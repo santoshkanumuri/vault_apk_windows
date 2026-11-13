@@ -114,7 +114,7 @@ Check all three certifications. They are true for this extension: it doesn't sel
 
 ```text
 This extension works only with the desktop app Nuvori for Windows, which holds the vault.
-1. Download and install Nuvori for Windows from <download link>.
+1. Download and install Nuvori for Windows from https://github.com/santoshkanumuri/vault_apk_windows/releases/latest (file Nuvori_2.2.3_x64-setup.exe).
 2. Open Nuvori and create a vault with any master password. On the Home page, select Add, choose a login, and save one for an HTTPS sign-in page you can open.
 3. Install the extension and restart the browser. Nuvori connects it automatically. Settings > Browser extension then shows a "Last contact" time.
 4. Open a sign-in page on an HTTPS site. Select the username field and choose the account from the Nuvori list.

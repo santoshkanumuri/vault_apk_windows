@@ -2,9 +2,9 @@
 
 ## Use the ready-made installer
 
-Share `Nuvori_2.2.1_x64-setup.exe` from this repository's **Releases** page with people using 64-bit Windows PCs. They double-click the file, complete setup, and open Nuvori from the Start menu. The setup installs for the current Windows user. Node.js, npm, Rust, and the .NET SDK are not required on their PCs.
+Share `Nuvori_2.2.3_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) with people using 64-bit Windows PCs. They double-click the file, complete setup, and open Nuvori from the Start menu. The setup installs for the current Windows user. Node.js, npm, Rust, and the .NET SDK are not required on their PCs.
 
-The MSI `Nuvori_2.2.1_x64_en-US.msi` on the same Releases page is an alternative for managed installation. Choose one package. These are x64 Windows packages. Android phones need the phone APK, and other platforms need separate builds.
+The MSI `Nuvori_2.2.3_x64_en-US.msi` on the same Releases page is an alternative for managed installation. Choose one package. These are x64 Windows packages. Android phones need the phone APK, and other platforms need separate builds.
 
 Setup includes the pairing helper and browser Native Messaging host. Install the browser extension **Nuvori Password Fill** from the Chrome Web Store (see [Chrome Web Store](CHROME-WEB-STORE.md)). For development, `Nuvori_extension_<version>.zip` can also be extracted to a folder that stays in place and loaded with **Load unpacked**. Nuvori connects the extension to Chrome, Edge and Brave by itself when it starts; **Settings > Browser extension > Connect** does it again on demand. Restart the browser afterward. Nuvori trusts the store extension ID and the fixed unpacked ID, so a new folder or a later update needs no new registration.
 
@@ -35,7 +35,7 @@ These Windows packages are unsigned. Public distribution should use Windows code
 To compare a download with the supplied checksum:
 
 ```powershell
-Get-FileHash .\Nuvori_2.2.1_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\Nuvori_2.2.3_x64-setup.exe -Algorithm SHA256
 ```
 
 The checksum detects a changed file. It does not replace a trusted publisher signature.
@@ -66,4 +66,4 @@ Both builds use the same vault folder, and one Nuvori runs at a time. From 2.1.9
 
 To return to the installer build, uninstall the MSIX. The installer build then deletes the stale `store-build.json`, runs itself, and connects the browsers to its own host.
 
-For a Store release, replace the identity name and publisher in `package-msix.ps1` with the values from Partner Center, and build with `-NoSign`; the Store signs the package. The Store reviews the `unvirtualizedResources` capability, which keeps the vault outside the package so it survives an uninstall and stays shared with the installer build.
+For a Store release, build with `package-msix.ps1 -Store`. It uses the Partner Center identity, leaves the package unsigned for the Store to sign, and writes `Nuvori_<version>_x64_store.msix`. See [Microsoft Store](MICROSOFT-STORE.md). The Store reviews the `unvirtualizedResources` capability, which keeps the vault outside the package so it survives an uninstall and stays shared with the installer build.

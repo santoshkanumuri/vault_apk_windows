@@ -53,17 +53,19 @@ You need Nuvori 2.2.0 or newer on the phone.
 5. Choose the same Google account that you use on this PC, and allow access.
 6. The card now shows **Google Drive** and your account.
 
-The phone checks Google Drive when you unlock it, about every minute while Nuvori is open, and on **Sync now**. It uploads its own changes right after each change. It does not check while Nuvori is closed. Unlike Windows, the phone checks Google Drive also when Wi-Fi sync is off.
+The phone checks Google Drive when you unlock it, at the interval you choose on its Google Drive card while Nuvori is open, and on **Sync now**. It uploads its own changes right after each change. It does not check while Nuvori is closed.
 
 ### When devices sync
 
 Google Drive does not tell a device about new files. Each device checks Google Drive by itself while its vault is unlocked:
 
 - about 2 seconds after a change on this PC,
-- about every minute when nothing changes,
+- at the interval you choose under **Check Google Drive every** on the Google Drive card: 15 s (default), 1 min, 5 min, or **Sync now only**,
 - when you select **Sync now**.
 
-The automatic checks run only when **Sync automatically** is on in the Sync page. With it off, Windows checks Google Drive only when you select **Sync now**. After a failure, automatic sync waits longer between tries (15 seconds, up to 5 minutes).
+The Google Drive checks have their own timer (`src-tauri/src/lib.rs`, `WayClock`). They run whenever Google Drive is connected, also when **Sync automatically** (Wi-Fi) is off. Wi-Fi checks use **Check devices every** on the Sync page. After a failure, each way waits longer between tries by itself (15 seconds, up to 5 minutes). With **Sync now only**, Windows checks Google Drive when it unlocks, after its own changes, and on **Sync now**.
+
+On the phone, the same choice is on the Google Drive card under **Settings > Devices & sync**. The phone checks while Nuvori is open and unlocked, and uploads its own changes right after each change.
 
 ### What the card shows
 
@@ -172,6 +174,7 @@ Read these limits before you depend on Google Drive sync:
 
 - **No push.** Devices check Google Drive by themselves. See [When devices sync](#when-devices-sync).
 - **First pairing needs the same Wi-Fi.** Google Drive carries changes only between devices that are already in the sync group.
+- **Leaving works through Google Drive too (from 2.2.3).** A device that leaves seals its signed leave request with the group's cloud key and uploads it as an `l.` file, while it still has the keys. The managing phone checks it the same way as a Wi-Fi leave request: the device's own signature, an accepted key epoch, a request at most 30 days old, and a request made during the device's current membership. Then it signs the removal, and the new history reaches every device through Google Drive. Only the managing phone answers these files. Windows sends them but never answers them.
 - **One Google account.** Every device must use the same Google account. Each account has its own hidden app folder.
 - **A removed device can still read old files.** Suppose you remove a device from the sync group. If that device still has the Google sign-in and the old keys, it can still download and open the files. The other devices refuse its new changes. To stop it reading, also remove that device's access in your Google account. This can end the sign-in on your other devices too. Then use **Sign in again** on each device you keep.
 - **The folder grows slowly.** Nuvori does not clean up old files yet. Every change file and photo stays. The files use storage in your Google account.
@@ -209,6 +212,7 @@ All files are in the Google Drive `appDataFolder`. Every name starts with `nv1.<
 | Changes | `nv1.<group>.o.<device>.<first>.<last>` | `<first>` and `<last>`: sequence numbers of the author's changes, 12 digits each. `first` is at least 1, and `last` is at least `first`. |
 | Progress | `nv1.<group>.p.<device>` | One file per device. |
 | Photo blob | `nv1.<group>.b.<sha256>` | `<sha256>`: 64 lowercase hex characters, the hash of the encrypted blob. |
+| Leave request | `nv1.<group>.l.<device>` | `<device>`: the tag of the device that leaves. One file per device. |
 
 - Numbers are zero padded. Hex is lowercase.
 - `<device>` in a change file is the tag of the author, not of the device that uploaded it.
@@ -247,6 +251,7 @@ Contents after the envelope is opened:
 | Changes | JSON array of changes by one author, in sequence order. Each change is in its Wi-Fi wire form. The array has exactly `last - first + 1` items. |
 | Progress | JSON object `{"deviceId": ..., "updatedAt": <milliseconds>, "progress": <sync progress>}`. |
 | Photo blob | The blob as stored on the device: nonce (12 bytes) and ciphertext with tag. No envelope. The blob is already encrypted under a key derived from the content key, and its name is its hash. |
+| Leave request | `{"request": {vaultId, deviceId, membershipHead, keyEpoch, createdAt}, "signature": "<base64url>"}`: the same signed request as the Wi-Fi `leave1` frame. The keys of `request` are in this order. The shared value `leaveBody` in the test fixture is one exact example. |
 
 Every file is written once and never changed. The only exception is the progress file. Any device may upload any author's changes that Google Drive lacks. So a device that never connects to Google Drive still reaches it through one that does. Two devices that upload the same range make a harmless duplicate.
 

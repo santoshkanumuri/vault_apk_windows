@@ -1,12 +1,17 @@
 import { useState } from "react";
-import { Cloud, LogOut } from "lucide-react";
+import { Cloud, LogOut, Timer } from "lucide-react";
 import { Button } from "../../components/Button";
+import { SettingsRow } from "../../components/Display";
+import { Segmented } from "../../components/Field";
 import { StatusBanner, StatusChip, type StatusKind } from "../../components/Status";
 import { useConfirm } from "../../app/confirm";
 import { usePolling } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import { api, type CloudStatus } from "../../lib/api";
 import { formatDateTime, relativeTime } from "../../lib/format";
+
+const DRIVE_CHECK_LABELS: Record<string, string> = { "15": "15 seconds", "60": "minute", "300": "5 minutes" };
+const DRIVE_CHECK_OPTIONS = [{ value: "15", label: "15 s" }, { value: "60", label: "1 min" }, { value: "300", label: "5 min" }, { value: "0", label: "Sync now only" }];
 
 /** What the chip in the card's corner says. */
 export function cloudIndicator(status: CloudStatus): { kind: StatusKind; label: string } {
@@ -39,6 +44,19 @@ export function CloudCard() {
       else toast.info("Google sign-in was canceled. Nothing changed.");
     } catch (failure) {
       toast.error(failure, "Couldn't connect Google Drive.");
+    } finally {
+      setBusy(false);
+      await cloud.reload();
+    }
+  };
+
+  const changeInterval = async (value: string) => {
+    setBusy(true);
+    try {
+      await api.setSyncSchedule({ driveSeconds: Number(value) });
+      toast.success(value === "0" ? "Google Drive is checked only when you select Sync now" : `Checks Google Drive every ${DRIVE_CHECK_LABELS[value] ?? value}`);
+    } catch (failure) {
+      toast.error(failure, "Couldn't change the check interval.");
     } finally {
       setBusy(false);
       await cloud.reload();
@@ -123,7 +141,14 @@ export function CloudCard() {
             <div><dt>Last Drive sync</dt><dd title={status.lastSync ? formatDateTime(status.lastSync) : undefined}>{status.lastSync ? relativeTime(status.lastSync) : "Not yet"}</dd></div>
             <div><dt>Stored in your Drive</dt><dd>Encrypted changes only</dd></div>
           </dl>
-          <p className="muted small">On your phone, open Devices and connect the same Google account. Changes then sync through Drive whenever a device is unlocked and online.</p>
+          {status.checkSeconds !== undefined && (
+            <SettingsRow icon={Timer} title="Check Google Drive every" description={status.checkSeconds === 0
+              ? "Only when this PC unlocks and when you select Sync now. Your own changes still upload about 2 seconds after you save them."
+              : "While this PC is unlocked. Shorter means other devices' changes arrive sooner. Your own changes upload about 2 seconds after you save them."}
+              control={<Segmented label="Check Google Drive every" size="sm" value={String(status.checkSeconds)} onChange={(value) => void changeInterval(value)}
+                options={DRIVE_CHECK_OPTIONS} />} />
+          )}
+          <p className="muted small">On your phone, open Settings &gt; Devices &amp; sync and connect the same Google account. Changes then sync through Drive whenever a device is unlocked and online.</p>
           <div className="button-row">
             <Button variant="ghost" icon={LogOut} busy={busy} onClick={() => void disconnect()}>Disconnect</Button>
           </div>

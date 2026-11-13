@@ -232,6 +232,13 @@ impl CloudController {
         Some(result)
     }
 
+    /// True when this build has a Google client and this PC saved a Google Drive sign-in.
+    fn connected(state: &ManagedState) -> bool {
+        google_drive::client().is_some() && state.lock().ok().is_some_and(|mut app| {
+            app.unlocked.as_mut().is_some_and(|vault| lan_sync::cloud::account(vault.connection()).is_some())
+        })
+    }
+
     fn reset(&self) {
         use std::sync::atomic::Ordering;
         if let Ok(mut drive) = self.drive.lock() { *drive = None; }
@@ -248,57 +255,97 @@ impl SyncController {
         network.as_mut().map_or_else(Vec::new, discovery::LanDiscovery::endpoints)
     }
 
-    /// Runs one pass. `manual` passes always log; automatic passes log only when something
-    /// moved or failed so the activity log is not flooded by idle checks.
-    fn exchange(&self, state: &ManagedState, helper: &std::path::Path, address: &str, manual: bool) -> Result<lan_sync::SyncReport, String> {
-        let _guard = self.gate.try_lock().map_err(|_| "A sync pass is already running")?;
-        *self.message.lock().map_err(|_| "Sync status unavailable")? = "Syncing with your devices...".into();
+    /// Runs one pass over `ways`. `manual` passes always log; automatic passes log only when
+    /// something moved or failed so the activity log is not flooded by idle checks.
+    fn exchange(&self, state: &ManagedState, helper: &std::path::Path, address: &str, manual: bool, ways: Ways) -> PassOutcome {
+        let Ok(_guard) = self.gate.try_lock() else {
+            return PassOutcome::not_run(Err("A sync pass is already running".into()));
+        };
+        // Google Drive alone was asked for and is not connected: nothing runs, the status stays.
+        if !ways.wifi && !CloudController::connected(state) {
+            return PassOutcome::not_run(Err(DRIVE_NOT_CONNECTED.into()));
+        }
+        if let Ok(mut message) = self.message.lock() { *message = "Syncing with your devices...".into(); }
         if manual {
             activity::log(Level::Progress, Category::Sync, "Sync started");
         }
-        let mut endpoints = self.endpoints();
-        if manual && endpoints.is_empty() {
+        let mut endpoints = if ways.wifi { self.endpoints() } else { Vec::new() };
+        if manual && ways.wifi && endpoints.is_empty() {
             for _ in 0..6 {
                 thread::sleep(Duration::from_millis(500));
                 endpoints = self.endpoints();
                 if !endpoints.is_empty() { break; }
             }
         }
-        let mut result = self.pass(state, helper, address, &endpoints, manual);
+        let mut outcome = self.pass(state, helper, address, &endpoints, manual, ways);
         // Continuous editing: edits saved on this PC while the pass ran get a prompt follow-up
         // pass (after a short debounce) instead of waiting for the next interval.
         for _ in 0..MAX_FOLLOW_UP_PASSES {
-            let Ok(report) = &result else { break };
+            let Ok(report) = &outcome.result else { break };
             if !local_edits_since(state, report.local_revision_at_start) {
                 break;
             }
+            let previous = report.clone();
             thread::sleep(FOLLOW_UP_DEBOUNCE);
-            let follow_up = self.pass(state, helper, address, &self.endpoints(), false);
-            result = match (follow_up, report.clone()) {
-                (Ok(next), previous) => Ok(lan_sync::SyncReport {
+            let endpoints = if ways.wifi { self.endpoints() } else { Vec::new() };
+            let follow_up = self.pass(state, helper, address, &endpoints, false, ways);
+            outcome = PassOutcome {
+                result: follow_up.result.map(|next| lan_sync::SyncReport {
                     sent: previous.sent + next.sent,
                     received: previous.received + next.received,
                     photos_received: previous.photos_received + next.photos_received,
                     photos_sent: previous.photos_sent + next.photos_sent,
                     ..next
                 }),
-                (Err(error), _) => Err(error),
+                ..follow_up
             };
         }
-        *self.message.lock().map_err(|_| "Sync status unavailable")? = match &result {
-            Ok(report) => sync_summary(report),
-            Err(error) => error.clone(),
-        };
-        log_sync_result(&result, manual);
-        result
+        if !outcome.quiet {
+            if let Ok(mut message) = self.message.lock() {
+                *message = match &outcome.result { Ok(report) => sync_summary(report), Err(error) => error.clone() };
+            }
+            log_sync_result(&outcome.result, manual);
+        }
+        outcome
     }
 
-    /// One pass: devices on this Wi-Fi first, then Google Drive when it is connected. The pass
-    /// succeeds when either way worked, so a PC away from its phone still syncs.
+    /// One pass over `ways`: devices on this Wi-Fi first, then Google Drive when it is connected.
+    /// The pass succeeds when either way worked, so a PC away from its phone still syncs.
     fn pass(&self, state: &ManagedState, helper: &std::path::Path, address: &str,
-        endpoints: &[std::net::SocketAddr], manual: bool) -> Result<lan_sync::SyncReport, String> {
-        let lan = lan_sync::run(state, helper, address, &self.tracker, endpoints);
-        let Some(cloud) = self.cloud.pass(state, &self.tracker, manual) else { return lan };
+        endpoints: &[std::net::SocketAddr], manual: bool, ways: Ways) -> PassOutcome {
+        let lan = ways.wifi.then(|| lan_sync::run(state, helper, address, &self.tracker, endpoints));
+        let cloud = if ways.drive { self.cloud.pass(state, &self.tracker, manual) } else { None };
+        let way = |result: &Option<Result<lan_sync::SyncReport, String>>| {
+            result.as_ref().map(|result| result.as_ref().map(|_| ()).map_err(Clone::clone))
+        };
+        let (wifi, drive) = (way(&lan), way(&cloud));
+        let mut quiet = false;
+        let result = match (lan, cloud) {
+            (None, None) => {
+                quiet = true;
+                Err(DRIVE_NOT_CONNECTED.to_owned())
+            }
+            (Some(lan), None) => {
+                // Wi-Fi alone, with Google Drive connected: no device on this Wi-Fi is normal for
+                // a PC away from its phone. It is not shown or logged as a sync failure.
+                if !manual && lan.as_ref().is_err_and(|error| error == lan_sync::UNREACHABLE) && CloudController::connected(state) {
+                    self.tracker.succeed();
+                    quiet = true;
+                }
+                lan
+            }
+            (None, Some(cloud)) => {
+                // Google Drive alone. Its errors show on the Google Drive card, not as a Wi-Fi failure.
+                if cloud.is_ok() { self.tracker.succeed(); } else { self.tracker.set_phase(lan_sync::Phase::Done); }
+                quiet = cloud.is_err() && !manual;
+                cloud.map(|report| lan_sync::SyncReport { cloud: true, ..report })
+            }
+            (Some(lan), Some(cloud)) => self.merge(lan, cloud),
+        };
+        PassOutcome { result, wifi, drive, quiet }
+    }
+
+    fn merge(&self, lan: Result<lan_sync::SyncReport, String>, cloud: Result<lan_sync::SyncReport, String>) -> Result<lan_sync::SyncReport, String> {
         match (lan, cloud) {
             (Ok(lan), Ok(cloud)) => {
                 self.tracker.succeed();
@@ -331,6 +378,35 @@ impl SyncController {
         }
     }
 }
+
+/// Which ways one pass uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Ways {
+    wifi: bool,
+    drive: bool,
+}
+
+impl Ways {
+    const ALL: Ways = Ways { wifi: true, drive: true };
+    const DRIVE: Ways = Ways { wifi: false, drive: true };
+}
+
+/// The result of one pass, and of each way that ran (`None`: it did not run). The automatic loop
+/// keeps a retry delay per way. `quiet`: an expected miss that changes no status message or log.
+struct PassOutcome {
+    result: Result<lan_sync::SyncReport, String>,
+    wifi: Option<Result<(), String>>,
+    drive: Option<Result<(), String>>,
+    quiet: bool,
+}
+
+impl PassOutcome {
+    fn not_run(result: Result<lan_sync::SyncReport, String>) -> Self {
+        PassOutcome { result, wifi: None, drive: None, quiet: true }
+    }
+}
+
+const DRIVE_NOT_CONNECTED: &str = "Google Drive is not connected on this PC.";
 
 fn sync_summary(report: &lan_sync::SyncReport) -> String {
     match (report.cloud, report.peers_checked) {
@@ -411,6 +487,19 @@ fn configure_sync(address: String, automatic: bool, state: State<'_, ManagedStat
     Ok(())
 }
 
+/// Saves how often automatic sync checks Wi-Fi devices and Google Drive (Sync page). A value
+/// left out keeps its saved choice.
+#[tauri::command]
+fn set_sync_schedule(wifi_seconds: Option<u64>, drive_seconds: Option<u64>, state: State<'_, ManagedState>) -> Result<(), String> {
+    let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
+    let db = app.unlocked.as_mut().ok_or("Unlock the vault first")?.connection();
+    let saved = lan_sync::schedule(db);
+    lan_sync::set_schedule(db, lan_sync::Schedule {
+        wifi_seconds: wifi_seconds.unwrap_or(saved.wifi_seconds),
+        drive_seconds: drive_seconds.unwrap_or(saved.drive_seconds),
+    })
+}
+
 #[tauri::command]
 async fn sync_now(address: String, state: State<'_, ManagedState>, pairing: State<'_, Arc<PairingController>>, sync: State<'_, Arc<SyncController>>) -> Result<lan_sync::SyncReport, String> {
     if pairing.is_active()? { return Err("Finish or cancel pairing before syncing".into()); }
@@ -418,7 +507,7 @@ async fn sync_now(address: String, state: State<'_, ManagedState>, pairing: Stat
     let helper = pairing.helper_path.clone();
     let sync = sync.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        sync.exchange(&state, &helper, &address, true)
+        sync.exchange(&state, &helper, &address, true, Ways::ALL).result
     }).await.map_err(|_| "Sync stopped unexpectedly. Retry to continue.".to_owned())?
 }
 
@@ -634,6 +723,8 @@ struct CloudStatus {
     last_error: String,
     connecting: bool,
     needs_sign_in: bool,
+    /// How often automatic sync checks Google Drive; 0 = only on Sync now.
+    check_seconds: u64,
 }
 
 fn read_cloud_status(state: &ManagedState, sync: &SyncController) -> Result<CloudStatus, String> {
@@ -649,6 +740,7 @@ fn read_cloud_status(state: &ManagedState, sync: &SyncController) -> Result<Clou
         last_error: sync.cloud.last_error.lock().map(|error| error.clone()).unwrap_or_default(),
         connecting: sync.cloud.connecting.load(Ordering::SeqCst),
         needs_sign_in: sync.cloud.needs_sign_in.load(Ordering::SeqCst),
+        check_seconds: lan_sync::schedule(vault.connection()).drive_seconds,
     })
 }
 
@@ -699,7 +791,7 @@ async fn cloud_connect(state: State<'_, ManagedState>, pairing: State<'_, Arc<Pa
             activity::log(Level::Success, Category::Sync, "Google Drive connected. Changes now also sync through your Drive");
             // First upload right away, so the other devices find this PC's changes.
             let (state, sync) = (state.clone(), sync.clone());
-            thread::spawn(move || { let _ = sync.exchange(&state, &helper, "", false); });
+            thread::spawn(move || { let _ = sync.exchange(&state, &helper, "", false, Ways::DRIVE); });
         }
         read_cloud_status(&state, &sync)
     })
@@ -745,34 +837,69 @@ fn retry_label(delay: Duration) -> String {
     }
 }
 
-fn background_sync_due(changed: bool, elapsed: Option<Duration>) -> bool {
-    elapsed.is_none_or(|elapsed| elapsed >= Duration::from_secs(60) || (changed && elapsed >= Duration::from_secs(2)))
+/// The automatic loop's state for one way (Wi-Fi or Google Drive). Each way has its own
+/// interval and its own retry delay, so a phone away from this Wi-Fi does not slow down Drive.
+#[derive(Default)]
+struct WayClock {
+    /// The address and change revision of the last attempt; a new value means something changed.
+    seen: Option<(String, u64)>,
+    last: Option<Instant>,
+    retry_at: Option<Instant>,
+    failures: u32,
 }
 
-#[test]
-fn background_sync_retries_without_busy_polling() {
-    assert!(background_sync_due(false, None));
-    assert!(!background_sync_due(true, Some(Duration::from_secs(1))));
-    assert!(background_sync_due(true, Some(Duration::from_secs(2))));
-    assert!(!background_sync_due(false, Some(Duration::from_secs(59))));
-    assert!(background_sync_due(false, Some(Duration::from_secs(60))));
-}
+impl WayClock {
+    /// Due after `every` (`None`: never by time), 2 s after a change, at once the first time,
+    /// or after a failure only at its retry deadline.
+    fn due(&self, seen: &(String, u64), every: Option<Duration>, now: Instant) -> bool {
+        if let Some(at) = self.retry_at { return now >= at; }
+        let Some(last) = self.last else { return true };
+        let elapsed = now.saturating_duration_since(last);
+        (self.seen.as_ref() != Some(seen) && elapsed >= FOLLOW_UP_DEBOUNCE) || every.is_some_and(|every| elapsed >= every)
+    }
 
-/// Decides when the automatic loop runs. After failures it waits for the backoff deadline
-/// instead of the regular interval; a success (manual or automatic) clears the backoff.
-fn background_attempt_due(retry_at: Option<Instant>, changed: bool, elapsed: Option<Duration>, now: Instant) -> bool {
-    match retry_at {
-        Some(at) => now >= at,
-        None => background_sync_due(changed, elapsed),
+    fn start(&mut self, seen: &(String, u64), now: Instant) {
+        self.seen = Some(seen.clone());
+        self.last = Some(now);
+    }
+
+    /// Records a result; returns the retry delay after a failure.
+    fn finish(&mut self, result: &Result<(), String>, now: Instant) -> Option<Duration> {
+        match result {
+            Ok(()) => { self.failures = 0; self.retry_at = None; None }
+            Err(error) => {
+                self.failures = self.failures.saturating_add(1);
+                let delay = if error == lan_sync::BUSY {
+                    Duration::from_millis(5_000 + u64::from(lan_sync::random_jitter()) % 5_000)
+                } else { lan_sync::retry_delay(self.failures, lan_sync::random_jitter()) };
+                self.retry_at = Some(now + delay);
+                Some(delay)
+            }
+        }
     }
 }
 
 #[test]
-fn background_backoff_waits_for_the_retry_deadline() {
-    let now = Instant::now();
-    assert!(!background_attempt_due(Some(now + Duration::from_secs(30)), true, Some(Duration::from_secs(600)), now));
-    assert!(background_attempt_due(Some(now), false, Some(Duration::from_secs(1)), now));
-    assert!(background_attempt_due(None, false, None, now));
+fn each_way_keeps_its_own_interval_and_retry_delay() {
+    let start = Instant::now();
+    let seen = (String::new(), 7);
+    let mut drive = WayClock::default();
+    assert!(drive.due(&seen, Some(Duration::from_secs(15)), start), "the first check runs at once");
+    drive.start(&seen, start);
+    assert!(!drive.due(&seen, Some(Duration::from_secs(15)), start + Duration::from_secs(14)));
+    assert!(drive.due(&seen, Some(Duration::from_secs(15)), start + Duration::from_secs(15)));
+    // A change runs a pass 2 s later, also when Drive checks only on Sync now.
+    let changed = (String::new(), 8);
+    assert!(!drive.due(&changed, None, start + Duration::from_secs(1)));
+    assert!(drive.due(&changed, None, start + Duration::from_secs(2)));
+    assert!(!drive.due(&seen, None, start + Duration::from_secs(3600)), "no change, no time interval: no check");
+    // A failure waits for its retry deadline, whatever the interval says.
+    let delay = drive.finish(&Err(lan_sync::TIMED_OUT.into()), start).unwrap();
+    assert!(delay >= Duration::from_secs(12));
+    assert!(!drive.due(&changed, Some(Duration::from_secs(15)), start + Duration::from_secs(11)));
+    assert!(drive.due(&seen, Some(Duration::from_secs(15)), start + delay));
+    assert_eq!(drive.finish(&Ok(()), start + delay), None);
+    assert_eq!((drive.failures, drive.retry_at), (0, None));
     assert_eq!(retry_label(Duration::from_secs(15)), "15 s");
     assert_eq!(retry_label(Duration::from_secs(240)), "4 min");
 }
@@ -812,53 +939,93 @@ fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync
     });
 }
 
+/// Uploads the Google Drive copy of a pending leave request (see `cloud_sync::save_pending_leave`).
+fn upload_drive_leave(state: &ManagedState) {
+    if google_drive::client().is_none() { return; }
+    let now = time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000;
+    let pending = state.lock().ok().and_then(|mut app| {
+        app.unlocked.as_mut().and_then(|vault| lan_sync::cloud::pending_leave_upload(vault.connection(), now as i64))
+    });
+    let Some((name, sealed, account)) = pending else { return };
+    let mut drive = google_drive::GoogleDrive::new(account.refresh_token.clone());
+    if lan_sync::cloud::upload_sealed(&mut drive, &name, &sealed).is_ok()
+        && let Ok(mut app) = state.lock()
+        && let Some(vault) = app.unlocked.as_mut() {
+        lan_sync::cloud::finish_pending_leave(vault.connection());
+        activity::log(Level::Info, Category::Sync, "The leave request was also sent through Google Drive");
+    }
+}
+
+/// What the automatic loop reads from the unlocked vault on each tick.
+struct LoopPlan {
+    seen: (String, u64),
+    automatic: bool,
+    drive: bool,
+    schedule: lan_sync::Schedule,
+}
+
 fn start_background_sync(state: ManagedState, pairing: Arc<PairingController>, sync: Arc<SyncController>) {
     thread::spawn(move || {
-        let mut previous = None;
-        let mut last_attempt = None;
-        let mut retry_at: Option<Instant> = None;
+        let (mut wifi, mut drive) = (WayClock::default(), WayClock::default());
         loop {
             thread::sleep(Duration::from_secs(2));
             if pairing.is_active().unwrap_or(true) { continue; }
-            // A queued leave request is retried every 5 minutes for up to 30 days.
+            // A queued leave request is retried every 5 minutes for up to 30 days, over Wi-Fi and
+            // through Google Drive.
             if sync.gate.try_lock().is_ok() {
                 let _ = lan_sync::deliver_leave(&state, LEAVE_RETRY_MILLIS);
+                upload_drive_leave(&state);
             }
-            let next = (|| {
+            let plan = (|| {
                 let mut app = state.lock().ok()?;
                 let vault = app.unlocked.as_mut()?;
                 if !vault.is_enrolled().ok()? { return None; }
                 let revision = vault.change_revision().ok()?;
                 let (address, automatic) = lan_sync::configuration(vault).ok()?;
-                automatic.then_some((address, revision))
+                let schedule = lan_sync::schedule(vault.connection());
+                let drive = google_drive::client().is_some() && lan_sync::cloud::account(vault.connection()).is_some();
+                Some(LoopPlan { seen: (address, revision), automatic, drive, schedule })
             })();
-            let Some(next) = next else {
-                previous = None;
-                last_attempt = None;
-                if retry_at.take().is_some() { sync.tracker.schedule_retry(None); }
+            let Some(plan) = plan else {
+                if wifi.retry_at.is_some() { sync.tracker.schedule_retry(None); }
+                (wifi, drive) = (WayClock::default(), WayClock::default());
                 continue;
             };
-            if retry_at.is_some() && sync.tracker.consecutive_failures() == 0 && !sync.tracker.peer_busy() {
-                retry_at = None;
+            // Wi-Fi sync switched off, or Google Drive disconnected: that way starts fresh later.
+            if !plan.automatic {
+                if wifi.retry_at.is_some() { sync.tracker.schedule_retry(None); }
+                wifi = WayClock::default();
             }
-            let elapsed = last_attempt.map(|instant: Instant| instant.elapsed());
-            if !background_attempt_due(retry_at, previous.as_ref() != Some(&next), elapsed, Instant::now()) { continue; }
+            if !plan.drive { drive = WayClock::default(); }
+            // A successful pass of any kind (also Sync now) ends the Wi-Fi retry delay early.
+            if wifi.retry_at.is_some() && sync.tracker.consecutive_failures() == 0 && !sync.tracker.peer_busy() {
+                wifi.retry_at = None;
+                wifi.failures = 0;
+            }
+            let now = Instant::now();
+            let ways = Ways {
+                wifi: plan.automatic && wifi.due(&plan.seen, Some(Duration::from_secs(plan.schedule.wifi_seconds)), now),
+                drive: plan.drive && drive.due(&plan.seen, (plan.schedule.drive_seconds > 0)
+                    .then(|| Duration::from_secs(plan.schedule.drive_seconds)), now),
+            };
+            if !ways.wifi && !ways.drive { continue; }
             if sync.gate.try_lock().is_err() { continue; }
-            previous = Some(next.clone());
-            last_attempt = Some(Instant::now());
-            match sync.exchange(&state, &pairing.helper_path, &next.0, false) {
-                Ok(_) => retry_at = None,
-                Err(error) => {
-                    let failures = sync.tracker.consecutive_failures();
-                    let delay = if error == lan_sync::BUSY {
-                        Duration::from_millis(5_000 + u64::from(lan_sync::random_jitter()) % 5_000)
-                    } else { lan_sync::retry_delay(failures, lan_sync::random_jitter()) };
-                    retry_at = Some(Instant::now() + delay);
-                    sync.tracker.schedule_retry(retry_at);
+            if ways.wifi { wifi.start(&plan.seen, now); }
+            if ways.drive { drive.start(&plan.seen, now); }
+            let outcome = sync.exchange(&state, &pairing.helper_path, &plan.seen.0, false, ways);
+            let finished = Instant::now();
+            if let Some(result) = &outcome.drive {
+                drive.finish(result, finished);
+            }
+            if let Some(result) = &outcome.wifi {
+                let delay = wifi.finish(result, finished);
+                // A quiet miss (no device on this Wi-Fi while Drive works) backs off silently.
+                if let (Some(delay), false) = (delay, outcome.quiet) {
+                    sync.tracker.schedule_retry(wifi.retry_at);
                     activity::global().record_coalesced(
                         Level::Warning,
                         Category::Sync,
-                        format!("Auto-sync will retry in {} (attempt {})", retry_label(delay), failures + 1),
+                        format!("Auto-sync will retry in {} (attempt {})", retry_label(delay), wifi.failures),
                         Duration::from_secs(1),
                     );
                 }
@@ -2042,6 +2209,7 @@ pub fn run() {
             sync_now,
             sync_status,
             configure_sync,
+            set_sync_schedule,
             pairing_status,
             start_pairing,
             start_reverse_pairing,

@@ -9,6 +9,8 @@
   "operationsName": "nv1.e1e6ddbe30652114.o.5755ee97f9749a2d.000000000007.000000000042",
   "progressName": "nv1.e1e6ddbe30652114.p.5755ee97f9749a2d",
   "blobName": "nv1.e1e6ddbe30652114.b.cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+  "leaveName": "nv1.e1e6ddbe30652114.l.5755ee97f9749a2d",
+  "leaveBody": "{\"request\":{\"vaultId\":\"7d0e7f0a-3b56-4a57-9a0e-2f6f1c5f0b11\",\"deviceId\":\"0f6c1a52-9d1e-4c3b-8a77-5e2d9b4c6a10\",\"membershipHead\":\"abababababababababababababababababababababababababababababababab\",\"keyEpoch\":1,\"createdAt\":1767225600000},\"signature\":\"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw\"}",
   "nonceHex": "6465666768696a6b6c6d6e6f",
   "plaintext": "[{\"sequence\":7,\"note\":\"ünïcode\"}]",
   "sealedHex": "4e5643316465666768696a6b6c6d6e6f7ff3d31db3923533bad15d847efbe68d44e6a148f2138a11d524f12ebf79da27fad41a57f317cbf0b5839a8665512a9f63d0ee"

@@ -1,6 +1,6 @@
 # Nuvori for Windows
 
-Nuvori for Windows is the desktop companion for the Android vault. Version 2.2.1 uses Tauri 2, React, TypeScript, and Rust. See [release notes](docs/RELEASE-2.2.1.md).
+Nuvori for Windows is the desktop companion for the Android vault. Version 2.2.3 uses Tauri 2, React, TypeScript, and Rust. See [release notes](docs/RELEASE-2.2.3.md).
 
 This repository is still in development. The desktop app creates, unlocks, and locks a SQLCipher vault. It can create, edit, and delete cards, logins, authenticator codes, security questions, contact autofill profiles, notes, and folders. It can add, view, and delete local entry photos, and list and delete stored passkeys. Each local entry change commits an Android-compatible encrypted, signed operation and device head in the same database transaction. Existing local notes are added to that history once on unlock. Rust can verify and durably stage bounded batches of signed incoming changes, and apply received entries, folders, and passkeys after authentication. Windows accepts the managing Android phone's QR through a PC camera or its copied setup link. When the PC cannot reach the phone, Windows can show a QR for the managing phone to scan and then accept the phone's connection. Both paths verify the pairing code and master password, ask for matching-code approval, and import the encrypted vault copy while preserving existing Windows items. The new reverse connection path needs a live phone-to-PC test. Paired devices can exchange later edits over an authenticated LAN connection. Windows supports automatic discovery, incoming and outgoing sync, photo transfer, and conflict review while the vault is unlocked. A group supports six mobile devices and two Windows PCs. Separate physical computers and phones still need a full network test.
 
@@ -29,7 +29,7 @@ React Native for Windows was considered. It makes more sense when the mobile app
 
 ## Install or distribute
 
-Download `Nuvori_2.2.1_x64-setup.exe` from this repository's **Releases** page and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
+Download `Nuvori_2.2.3_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
 
 The browser extension **Nuvori Password Fill** comes from the Chrome Web Store. See [extension/README.md](extension/README.md).
 

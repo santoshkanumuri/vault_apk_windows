@@ -62,6 +62,10 @@ export type SyncStatus = {
   lastAttempt?: string;
   consecutiveFailures?: number;
   nextRetrySeconds?: number;
+  /** How often automatic sync checks devices on this Wi-Fi: 30, 60, 300 or 900. */
+  wifiCheckSeconds?: number;
+  /** How often it checks Google Drive: 15, 60 or 300; 0 = only on Sync now. */
+  driveCheckSeconds?: number;
 };
 export type SyncReport = { peersChecked: number; peersWaiting: number; sent: number; received: number; waitingToApply: number; conflicts: number; /** The pass also went through Google Drive. */ cloud?: boolean };
 /** Sync through the user's own Google Drive. */
@@ -74,6 +78,8 @@ export type CloudStatus = {
   lastError: string;
   connecting: boolean;
   needsSignIn: boolean;
+  /** How often automatic sync checks Google Drive; 0 = only on Sync now. Absent on older builds. */
+  checkSeconds?: number;
 };
 export type PairingStage = "" | "connecting" | "offering" | "confirm" | "transferring" | "canceling" | "paired" | "failed";
 export type PairingStatus = { stage: PairingStage | string; confirmation: string; message: string; invitation: string };
@@ -210,6 +216,9 @@ export const api = {
 
   syncStatus: () => call<SyncStatus>("sync_status"),
   configureSync: (address: string, automatic: boolean) => call<void>("configure_sync", { address, automatic }),
+  /** Saves the check interval of one or both ways; a value left out keeps its saved choice. */
+  setSyncSchedule: (schedule: { wifiSeconds?: number; driveSeconds?: number }) =>
+    call<void>("set_sync_schedule", { wifiSeconds: schedule.wifiSeconds ?? null, driveSeconds: schedule.driveSeconds ?? null }),
   syncNow: (address: string) => call<SyncReport>("sync_now", { address }),
 
   pairingStatus: () => call<PairingStatus>("pairing_status"),

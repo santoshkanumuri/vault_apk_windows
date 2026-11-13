@@ -114,6 +114,56 @@ pub struct SyncStatus {
     pub consecutive_failures: u32,
     /// Seconds until the next automatic retry; 0 when none is scheduled.
     pub next_retry_seconds: u64,
+    /// How often automatic sync checks devices on this Wi-Fi (one of [`WIFI_CHECKS`]).
+    pub wifi_check_seconds: u64,
+    /// How often it checks Google Drive (one of [`DRIVE_CHECKS`]); 0 = only on Sync now.
+    pub drive_check_seconds: u64,
+}
+
+/// Wi-Fi check intervals offered on the Sync page; the same choices as the phone.
+pub(crate) const WIFI_CHECKS: [u64; 4] = [30, 60, 300, 900];
+/// Google Drive check intervals. 0 = only when this PC unlocks, on Sync now, and after its own
+/// changes (they still upload about 2 seconds after each change).
+pub(crate) const DRIVE_CHECKS: [u64; 4] = [15, 60, 300, 0];
+const DEFAULT_WIFI_CHECK: u64 = 60;
+const DEFAULT_DRIVE_CHECK: u64 = 15;
+
+/// How often the automatic loop checks each way. A setting of this PC, not of the vault group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Schedule {
+    pub wifi_seconds: u64,
+    pub drive_seconds: u64,
+}
+
+fn schedule_table(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch("CREATE TABLE IF NOT EXISTS local_sync_schedule (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        wifi_seconds INTEGER NOT NULL,
+        drive_seconds INTEGER NOT NULL)")
+}
+
+/// The saved schedule. A missing or unknown value falls back to its default.
+pub(crate) fn schedule(db: &Connection) -> Schedule {
+    let stored = schedule_table(db).ok().and_then(|()| db.query_row(
+        "SELECT wifi_seconds, drive_seconds FROM local_sync_schedule WHERE id = 1", [],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))).optional().ok().flatten());
+    let pick = |value: Option<i64>, allowed: &[u64], default: u64| value
+        .and_then(|value| u64::try_from(value).ok()).filter(|value| allowed.contains(value)).unwrap_or(default);
+    Schedule {
+        wifi_seconds: pick(stored.map(|value| value.0), &WIFI_CHECKS, DEFAULT_WIFI_CHECK),
+        drive_seconds: pick(stored.map(|value| value.1), &DRIVE_CHECKS, DEFAULT_DRIVE_CHECK),
+    }
+}
+
+pub(crate) fn set_schedule(db: &Connection, schedule: Schedule) -> Result<()> {
+    if !WIFI_CHECKS.contains(&schedule.wifi_seconds) || !DRIVE_CHECKS.contains(&schedule.drive_seconds) {
+        return Err("Choose one of the listed check intervals.".into());
+    }
+    schedule_table(db).map_err(storage_error)?;
+    db.execute("INSERT INTO local_sync_schedule (id, wifi_seconds, drive_seconds) VALUES (1, ?1, ?2)
+        ON CONFLICT(id) DO UPDATE SET wifi_seconds = excluded.wifi_seconds, drive_seconds = excluded.drive_seconds",
+        params![schedule.wifi_seconds as i64, schedule.drive_seconds as i64]).map_err(storage_error)?;
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -380,6 +430,8 @@ pub(crate) fn status(vault: &mut UnlockedVault) -> Result<SyncStatus> {
         last_attempt: String::new(),
         consecutive_failures: 0,
         next_retry_seconds: 0,
+        wifi_check_seconds: schedule(db).wifi_seconds,
+        drive_check_seconds: schedule(db).drive_seconds,
     })
 }
 
@@ -1733,6 +1785,20 @@ pub(crate) mod cloud;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_check_schedule_keeps_only_listed_intervals() {
+        let db = Connection::open_in_memory().unwrap();
+        assert_eq!(schedule(&db), Schedule { wifi_seconds: 60, drive_seconds: 15 });
+        set_schedule(&db, Schedule { wifi_seconds: 300, drive_seconds: 0 }).unwrap();
+        assert_eq!(schedule(&db), Schedule { wifi_seconds: 300, drive_seconds: 0 });
+        assert!(set_schedule(&db, Schedule { wifi_seconds: 7, drive_seconds: 15 }).is_err());
+        assert!(set_schedule(&db, Schedule { wifi_seconds: 60, drive_seconds: 1 }).is_err());
+        assert_eq!(schedule(&db), Schedule { wifi_seconds: 300, drive_seconds: 0 }, "a refused value changes nothing");
+        // A value written by a later version that this one does not offer falls back to the default.
+        db.execute("UPDATE local_sync_schedule SET drive_seconds = 2", []).unwrap();
+        assert_eq!(schedule(&db).drive_seconds, 15);
+    }
     use crate::{
         AppState, change_store::ChangeStore, identity::DeviceIdentity,
         membership::MembershipAction, protocol::RecordVersion, sync::ChangeKind, vault::VaultStore,
@@ -2348,7 +2414,7 @@ mod tests {
             phone_address: String::new(), automatic: true, running: false,
             message: String::new(), phase: "idle", progress_done: 0, progress_total: 0,
             last_error: String::new(), last_attempt: String::new(),
-            consecutive_failures: 0, next_retry_seconds: 0,
+            consecutive_failures: 0, next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15,
         };
         tracker.fill(&mut status);
         assert_eq!(status.phase, "error");

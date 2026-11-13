@@ -16,6 +16,7 @@
 //! | `nv1.<group>.o.<device>.<first>.<last>`| JSON array of changes by one author         |
 //! | `nv1.<group>.p.<device>`               | `{deviceId, updatedAt, progress}`           |
 //! | `nv1.<group>.b.<sha256>`               | a photo blob as stored (no envelope)        |
+//! | `nv1.<group>.l.<device>`               | `{request, signature}`: a signed leave request |
 //!
 //! - cloud key = HMAC-SHA256(transport secret, `nuvori-cloud-v1:<vaultId>`)
 //! - `<group>` = first 8 bytes, hex, of HMAC-SHA256(cloud key, `tag`)
@@ -128,6 +129,7 @@ pub enum CloudName {
     Operations { device: String, first: u64, last: u64 },
     Progress { device: String },
     Blob { hash: String },
+    Leave { device: String },
 }
 
 fn hex_field(text: &str, length: usize) -> bool {
@@ -187,6 +189,10 @@ impl CloudKeys {
         format!("{}b.{hash}", self.prefix())
     }
 
+    pub fn leave_name(&self, device_id: &str) -> String {
+        format!("{}l.{}", self.prefix(), self.device_tag(device_id))
+    }
+
     /// `None` for a file of another group or with a name this version does not know.
     pub fn parse(&self, name: &str) -> Option<CloudName> {
         let parts: Vec<&str> = name.strip_prefix(&self.prefix())?.split('.').collect();
@@ -200,6 +206,7 @@ impl CloudKeys {
             }
             ["p", device] if hex_field(device, 16) => Some(CloudName::Progress { device: (*device).into() }),
             ["b", hash] if photo_blobs::valid_hash(hash) => Some(CloudName::Blob { hash: (*hash).into() }),
+            ["l", device] if hex_field(device, 16) => Some(CloudName::Leave { device: (*device).into() }),
             _ => None,
         }
     }
@@ -344,6 +351,63 @@ pub(crate) fn last_sync(db: &Connection) -> String {
 pub(crate) fn forget(db: &Connection) -> Result<()> {
     db.execute_batch(SCHEMA).map_err(storage_error)?;
     db.execute_batch("DELETE FROM cloud_sync_files; DELETE FROM cloud_sync_state;").map_err(storage_error)
+}
+
+/// The body of a leave file: the same signed request as the Wi-Fi `leave1` frame, as
+/// `{"request": {...}, "signature": "<base64url>"}`. Byte for byte the same as Android `CloudLeave`.
+pub(crate) fn leave_body(request: &crate::membership_exit::LeaveRequest, signature: &[u8; 64]) -> Vec<u8> {
+    // Written by hand: `serde_json` would sort the request's keys, and both apps write them in
+    // declaration order (vaultId, deviceId, membershipHead, keyEpoch, createdAt).
+    [b"{\"request\":".as_slice(), &request.json(), b",\"signature\":\"", URL_SAFE_NO_PAD.encode(signature).as_bytes(), b"\"}"].concat()
+}
+
+/// A leave request waiting for upload to Google Drive. Sealed while this PC still held the group
+/// keys; the managing phone answers it as it answers one over Wi-Fi.
+const PENDING_LEAVE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS cloud_pending_leave (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1), name TEXT NOT NULL, sealed BLOB NOT NULL,
+    created_at INTEGER NOT NULL, attempted_at INTEGER NOT NULL DEFAULT 0)";
+/// Retry an upload at most this often, for at most as long as a Wi-Fi leave request.
+const LEAVE_UPLOAD_RETRY_MILLIS: i64 = 5 * 60 * 1000;
+const LEAVE_UPLOAD_MAX_AGE_MILLIS: i64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Before this PC leaves: seals the leave request for Google Drive when it is connected. Returns
+/// false (and stores nothing) without a Google Drive sign-in.
+pub(crate) fn save_pending_leave(db: &Connection, transport_secret: &[u8], vault_id: &str,
+    request: &crate::membership_exit::LeaveRequest, signature: &[u8; 64]) -> Result<bool> {
+    if account(db).is_none() { return Ok(false); }
+    let keys = CloudKeys::derive(transport_secret, vault_id).ok_or("Invalid sync keys")?;
+    let name = keys.leave_name(&request.device_id);
+    let sealed = keys.seal(&name, &leave_body(request, signature))?;
+    db.execute_batch(PENDING_LEAVE_SCHEMA).map_err(storage_error)?;
+    db.execute("INSERT OR REPLACE INTO cloud_pending_leave (id, name, sealed, created_at, attempted_at) VALUES (1, ?1, ?2, ?3, 0)",
+        params![name, sealed, request.created_at]).map_err(storage_error)?;
+    Ok(true)
+}
+
+/// The leave file to upload now, with the account to upload it with. `None` when there is none,
+/// when the last try was less than 5 minutes ago, or after 30 days (then it is dropped).
+pub(crate) fn pending_leave_upload(db: &Connection, now: i64) -> Option<(String, Vec<u8>, Account)> {
+    db.execute_batch(PENDING_LEAVE_SCHEMA).ok()?;
+    let (name, sealed, created, attempted): (String, Vec<u8>, i64, i64) = db.query_row(
+        "SELECT name, sealed, created_at, attempted_at FROM cloud_pending_leave WHERE id = 1", [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).ok()?;
+    if now - created > LEAVE_UPLOAD_MAX_AGE_MILLIS {
+        let _ = db.execute("DELETE FROM cloud_pending_leave", []);
+        return None;
+    }
+    if now - attempted < LEAVE_UPLOAD_RETRY_MILLIS { return None; }
+    let _ = db.execute("UPDATE cloud_pending_leave SET attempted_at = ?1 WHERE id = 1", [now]);
+    Some((name, sealed, account(db)?))
+}
+
+pub(crate) fn finish_pending_leave(db: &Connection) {
+    let _ = db.execute_batch(PENDING_LEAVE_SCHEMA);
+    let _ = db.execute("DELETE FROM cloud_pending_leave", []);
+}
+
+/// Uploads one sealed file; the leave request uses it.
+pub(crate) fn upload_sealed(store: &mut dyn CloudStore, name: &str, sealed: &[u8]) -> Cloud<CloudFile> {
+    upload_bytes(store, name, sealed)
 }
 
 /// The cloud account this PC is signed in to. The token lives in the encrypted vault database,
@@ -851,6 +915,34 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_leaving_pc_keeps_a_sealed_leave_file_until_it_is_uploaded() {
+        let db = Connection::open_in_memory().unwrap();
+        let secret = [4u8; 32];
+        let request = crate::membership_exit::LeaveRequest {
+            vault_id: "vault-a".into(), device_id: "pc".into(), membership_head: "ab".repeat(32), key_epoch: 1,
+            created_at: 1_767_225_600_000,
+        };
+        // Without a Google Drive sign-in nothing is stored.
+        assert!(!save_pending_leave(&db, &secret, "vault-a", &request, &[7u8; 64]).unwrap());
+        save_account(&db, "person@example.com", "refresh").unwrap();
+        assert!(save_pending_leave(&db, &secret, "vault-a", &request, &[7u8; 64]).unwrap());
+        let now = request.created_at + 1_000;
+        let (name, sealed, account) = pending_leave_upload(&db, now).unwrap();
+        let keys = CloudKeys::derive(&secret, "vault-a").unwrap();
+        assert_eq!(name, keys.leave_name("pc"));
+        assert_eq!(keys.open(&name, &sealed).unwrap(), leave_body(&request, &[7u8; 64]));
+        assert_eq!(account.account, "person@example.com");
+        // A failed upload is retried after 5 minutes, and given up after 30 days.
+        assert!(pending_leave_upload(&db, now + 60_000).is_none());
+        assert!(pending_leave_upload(&db, now + LEAVE_UPLOAD_RETRY_MILLIS).is_some());
+        assert!(pending_leave_upload(&db, request.created_at + LEAVE_UPLOAD_MAX_AGE_MILLIS + 1).is_none());
+        assert!(pending_leave_upload(&db, now + 2 * LEAVE_UPLOAD_RETRY_MILLIS).is_none(), "dropped after 30 days");
+        save_pending_leave(&db, &secret, "vault-a", &request, &[7u8; 64]).unwrap();
+        finish_pending_leave(&db);
+        assert!(pending_leave_upload(&db, now + 3 * LEAVE_UPLOAD_RETRY_MILLIS).is_none(), "gone after the upload");
+    }
+
+    #[test]
     fn names_and_envelope_match_the_shared_vectors() {
         let vectors: serde_json::Value = serde_json::from_str(include_str!("../fixtures/cloud-sync-v1.json")).unwrap();
         let secret = hex::decode(vectors["transportSecretHex"].as_str().unwrap()).unwrap();
@@ -863,6 +955,13 @@ pub(crate) mod tests {
         assert_eq!(keys.operations_name(device, 7, 42), vectors["operationsName"]);
         assert_eq!(keys.progress_name(device), vectors["progressName"]);
         assert_eq!(keys.blob_name(&"cd".repeat(32)), vectors["blobName"]);
+        assert_eq!(keys.leave_name(device), vectors["leaveName"]);
+        // A leave file body is byte for byte the same on Windows and Android.
+        let request = crate::membership_exit::LeaveRequest {
+            vault_id: vectors["vaultId"].as_str().unwrap().into(), device_id: device.into(),
+            membership_head: "ab".repeat(32), key_epoch: 1, created_at: 1_767_225_600_000,
+        };
+        assert_eq!(String::from_utf8(leave_body(&request, &[7u8; 64])).unwrap(), vectors["leaveBody"].as_str().unwrap());
         let name = vectors["operationsName"].as_str().unwrap();
         let plain = vectors["plaintext"].as_str().unwrap().as_bytes();
         let nonce: [u8; 12] = hex::decode(vectors["nonceHex"].as_str().unwrap()).unwrap().try_into().unwrap();
@@ -880,6 +979,7 @@ pub(crate) mod tests {
         assert_eq!(keys.parse(&keys.operations_name("phone", 1, 256)), Some(CloudName::Operations { device: tag.clone(), first: 1, last: 256 }));
         assert_eq!(keys.parse(&keys.membership_name(4, &"ab".repeat(32))), Some(CloudName::Membership { count: 4, head: "ab".repeat(8) }));
         assert_eq!(keys.parse(&keys.progress_name("phone")), Some(CloudName::Progress { device: tag.clone() }));
+        assert_eq!(keys.parse(&keys.leave_name("phone")), Some(CloudName::Leave { device: tag.clone() }));
         assert_eq!(keys.parse(&keys.blob_name(&"cd".repeat(32))), Some(CloudName::Blob { hash: "cd".repeat(32) }));
         let prefix = keys.prefix();
         for name in [

@@ -41,14 +41,14 @@ const state = {
   groups: [{ id: "g-work", name: "Work", notes: "", folderType: "PASSWORD" }, { id: "g-home", name: "Home", notes: "", folderType: "" }] as VaultGroup[],
   passkeys: [{ id: id(), rpId: "github.com", username: "dev@example.com", displayName: "Dev", createdAt: minutes(30000) }] as PasskeySummary[],
   photos: new Map<string, EntryPhoto[]>(),
-  sync: { lastSync: new Date(minutes(3)).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "192.168.1.24", automatic: true, running: false, message: "Sent 2 changes and received 1.", phase: "idle", progressDone: 0, progressTotal: 0, lastError: "", lastAttempt: new Date(minutes(1)).toISOString(), consecutiveFailures: 0, nextRetrySeconds: 0 } as SyncStatus,
+  sync: { lastSync: new Date(minutes(3)).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "192.168.1.24", automatic: true, running: false, message: "Sent 2 changes and received 1.", phase: "idle", progressDone: 0, progressTotal: 0, lastError: "", lastAttempt: new Date(minutes(1)).toISOString(), consecutiveFailures: 0, nextRetrySeconds: 0, wifiCheckSeconds: 60, driveCheckSeconds: 15 } as SyncStatus,
   pairing: { stage: "", confirmation: "", message: "", invitation: "" } as PairingStatus,
   activity: [] as ActivityEvent[],
   conflicts: [] as SyncConflict[],
   removedNotice: null as MembershipStatus["removedNotice"],
   pendingLeave: false,
   photos_waiting: 2,
-  cloud: { available: true, connected: false, account: "", lastSync: "", lastError: "", connecting: false, needsSignIn: false } as CloudStatus
+  cloud: { available: true, connected: false, account: "", lastSync: "", lastError: "", connecting: false, needsSignIn: false, checkSeconds: 15 } as CloudStatus
 };
 state.entries[0].groupIds = ["g-work"];
 state.conflicts = [
@@ -130,6 +130,10 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "delete_passkey": state.passkeys = state.passkeys.filter((p) => p.id !== args.id); return null;
     case "sync_status": requireUnlocked(); return { ...state.sync };
     case "configure_sync": state.sync.phoneAddress = String(args.address); state.sync.automatic = Boolean(args.automatic); return null;
+    case "set_sync_schedule":
+      if (args.wifiSeconds != null) state.sync.wifiCheckSeconds = Number(args.wifiSeconds);
+      if (args.driveSeconds != null) { state.sync.driveCheckSeconds = Number(args.driveSeconds); state.cloud.checkSeconds = Number(args.driveSeconds); }
+      return null;
     case "sync_now": {
       state.sync = { ...state.sync, running: true, phase: "connecting", progressDone: 0, progressTotal: 0, lastAttempt: new Date().toISOString() };
       log("progress", "sync", "Sync started");

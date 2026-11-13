@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { History, Image, Laptop, Pencil, RefreshCw, Smartphone, Wifi } from "lucide-react";
+import { History, Image, Laptop, Pencil, RefreshCw, Smartphone, Timer, Wifi } from "lucide-react";
 import { Button, IconButton } from "../../components/Button";
 import { Card, SettingsGroup, SettingsRow } from "../../components/Display";
 import { DangerZone } from "../SettingsPage";
-import { TextField, Toggle } from "../../components/Field";
+import { Segmented, TextField, Toggle } from "../../components/Field";
 import { ProgressBar } from "../../components/Spinner";
 import { StatusBanner, StatusChip } from "../../components/Status";
 import { useConflicts, useMembership, usePhotoSyncStatus, usePolling, useSyncStatus } from "../../app/hooks";
@@ -171,6 +171,9 @@ function ConnectionCard({ status, error, reload }: { status: SyncStatus | null; 
   );
 }
 
+const WIFI_CHECK_LABELS: Record<string, string> = { "30": "30 seconds", "60": "minute", "300": "5 minutes", "900": "15 minutes" };
+const WIFI_CHECK_OPTIONS = [{ value: "30", label: "30 s" }, { value: "60", label: "1 min" }, { value: "300", label: "5 min" }, { value: "900", label: "15 min" }];
+
 function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () => Promise<void> }) {
   const toast = useToast();
   const [editing, setEditing] = useState(false);
@@ -200,6 +203,19 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
   const saveAndSync = async () => {
     const value = address.trim();
     if (await syncNow.run({ address: value, automatic: status.automatic })) setEditing(false);
+  };
+
+  const changeInterval = async (value: string) => {
+    setBusy(true);
+    try {
+      await api.setSyncSchedule({ wifiSeconds: Number(value) });
+      toast.success(`Checks devices on this Wi-Fi every ${WIFI_CHECK_LABELS[value] ?? value}`);
+      await reload();
+    } catch (failure) {
+      toast.error(failure, "Couldn't change the check interval.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const toggleAuto = async (automatic: boolean) => {
@@ -232,6 +248,11 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
       </SettingsRow>
       <SettingsRow icon={RefreshCw} title="Sync automatically" description="Finds paired phones and PCs on your local network while unlocked. Sends new changes sooner and retries after a dropped connection."
         control={<Toggle label="Sync automatically" checked={status.automatic} disabled={busy || running} onChange={(value) => void toggleAuto(value)} />} />
+      {status.automatic && status.wifiCheckSeconds !== undefined && (
+        <SettingsRow icon={Timer} title="Check devices every" description="How often this PC looks for paired devices on this Wi-Fi. Your own changes go out about 2 seconds after you save them."
+          control={<Segmented label="Check devices every" size="sm" value={String(status.wifiCheckSeconds)} onChange={(value) => void changeInterval(value)}
+            options={WIFI_CHECK_OPTIONS} />} />
+      )}
     </SettingsGroup>
   );
 }

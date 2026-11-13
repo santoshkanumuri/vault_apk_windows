@@ -786,6 +786,12 @@ impl UnlockedVault {
             created_at: now_millis()?,
         };
         let signature = self.identity_store.sign(&request.signing_bytes())?;
+        // With Google Drive connected, the request also goes to Drive, sealed with the group's
+        // cloud key while this PC still holds it. The managing phone finds it from anywhere.
+        let root: Vec<u8> = self.connection.query_row(
+            "SELECT transport_secret FROM sync_group_state WHERE vault_id = ?1", [&verified.vault_id], |row| row.get(0))?;
+        let _ = crate::lan_sync::cloud::save_pending_leave(&self.connection, &Zeroizing::new(root), &verified.vault_id,
+            &request, &signature);
         self.leave_locally(true)?;
         if !keep_items {
             self.clear_local_items()?;

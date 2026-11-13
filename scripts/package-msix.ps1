@@ -1,5 +1,7 @@
 param(
-    # Package identity. For the Store, use the values Partner Center gives you.
+    # Build the Store upload: the Partner Center identity below, unsigned, in its own file.
+    [switch]$Store,
+    # Package identity of the test build. -Store replaces these values.
     [string]$IdentityName = 'Nuvori.Desktop.Test',
     [string]$Publisher = 'CN=Nuvori Test',
     [string]$PublisherDisplayName = 'Nuvori',
@@ -20,9 +22,20 @@ $ErrorActionPreference = 'Stop'
 # host, and the pairing helper.
 #
 # Output (in artifacts\msix):
-#   layout\                      loose files with AppxManifest.xml (for Developer Mode installs)
-#   Nuvori_<version>_x64.msix    the package, signed with a local test certificate
-#   Nuvori-Test.cer              the public test certificate
+#   layout\                            loose files with AppxManifest.xml (for Developer Mode installs)
+#   Nuvori_<version>_x64.msix          the test package, signed with a local test certificate
+#   Nuvori-Test.cer                    the public test certificate
+#   layout-store\, Nuvori_<version>_x64_store.msix   with -Store: the unsigned Store upload
+
+if ($Store) {
+    # Partner Center > Product management > Product identity. The Store rejects a package whose
+    # values differ, and every update must keep them.
+    $IdentityName = 'SantoshKanumuri.Nuvori'
+    $Publisher = 'CN=048504FE-BF37-40FB-AF4D-22F10F1A4D6A'
+    $PublisherDisplayName = 'Santosh Kanumuri'
+    $NoSign = $true
+    if ($Revision -ne 0) { throw 'The Store requires 0 as the fourth version part.' }
+}
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $version = (Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
@@ -52,7 +65,7 @@ $makeappx = Join-Path $kit.FullName 'x64\makeappx.exe'
 $signtool = Join-Path $kit.FullName 'x64\signtool.exe'
 
 $output = Join-Path $root 'artifacts\msix'
-$layout = Join-Path $output 'layout'
+$layout = Join-Path $output $(if ($Store) { 'layout-store' } else { 'layout' })
 if (Test-Path -LiteralPath $layout) { Remove-Item -LiteralPath $layout -Recurse -Force }
 New-Item -ItemType Directory -Path (Join-Path $layout 'Assets'), (Join-Path $layout 'pairing') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $release 'nuvori.exe'), (Join-Path $release 'nuvori-native-host.exe') -Destination $layout
@@ -104,15 +117,10 @@ $manifest = @"
             </com:ExeServer>
           </com:ComServer>
         </com:Extension>
-      </Extensions>
-    </Application>
-    <!-- The browser extension's native host. The alias puts nuvori-native-host.exe in
-         %LOCALAPPDATA%\Microsoft\WindowsApps, where the browser can start it. -->
-    <Application Id="BrowserHost" Executable="nuvori-native-host.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="Nuvori browser bridge" Description="Connects the Nuvori browser extension"
-        BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png" AppListEntry="none" />
-      <Extensions>
+        <!-- The browser extension's native host. The alias puts nuvori-native-host.exe in
+             %LOCALAPPDATA%\Microsoft\WindowsApps, where the browser can start it. It belongs to
+             this application: the Store rejects a second application that is hidden from the
+             Start menu (a headless app) unless Microsoft grants a waiver. -->
         <uap3:Extension Category="windows.appExecutionAlias" Executable="nuvori-native-host.exe" EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
             <desktop:ExecutionAlias Alias="nuvori-native-host.exe" />
@@ -129,7 +137,7 @@ $manifest = @"
 "@
 [System.IO.File]::WriteAllText((Join-Path $layout 'AppxManifest.xml'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
 
-$package = Join-Path $output ("Nuvori_{0}.{1}_x64.msix" -f $version, $Revision)
+$package = Join-Path $output ("Nuvori_{0}.{1}_x64{2}.msix" -f $version, $Revision, $(if ($Store) { '_store' } else { '' }))
 & $makeappx pack /d $layout /p $package /o | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "makeappx failed with exit code $LASTEXITCODE" }
 
@@ -149,4 +157,9 @@ if (-not $NoSign) {
 }
 
 Write-Host "MSIX ready: $package"
-Write-Host "Install it for testing with scripts\install-test-msix.ps1"
+Write-Host "Identity: $IdentityName, $Publisher, $PublisherDisplayName, version $version.$Revision"
+if ($Store) {
+    Write-Host 'Upload this unsigned package in Partner Center.'
+} else {
+    Write-Host "Install it for testing with scripts\install-test-msix.ps1"
+}
