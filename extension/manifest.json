@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Nuvori Password Fill",
+  "version": "0.7.2",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiKD5PzIhxbn6f44qevObO+T9t0LQNY4kShbHxAAeXELgqvA5jJyIDfCWe586sBNZcFsIdLdok8wwKaw2WINWETUzP5PhigJ8Ofg8/GrV06JVK7iLCTtjmzdA77GKpQu5baqz8ksxLQWsygP6X+R0UNnVPfVyyuKvk97y7bzQso0VTSuwt4TzoRCt+IIlXhN5+JJ+JQ6lI7oBewaZggw/xrtIS4d6vIzNajc012iZlfIxTDJKjnJK9iUVEuggLINMI7SXuAix/ZEPl2bz0PvZ9AX8j+IcQl1Ijt96z07TQWGu2HxiWmMOE59q6CoUjA2XeewUO84oGtVhwakZPN1NVwIDAQAB",
+  "description": "Fill and save logins from Nuvori for Windows, right on the page.",
+  "minimum_chrome_version": "127",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "host_permissions": [
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "js": [
+        "fields.js",
+        "suggestions.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "scripting",
+    "nativeMessaging",
+    "storage",
+    "alarms",
+    "clipboardWrite",
+    "offscreen"
+  ],
+  "optional_permissions": [
+    "privacy"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Fill with Nuvori",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    },
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,52 @@
+[package]
+name = "nuvori"
+version = "2.2.1"
+default-run = "nuvori"
+description = "Nuvori companion app for Windows"
+authors = ["Nuvori"]
+edition = "2024"
+rust-version = "1.88"
+
+[lib]
+name = "nuvori_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "nuvori"
+path = "src/main.rs"
+
+[[bin]]
+name = "nuvori-native-host"
+path = "src/bin/nuvori-native-host.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[dependencies]
+aes-gcm = "0.10.3"
+argon2 = "0.5.3"
+base64 = "0.22"
+ed25519-dalek = "2.2"
+getrandom = "0.3"
+hex = "0.4"
+hmac = "0.12.1"
+mdns-sd = "0.21"
+if-addrs = "0.14"
+p256 = { version = "0.14", features = ["ecdsa", "pkcs8"] }
+psl = "2"
+rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+tauri = { version = "2", features = ["tray-icon"] }
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+url = "2"
+ureq = { version = "2.12", features = ["json"] }
+windows = { version = "0.61", features = ["Security_Credentials_UI", "Win32_Foundation", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_WinRT", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-core = "0.61"
+windows-future = "0.2"
+zeroize = "1.8"

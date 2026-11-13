@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "One text input followed by a lone password, in one HTTPS form. `username` says whether that input is used as the account. The browser extension keeps a copy at extension/fixtures/preceding-account-v1.json; both test suites must pass on identical files.",
+  "cases": [
+    { "name": "acct", "username": true },
+    { "name": "member_no", "username": true },
+    { "name": "phone", "username": true },
+    { "name": "mobile_number", "username": true },
+    { "name": "emailid", "username": true },
+    { "name": "name", "username": false },
+    { "name": "city", "username": false },
+    { "name": "zip", "username": false },
+    { "name": "country", "username": false },
+    { "name": "street", "username": false },
+    { "name": "promo_code", "username": false },
+    { "name": "search", "username": false },
+    { "name": "workspace", "username": false },
+    { "name": "server", "username": false },
+    { "name": "company", "username": false },
+    { "name": "captcha", "username": false }
+  ]
+}

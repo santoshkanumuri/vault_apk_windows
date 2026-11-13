@@ -1,0 +1,9 @@
+{
+  "name": "com.nuvori.desktop",
+  "description": "Nuvori browser bridge",
+  "path": "C:\\REPLACE_WITH_ABSOLUTE_PATH\\nuvori-native-host.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://REPLACE_WITH_32_CHARACTER_EXTENSION_ID/"
+  ]
+}

@@ -1,0 +1,23 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+pairing-helper/bin/
+pairing-helper/obj/
+pairing-helper/publish/
+pairing-helper/*.class
+*.log
+.env
+.env.*
+!.env.example
+
+src-tauri/cloud-oauth.json
+
+# Build outputs. Installers, the Store package and the extension zips go to GitHub Releases.
+artifacts/
+
+# Signing material and editor folders never go into Git.
+*.pfx
+*.p12
+*.pem
+.vscode/

@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../pairing-helper/publish/Nuvori.PairingHelper.exe": "pairing/Nuvori.PairingHelper.exe"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "transportSecretHex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "vaultId": "7d0e7f0a-3b56-4a57-9a0e-2f6f1c5f0b11",
+  "deviceId": "0f6c1a52-9d1e-4c3b-8a77-5e2d9b4c6a10",
+  "cloudKeyHex": "176da876e7ee88a4430233d646d5ed610cd913b83b6164346690c761e48b9d80",
+  "prefix": "nv1.e1e6ddbe30652114.",
+  "deviceTag": "5755ee97f9749a2d",
+  "membershipName": "nv1.e1e6ddbe30652114.m.0000000003.abababababababab",
+  "operationsName": "nv1.e1e6ddbe30652114.o.5755ee97f9749a2d.000000000007.000000000042",
+  "progressName": "nv1.e1e6ddbe30652114.p.5755ee97f9749a2d",
+  "blobName": "nv1.e1e6ddbe30652114.b.cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+  "nonceHex": "6465666768696a6b6c6d6e6f",
+  "plaintext": "[{\"sequence\":7,\"note\":\"ünïcode\"}]",
+  "sealedHex": "4e5643316465666768696a6b6c6d6e6f7ff3d31db3923533bad15d847efbe68d44e6a148f2138a11d524f12ebf79da27fad41a57f317cbf0b5839a8665512a9f63d0ee"
+}

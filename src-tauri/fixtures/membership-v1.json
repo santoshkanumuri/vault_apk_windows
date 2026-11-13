@@ -1,0 +1,124 @@
+{
+  "format": "nuvori-membership-vectors-v1",
+  "notes": "Base64 is URL-safe without padding. Ed25519 seeds are raw 32-byte private seeds. Transport secret for epoch N>1 = base64url(HMAC-SHA256(decode(epoch-1 secret), \"nuvori-transport-epoch-v1:<vaultId>:<N>\")); epoch 1 is the stored group secret. Probe proof = HMAC-SHA256(decode(secret), \"nuvori-lan-probe-v1\" || challenge). Leave signing bytes = UTF-8 \"nuvori-leave-v1\\n<vaultId>\\n<deviceId>\\n<membershipHead>\\n<keyEpoch>\\n<createdAtMillis>\".",
+  "manager": {
+    "deviceId": "manager-device",
+    "seedHex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "publicKeyB64": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "client": {
+    "deviceId": "client-device",
+    "seedHex": "0202020202020202020202020202020202020202020202020202020202020202",
+    "publicKeyB64": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q"
+  },
+  "other": {
+    "deviceId": "other-device",
+    "seedHex": "0303030303030303030303030303030303030303030303030303030303030303",
+    "publicKeyB64": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E"
+  },
+  "transport": {
+    "vaultId": "vault-membership-v1",
+    "epoch1SecretB64": "ERERERERERERERERERERERERERERERERERERERERERE",
+    "epochs": [
+      {
+        "epoch": 1,
+        "secretB64": "ERERERERERERERERERERERERERERERERERERERERERE"
+      },
+      {
+        "epoch": 2,
+        "secretB64": "4S0bdUr1qiGlhM3lZ69xT5C3-c6EVSssRQMD_ONR1PI"
+      },
+      {
+        "epoch": 3,
+        "secretB64": "OJA1EtwnfSB3OMJEAmZeRIyfplUcIQFcvp5VwDa1aEE"
+      }
+    ]
+  },
+  "probe": {
+    "challengeHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "secretB64": "ERERERERERERERERERERERERERERERERERERERERERE",
+    "proofB64": "japWRQooSB-haVwaC3ueqW5yzohT_ZEC2hU9o5BIwZg"
+  },
+  "leaveRequest": {
+    "fields": {
+      "vaultId": "vault-membership-v1",
+      "deviceId": "client-device",
+      "membershipHead": "e0942496dd4a56708fefda261591a4ea193799fec29e661aa9e30124053ff64a",
+      "keyEpoch": 1,
+      "createdAt": 1767225600000
+    },
+    "json": "{\"vaultId\":\"vault-membership-v1\",\"deviceId\":\"client-device\",\"membershipHead\":\"e0942496dd4a56708fefda261591a4ea193799fec29e661aa9e30124053ff64a\",\"keyEpoch\":1,\"createdAt\":1767225600000}",
+    "signingBytesHex": "6e75766f72692d6c656176652d76310a7661756c742d6d656d626572736869702d76310a636c69656e742d6465766963650a653039343234393664643461353637303866656664613236313539316134656131393337393966656332396536363161613965333031323430353366663634610a310a31373637323235363030303030",
+    "signatureB64": "86aiuW6FasQTAR1EzYeTFt2MXb88aZB049dvPQKtpjXlepG1JYxtwqkwhWjmm-7mR3J5ZZYWkjI6gSikSsUCCQ",
+    "frame": "leave1.japWRQooSB-haVwaC3ueqW5yzohT_ZEC2hU9o5BIwZg.eyJ2YXVsdElkIjoidmF1bHQtbWVtYmVyc2hpcC12MSIsImRldmljZUlkIjoiY2xpZW50LWRldmljZSIsIm1lbWJlcnNoaXBIZWFkIjoiZTA5NDI0OTZkZDRhNTY3MDhmZWZkYTI2MTU5MWE0ZWExOTM3OTlmZWMyOWU2NjFhYTllMzAxMjQwNTNmZjY0YSIsImtleUVwb2NoIjoxLCJjcmVhdGVkQXQiOjE3NjcyMjU2MDAwMDB9.86aiuW6FasQTAR1EzYeTFt2MXb88aZB049dvPQKtpjXlepG1JYxtwqkwhWjmm-7mR3J5ZZYWkjI6gSikSsUCCQ",
+    "serverNowMillis": 1767225660000,
+    "expectedReply": "left1"
+  },
+  "history": {
+    "clientDeviceId": "client-device",
+    "clientHeadSequence": 3,
+    "clientHeadHash": "e0942496dd4a56708fefda261591a4ea193799fec29e661aa9e30124053ff64a",
+    "keyEpochAfter": 2,
+    "events": [
+      {
+        "vaultId": "vault-membership-v1",
+        "sequence": 1,
+        "formatVersion": 1,
+        "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "action": "GENESIS",
+        "issuerDeviceId": "manager-device",
+        "subjectDeviceId": "manager-device",
+        "subjectPublicKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+        "keyEpoch": 1,
+        "signature": "gUp_lk0eKTq388js502_w6h34GuxB0f2tR0Lb-FvLLug6mzR8rUdlpxNhS_gfK-O5lybLd0J3B6YqKK_-K20Dw",
+        "hash": "848b07b71559bd6d0e32d0c0b6f896e31ef61779dafa53abba7c92770b1ad240"
+      },
+      {
+        "vaultId": "vault-membership-v1",
+        "sequence": 2,
+        "formatVersion": 1,
+        "previousHash": "848b07b71559bd6d0e32d0c0b6f896e31ef61779dafa53abba7c92770b1ad240",
+        "action": "ADD",
+        "issuerDeviceId": "manager-device",
+        "subjectDeviceId": "client-device",
+        "subjectPublicKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "keyEpoch": 1,
+        "signature": "SY8lxCkRUjUEi3Ky6t9kAoQ3nWsc_GVL7nLBNfLUrSZ9yPKaL-wdXov181GjkscjxDMUdQqcOgxq9vVzDhgmBA",
+        "hash": "86e65532829c78e71c6885564b3970a139cdeb889894bb43ceb51f916eaf4bab"
+      },
+      {
+        "vaultId": "vault-membership-v1",
+        "sequence": 3,
+        "formatVersion": 1,
+        "previousHash": "86e65532829c78e71c6885564b3970a139cdeb889894bb43ceb51f916eaf4bab",
+        "action": "ADD",
+        "issuerDeviceId": "manager-device",
+        "subjectDeviceId": "other-device",
+        "subjectPublicKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+        "keyEpoch": 1,
+        "signature": "ATWgv329IGyA2MbA5ELFKdDkZP-NH3sDTUdLghZlPDkC8xUlODVGLc8IL_EYbGn_6bETf545_PVgAGgLpwR2Bg",
+        "hash": "e0942496dd4a56708fefda261591a4ea193799fec29e661aa9e30124053ff64a"
+      },
+      {
+        "vaultId": "vault-membership-v1",
+        "sequence": 4,
+        "formatVersion": 1,
+        "previousHash": "e0942496dd4a56708fefda261591a4ea193799fec29e661aa9e30124053ff64a",
+        "action": "REMOVE",
+        "issuerDeviceId": "manager-device",
+        "subjectDeviceId": "client-device",
+        "subjectPublicKey": "",
+        "keyEpoch": 2,
+        "signature": "h38l7TOOF6IcxqFlseeDoD_6pQo-6Vmi_vpH4E45seqTrYwhYdlqs9QnvyprMtoIpt-jqLh1y9UIDhjDzRQlCQ",
+        "hash": "f485a35778b6fffee352aed5f637736801dbd21fa0c036ff9764b7ba896bb4eb"
+      }
+    ]
+  },
+  "replies": {
+    "ok": "ok",
+    "removed": "removed1",
+    "left": "left1",
+    "notManager": "notmanager1",
+    "busy": "busy1"
+  }
+}

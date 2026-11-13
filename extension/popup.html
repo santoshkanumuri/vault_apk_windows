@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nuvori</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="top">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+        </span>
+        <div class="top-text">
+          <h1>Nuvori</h1>
+          <p id="site">Checking this tab…</p>
+        </div>
+        <button id="theme" class="icon-btn" type="button" aria-label="Theme: system. Switch to light" title="Theme">
+          <svg class="t-system" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+          <svg class="t-light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+          <svg class="t-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+      </header>
+
+      <div class="status-row">
+        <span id="connection" class="chip" data-state="checking" role="status" aria-live="polite">
+          <svg class="s-ready" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+          <svg class="s-locked" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <svg class="s-offline" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+          <svg class="s-checking spin" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          <svg class="s-unsupported" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <span id="connection-text">Checking…</span>
+        </span>
+        <button id="unlock-app" class="text-btn" type="button" hidden>Unlock Nuvori</button>
+        <button id="reconnect" class="text-btn" type="button">Retry</button>
+      </div>
+      <span id="browser-chip" class="chip small-chip" data-state="ready" hidden>
+        <svg class="s-ready" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+        <span>Browser saving: off (Nuvori)</span>
+      </span>
+
+      <section id="setup" class="notice" data-tone="error" aria-labelledby="setup-title" hidden>
+        <h2 id="setup-title">Connect Nuvori for Windows</h2>
+        <p id="setup-lead">The extension can't reach the Windows app.</p>
+        <ol>
+          <li>Install and open Nuvori for Windows.</li>
+          <li>Register the browser host for this extension:<br /><code>register-native-host.ps1 -ExtensionId <span id="ext-id"></span></code></li>
+          <li>Unlock your vault, then choose Retry.</li>
+        </ol>
+      </section>
+
+      <nav class="tabs" role="tablist" aria-label="Nuvori views">
+        <button id="tab-site" type="button" role="tab" data-view="site" aria-selected="true" aria-controls="view-site">This site</button>
+        <button id="tab-pending" type="button" role="tab" data-view="pending" aria-selected="false" aria-controls="view-pending">Pending <span id="pending-count" class="count">0</span></button>
+        <button id="tab-settings" type="button" role="tab" data-view="settings" aria-selected="false" aria-controls="view-settings">Settings</button>
+      </nav>
+
+      <p id="message" class="message" role="status" aria-live="polite"></p>
+
+      <section id="view-site" role="tabpanel" aria-labelledby="tab-site">
+        <div class="section-head">
+          <h2>Saved logins</h2>
+          <button id="find" class="text-btn" type="button">Refresh</button>
+        </div>
+        <ul id="choices" class="card list" aria-label="Saved logins for this site"></ul>
+        <div id="accounts-empty" class="card empty" hidden>
+          <p class="empty-title">No saved login for this site</p>
+          <p>Sign in on the page and Nuvori will offer to save it.</p>
+        </div>
+
+        <div id="codes-section" hidden>
+          <div class="section-head">
+            <h2>Authenticator codes</h2>
+          </div>
+          <ul id="codes" class="card list" aria-label="Authenticator codes for this site"></ul>
+        </div>
+
+        <div class="card save-card">
+          <div class="save-head">
+            <div>
+              <h3>Save this page's login</h3>
+              <p>Type it into the site's form, then review it here.</p>
+            </div>
+            <button id="capture" class="btn" type="button">Review</button>
+          </div>
+          <div id="save-review" hidden>
+            <p id="save-summary"></p>
+            <div id="save-name-row" hidden>
+              <label for="save-name">Name</label>
+              <input id="save-name" class="text-input" type="text" maxlength="200" autocomplete="off" spellcheck="false" />
+            </div>
+            <label for="review-password">Password</label>
+            <div class="secret-input">
+              <input id="review-password" type="password" autocomplete="off" readonly />
+              <button id="show-password" class="text-btn" type="button" aria-label="Show password" aria-pressed="false" aria-controls="review-password">Show</button>
+            </div>
+            <div class="actions">
+              <button id="save" class="btn primary" type="button">Save login</button>
+              <button id="cancel-save" class="btn" type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-pending" role="tabpanel" aria-labelledby="tab-pending" hidden>
+        <div class="section-head">
+          <h2 id="pending-title">Waiting to save</h2>
+          <button id="retry-pending" class="text-btn" type="button">Try saving now</button>
+        </div>
+        <ul id="pending" class="card list" aria-label="Encrypted logins waiting for the vault"></ul>
+        <div id="pending-empty" class="card empty">
+          <p class="empty-title">Nothing waiting</p>
+          <p>Captured logins stay encrypted here until you choose Save or Update.</p>
+        </div>
+      </section>
+
+      <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <div class="card group">
+          <h3>Appearance</h3>
+          <div class="segmented" role="radiogroup" aria-label="Theme">
+            <label><input type="radio" name="theme-choice" value="system" /><span>System</span></label>
+            <label><input type="radio" name="theme-choice" value="light" /><span>Light</span></label>
+            <label><input type="radio" name="theme-choice" value="dark" /><span>Dark</span></label>
+          </div>
+        </div>
+
+        <div class="card group">
+          <label class="switch-row">
+            <span>
+              <span class="row-title">Suggest logins in pages</span>
+              <span class="row-sub">Show saved logins under sign-in fields.</span>
+            </span>
+            <input id="inline-toggle" type="checkbox" role="switch" checked />
+          </label>
+          <label class="switch-row">
+            <span>
+              <span class="row-title">Ask to unlock when the browser starts</span>
+              <span class="row-sub">Nuvori opens a small password window, then keeps running in the Windows tray.</span>
+            </span>
+            <input id="startup-unlock-toggle" type="checkbox" role="switch" checked />
+          </label>
+        </div>
+
+        <div class="card group" aria-labelledby="fill-title">
+          <h3 id="fill-title">Fill and save more than logins</h3>
+          <label class="switch-row">
+            <span>
+              <span class="row-title">Cards</span>
+              <span class="row-sub">Number and expiry fill in one click. The security code asks for Windows Hello or your master password first.</span>
+            </span>
+            <input id="fill-cards-toggle" type="checkbox" role="switch" checked />
+          </label>
+          <label class="switch-row">
+            <span>
+              <span class="row-title">Addresses and contact details</span>
+              <span class="row-sub">Name, email, phone and address from your Nuvori profiles.</span>
+            </span>
+            <input id="fill-profiles-toggle" type="checkbox" role="switch" checked />
+          </label>
+          <label class="switch-row">
+            <span>
+              <span class="row-title">Authenticator codes</span>
+              <span class="row-sub">Suggest the current code on two-step sign-in pages.</span>
+            </span>
+            <input id="fill-codes-toggle" type="checkbox" role="switch" checked />
+          </label>
+          <label class="switch-row">
+            <span>
+              <span class="row-title">Offer to save new cards and addresses</span>
+              <span class="row-sub">After you submit a form. Security codes are never saved from a page.</span>
+            </span>
+            <input id="save-details-toggle" type="checkbox" role="switch" checked />
+          </label>
+        </div>
+
+        <div class="card group" aria-labelledby="browser-pm-title">
+          <h3 id="browser-pm-title">Browser password manager</h3>
+          <label class="switch-row">
+            <span>
+              <span class="row-title">Use Nuvori instead of the browser's password manager</span>
+              <span class="row-sub">Turns off the browser's “Save password?” prompts.</span>
+            </span>
+            <input id="browser-saving-toggle" type="checkbox" role="switch" />
+          </label>
+          <label class="switch-row sub-row">
+            <span>
+              <span class="row-title">Also turn off the browser's address and card autofill</span>
+            </span>
+            <input id="browser-autofill-toggle" type="checkbox" role="switch" disabled />
+          </label>
+          <p id="browser-pm-note" class="pending-state" data-tone="warning" role="status" hidden></p>
+          <p class="row-sub">Passwords already saved in the browser still show up in its own suggestions. Extensions can't hide them. Turning this off, or removing Nuvori, gives these settings back to the browser.</p>
+          <details class="move-hint">
+            <summary>Move your passwords to Nuvori</summary>
+            <ol>
+              <li>Export them from <code id="browser-pm-path">chrome://password-manager/settings</code>.</li>
+              <li>Import the file into Nuvori on your phone, then delete the file.</li>
+              <li>Delete the passwords from the browser so its suggestions stop.</li>
+            </ol>
+            <button id="open-password-settings" class="btn small" type="button" hidden>Open password settings</button>
+          </details>
+        </div>
+
+        <div class="card group">
+          <h3>Never save on</h3>
+          <ul id="never-list" class="site-list" aria-label="Sites where Nuvori never offers to save"></ul>
+          <p id="never-empty" class="row-sub">No sites.</p>
+          <h3>Don't suggest on</h3>
+          <ul id="nosuggest-list" class="site-list" aria-label="Sites without inline suggestions"></ul>
+          <p id="nosuggest-empty" class="row-sub">No sites.</p>
+        </div>
+
+        <div class="card group">
+          <div class="section-head tight">
+            <h3>Diagnostics</h3>
+            <div class="inline-actions">
+              <button id="test-connection" class="btn small" type="button">Test connection</button>
+              <button id="diag-clear" class="text-btn" type="button">Clear</button>
+            </div>
+          </div>
+          <p class="row-sub">Recent extension events. No usernames or passwords are recorded.</p>
+          <ol id="diag-list" class="diag-list" aria-label="Recent extension events"></ol>
+          <p id="diag-empty" class="row-sub">No events yet.</p>
+        </div>
+      </section>
+    </main>
+    <script src="appearance.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

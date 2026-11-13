@@ -1,0 +1,55 @@
+{
+  "formatVersion": 1,
+  "pairingCodeDigits": 24,
+  "recoverySecretBits": 256,
+  "membership": {
+    "vaultId": "vault-test-001",
+    "deviceId": "device-a",
+    "displayName": "Test Windows device",
+    "identityPublicKey": "identity-public-key-placeholder",
+    "status": "active",
+    "addedByDeviceId": "device-a",
+    "membershipSequence": 1,
+    "keyEpoch": 1
+  },
+  "keyEnvelope": {
+    "formatVersion": 1,
+    "vaultId": "vault-test-001",
+    "keyEpoch": 1,
+    "recipientType": "device",
+    "recipientId": "device-a",
+    "algorithm": "test-only",
+    "nonce": "nonce-placeholder",
+    "wrappedVaultKey": "wrapped-key-placeholder"
+  },
+  "frontier": {
+    "counters": {
+      "device-a": 2,
+      "device-b": 1
+    }
+  },
+  "change": {
+    "formatVersion": 1,
+    "vaultId": "vault-test-001",
+    "deviceId": "device-a",
+    "sequence": 2,
+    "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "mutationId": "mutation-test-002",
+    "entityType": "login",
+    "entityId": "login-test-001",
+    "kind": "upsert",
+    "baseRevision": 1,
+    "recordVersion": {
+      "counters": {
+        "device-a": 2,
+        "device-b": 1
+      }
+    },
+    "occurredAtUtc": "2026-09-21T12:00:00Z",
+    "payloadCiphertext": "ciphertext-placeholder",
+    "payloadNonce": "payload-nonce-placeholder",
+    "deviceSignature": "signature-placeholder",
+    "hash": "2e9dbf63e6368a338697225fee72964d13abd19ec995908f367867a68f7acbb6"
+  },
+  "expectedChangeHash": "2e9dbf63e6368a338697225fee72964d13abd19ec995908f367867a68f7acbb6"
+}
