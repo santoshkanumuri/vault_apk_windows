@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Activity, Clipboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
+import { Activity, Clipboard, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
 import { Button } from "../components/Button";
-import { SettingsGroup, SettingsRow } from "../components/Display";
+import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
 import { PasswordField, Segmented, TextField, Toggle } from "../components/Field";
 import { StatusBanner, StatusChip, type StatusKind } from "../components/Status";
@@ -10,17 +10,18 @@ import { useBrowserStatus, useBuildStatus, useLock, useMembership, useSyncStatus
 import { PendingLeaveChip, useLeaveGroup } from "./sync/Membership";
 import { useRouter } from "../app/router";
 import { autoLockChoices, clipboardChoices, usePreferences } from "../app/settings";
-import { useTheme, type ThemePreference } from "../app/theme";
+import { AccentPicker, AppearancePreview, SurfacePicker } from "../components/AppearancePicker";
+import { DEFAULT_ACCENT, DEFAULT_SURFACE, useTheme, type ThemePreference } from "../app/theme";
 import { useToast } from "../app/toast";
 import { useVault } from "../app/vault";
-import { api, type BrowserStatus, type BuildStatus, type PasskeyProviderState } from "../lib/api";
+import { api, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type QuickSearchStatus } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { relativeTime } from "../lib/format";
 import { browserIndicator, syncIndicator } from "../lib/syncState";
 
 
 export function SettingsPage({ section }: { section?: string }) {
-  const { preference, setPreference } = useTheme();
+  const { preference, setPreference, resolved, accent, surface, pendingSync, setAppearance } = useTheme();
   const { autoLockMinutes, setAutoLockMinutes, clipboardSeconds, setClipboardSeconds } = usePreferences();
   const { snapshot } = useVault();
   const router = useRouter();
@@ -41,11 +42,16 @@ export function SettingsPage({ section }: { section?: string }) {
     toast.success(value === "system" ? "Theme follows Windows" : `${value === "dark" ? "Dark" : "Light"} theme on`);
   };
 
+  const changeAppearance = (nextAccent: string, nextSurface: string) => {
+    setAppearance(nextAccent, nextSurface).catch((failure) => toast.error(failure, "Could not save the colors."));
+  };
+
   return (
     <div className="page page-narrow settings">
       <SettingsGroup title="Security" id="settings-security">
         <SettingsRow icon={LockKeyhole} title="Lock now" description="Shortcut: Ctrl+L" control={<Button size="sm" icon={LockKeyhole} onClick={() => void lock()}>Lock</Button>} />
         <HelloRow />
+        <QuickSearchRow />
         {build && <PasskeyProviderRow state={build.passkeyProvider} />}
         <SettingsRow icon={Timer} title="Auto-lock" description="Lock after this long without mouse or keyboard activity."
           control={<select className="input select select-compact" aria-label="Auto-lock" value={autoLockMinutes} onChange={(event) => { const value = Number(event.target.value); setAutoLockMinutes(value); toast.success(value ? `Auto-lock after ${value} min` : "Auto-lock off"); }}>
@@ -67,6 +73,21 @@ export function SettingsPage({ section }: { section?: string }) {
       <SettingsGroup title="App" id="settings-appearance">
         <SettingsRow icon={Palette} title="Theme" description="Follow Windows, or pick light or dark."
           control={<Segmented label="Theme" size="sm" value={preference} onChange={changeTheme} options={[{ value: "system", label: "System", icon: Monitor }, { value: "light", label: "Light", icon: Sun }, { value: "dark", label: "Dark", icon: Moon }]} />} />
+        <div className="appearance-picker" id="settings-colors">
+          <div>
+            <div className="appearance-label">Accent color</div>
+            <AccentPicker value={accent} onSelect={(id) => changeAppearance(id, surface)} />
+          </div>
+          <div>
+            <div className="appearance-label">Background</div>
+            <SurfacePicker value={surface} accent={accent} mode={resolved} onSelect={(id) => changeAppearance(accent, id)} />
+          </div>
+          <AppearancePreview />
+          {pendingSync && snapshot.enrolled && <p className="appearance-note">Saved on this PC. Your other devices get it after each has Nuvori 2.2.4 or newer and has synced once on Wi-Fi.</p>}
+          {(accent !== DEFAULT_ACCENT || surface !== DEFAULT_SURFACE) && (
+            <div className="appearance-actions"><Button size="sm" icon={RotateCcw} onClick={() => changeAppearance(DEFAULT_ACCENT, DEFAULT_SURFACE)}>Reset to Nuvori green</Button></div>
+          )}
+        </div>
         <SettingsRow icon={Activity} title="Activity log" description="Recent unlocks, saves, syncs, and browser fills." onClick={() => void router.navigate({ page: "activity" })} />
       </SettingsGroup>
 
@@ -143,6 +164,42 @@ function HelloRow() {
         </form>
       </Dialog>
     </>
+  );
+}
+
+function QuickSearchRow() {
+  const toast = useToast();
+  const [status, setStatus] = useState<QuickSearchStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.quickSearchStatus().then(setStatus).catch(() => setStatus(null)); }, []);
+  if (!status) return null;
+
+  const change = async (enabled: boolean, preset?: string) => {
+    setBusy(true);
+    try {
+      const next = await api.setQuickSearch(enabled, preset);
+      setStatus(next);
+      if (next.state === "inUse") toast.error(`${next.shortcut} is in use by another app`);
+      else toast.success(next.enabled ? `Quick search: ${next.shortcut}` : "Quick search shortcut off");
+    } catch (error) {
+      toast.error(humanError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const description = status.state === "inUse"
+    ? <span className="row-inline"><StatusChip kind="warning" label="In use by another app" /><span className="muted">Pick another shortcut, or close the app that owns {status.shortcut}.</span></span>
+    : status.enabled ? <span>Press <Kbd>{status.shortcut}</Kbd> in any app to open Nuvori's search. A locked vault asks for your password first.</span>
+    : "Off. Nuvori's search opens only from inside the app (Ctrl+K).";
+  return (
+    <SettingsRow icon={Keyboard} title="Quick search shortcut" description={description}
+      control={<span className="row-inline">
+        {status.enabled && <select className="input select select-compact" aria-label="Quick search shortcut" value={status.preset} disabled={busy} onChange={(event) => void change(true, event.target.value)}>
+          {status.presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+        </select>}
+        <Toggle label="Quick search shortcut" checked={status.enabled} disabled={busy} onChange={(on) => void change(on)} />
+      </span>} />
   );
 }
 

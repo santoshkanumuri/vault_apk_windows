@@ -13,6 +13,7 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use zeroize::Zeroize;
 
 use crate::{
+    appearance::{self, AppearanceStore},
     passkeys::{PasskeyError, VaultPasskey},
     photo_blobs::{self, PhotoBlobs},
     payload::{self, PayloadError},
@@ -50,16 +51,30 @@ impl IncomingApply {
         Self::apply_with_blobs(connection, operation, content_key, None)
     }
 
+    /// Appearance changes go to the store installed at startup (`appearance::install`).
     pub fn apply_with_blobs(
         connection: &mut Connection,
         operation: &ChangeRecord,
         content_key: &[u8],
         blobs: Option<&PhotoBlobs>,
     ) -> Result<ApplyOutcome, ApplyError> {
+        Self::apply_with_appearance(connection, operation, content_key, blobs, appearance::installed())
+    }
+
+    /// Without an appearance store, appearance changes are left waiting.
+    pub fn apply_with_appearance(
+        connection: &mut Connection,
+        operation: &ChangeRecord,
+        content_key: &[u8],
+        blobs: Option<&PhotoBlobs>,
+        appearance_store: Option<&AppearanceStore>,
+    ) -> Result<ApplyOutcome, ApplyError> {
         let supported = match operation.entity_type.as_str() {
             "entry" | "group" | "passkey" | "photo_cover" => true,
             "device_name" => operation.kind == ChangeKind::Upsert,
             "photo" => operation.kind == ChangeKind::Delete || blobs.is_some(),
+            // A delete is not supported but readable: `validate_payload` sets it aside.
+            appearance::ENTITY_TYPE => appearance_store.is_some(),
             _ => false,
         };
         if !supported {
@@ -103,6 +118,17 @@ impl IncomingApply {
             return Ok(ApplyOutcome::Replay);
         }
 
+        if operation.entity_type == appearance::ENTITY_TYPE {
+            let store = appearance_store.ok_or(ApplyError::UnsupportedEntity)?;
+            let (outcome, changed) = apply_appearance(&transaction, operation, &payload, store)?;
+            mark_applied(&transaction, operation, outcome)?;
+            transaction.commit()?;
+            if let Some(view) = changed {
+                store.notify(&view);
+            }
+            return Ok(outcome);
+        }
+
         let payload = resolve_links(&transaction, operation, &payload)?;
 
         let outcome = match current_state(&transaction, operation)? {
@@ -140,24 +166,105 @@ impl IncomingApply {
             },
         };
 
-        transaction.execute(
-            "INSERT INTO sync_applied_operations (mutation_id, change_hash, outcome, applied_at_utc)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                operation.mutation_id,
-                operation.hash,
-                match outcome {
-                    ApplyOutcome::Applied => "applied",
-                    ApplyOutcome::Conflict => "conflict",
-                    ApplyOutcome::Obsolete => "obsolete",
-                    ApplyOutcome::Replay => unreachable!(),
-                },
-                now_utc()?,
-            ],
-        )?;
+        mark_applied(&transaction, operation, outcome)?;
         transaction.commit()?;
         Ok(outcome)
     }
+}
+
+fn mark_applied(transaction: &Transaction<'_>, operation: &ChangeRecord, outcome: ApplyOutcome) -> Result<(), ApplyError> {
+    transaction.execute(
+        "INSERT INTO sync_applied_operations (mutation_id, change_hash, outcome, applied_at_utc)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            operation.mutation_id,
+            operation.hash,
+            match outcome {
+                ApplyOutcome::Applied => "applied",
+                ApplyOutcome::Conflict => "conflict",
+                ApplyOutcome::Obsolete => "obsolete",
+                ApplyOutcome::Replay => unreachable!(),
+            },
+            now_utc()?,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Protocol `appearance-v1`. Against the record state for ("appearance", "vault"): an incoming
+/// version that dominates applies; an older or equal one is obsolete; a concurrent one is decided
+/// by last writer wins against the stored value. A pending local value that was never written
+/// competes the same way. Every applied or concurrent case stores the pointwise maximum of both
+/// versions, so the next local change dominates both. Never a conflict, never a new change.
+/// Returns the new view when the stored value changed, to announce after the commit.
+fn apply_appearance(
+    transaction: &Transaction<'_>,
+    operation: &ChangeRecord,
+    payload: &Value,
+    store: &AppearanceStore,
+) -> Result<(ApplyOutcome, Option<appearance::View>), ApplyError> {
+    let (accent, surface) = appearance::parse_payload(payload).ok_or(ApplyError::InvalidPayload)?;
+    let current: Option<(String, i64)> = transaction
+        .query_row(
+            "SELECT record_version_json, revision FROM vault_records WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let current = current
+        .map(|(json, revision)| serde_json::from_str::<RecordVersion>(&json).map(|version| (version, revision)))
+        .transpose()?;
+    let relation = current.as_ref().map(|(version, _)| operation.record_version.relation_to(version));
+    if matches!(relation, Some(VersionRelation::Before | VersionRelation::Equal)) {
+        return Ok((ApplyOutcome::Obsolete, None));
+    }
+    let dominates = relation.is_none_or(|relation| relation == VersionRelation::After);
+
+    let _guard = store.lock();
+    let stored = store.load();
+    let incoming = appearance::Stamp::new(Some(&operation.occurred_at_utc), Some(&operation.device_id));
+    let value_wins = (dominates && !stored.pending_sync) || appearance::incoming_wins(&store.competing_stamp(&stored), &incoming);
+
+    let merged = current
+        .as_ref()
+        .map_or_else(|| operation.record_version.clone(), |(version, _)| version.merged(&operation.record_version));
+    let merged_json = serde_json::to_string(&merged)?;
+    if dominates || value_wins {
+        // The record now holds the incoming change. A pending local value that wins stays in
+        // `appearance.json` and is written later on top of this version.
+        let revision = current.as_ref().map_or(0, |(_, revision)| *revision).max(to_i64(operation.base_revision)?);
+        transaction.execute(
+            "INSERT INTO vault_records (entity_type, entity_id, payload_ciphertext, revision, record_version_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(entity_type, entity_id) DO UPDATE SET payload_ciphertext = excluded.payload_ciphertext,
+                 revision = excluded.revision, record_version_json = excluded.record_version_json",
+            params![
+                operation.entity_type,
+                operation.entity_id,
+                operation.payload_ciphertext,
+                revision.checked_add(1).ok_or(ApplyError::IntegerOverflow)?,
+                merged_json
+            ],
+        )?;
+    } else {
+        transaction.execute(
+            "UPDATE vault_records SET record_version_json = ?3 WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id, merged_json],
+        )?;
+    }
+    if !value_wins {
+        return Ok((ApplyOutcome::Applied, None));
+    }
+    let next = appearance::Stored {
+        accent,
+        surface,
+        updated_at_utc: Some(operation.occurred_at_utc.clone()),
+        updated_by_device: Some(operation.device_id.clone()),
+        pending_sync: false,
+    };
+    // Written before the commit: if the commit fails, the retry writes the same value again.
+    store.save(&next).map_err(|_| ApplyError::AppearanceStorage)?;
+    Ok((ApplyOutcome::Applied, (next.view() != stored.view()).then(|| next.view())))
 }
 
 /// Materializes an operation that wins, then closes every open conflict for the record whose
@@ -392,6 +499,13 @@ pub(crate) fn resolve_links(
 }
 
 fn validate_payload(operation: &ChangeRecord, payload: &Value) -> Result<(), ApplyError> {
+    if operation.entity_type == appearance::ENTITY_TYPE {
+        // `appearance-v1`: one record, always an upsert, two ids of the shared shape.
+        let valid = operation.kind == ChangeKind::Upsert
+            && operation.entity_id == appearance::ENTITY_ID
+            && appearance::parse_payload(payload).is_some();
+        return if valid { Ok(()) } else { Err(ApplyError::InvalidPayload) };
+    }
     match operation.kind {
         ChangeKind::Upsert => {
             if operation.entity_type == "device_name" {
@@ -891,6 +1005,8 @@ pub enum ApplyError {
     IntegerOverflow,
     #[error("system clock could not format an application time")]
     Clock,
+    #[error("the appearance file could not be saved")]
+    AppearanceStorage,
 }
 
 #[cfg(test)]
@@ -1695,5 +1811,182 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(members, ["card"]);
+    }
+
+    struct AppearanceFixture {
+        directory: std::path::PathBuf,
+        store: crate::appearance::AppearanceStore,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<crate::appearance::View>>>,
+    }
+
+    impl AppearanceFixture {
+        fn new() -> Self {
+            let directory = std::env::temp_dir().join(format!("nuvori-appearance-apply-{}", uuid::Uuid::new_v4()));
+            let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let store = crate::appearance::AppearanceStore::with_notify(&directory, {
+                let seen = seen.clone();
+                move |view| seen.lock().unwrap().push(view.clone())
+            });
+            AppearanceFixture { directory, store, seen }
+        }
+
+        fn ids(&self) -> (String, String, bool) {
+            let stored = self.store.load();
+            (stored.accent, stored.surface, stored.pending_sync)
+        }
+    }
+
+    impl Drop for AppearanceFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn appearance_change(device: &str, sequence: u64, previous: &str, version: RecordVersion, at: &str,
+        kind: ChangeKind, entity_id: &str, body: Value) -> ChangeRecord {
+        let signer = SigningKey::from_bytes(&[41; 32]);
+        let mutation = format!("appearance-{device}-{sequence}");
+        let encrypted = payload::encrypt(&CONTENT_KEY, "appearance", "vault-a", &mutation, entity_id,
+            &serde_json::to_vec(&body).unwrap()).unwrap();
+        ChangeRecord::create_signed_with("vault-a", device, sequence, previous, mutation, "appearance", entity_id,
+            kind, 0, version, at, encrypted.ciphertext, encrypted.nonce,
+            |bytes| Ok::<_, ()>(signer.sign(bytes).to_bytes()))
+            .unwrap()
+    }
+
+    fn colors(accent: &str, surface: &str) -> Value {
+        json!({"appearance": {"accent": accent, "surface": surface}})
+    }
+
+    fn apply_appearance(connection: &mut Connection, fixture: &AppearanceFixture, change: &ChangeRecord)
+        -> Result<ApplyOutcome, super::ApplyError> {
+        insert_persisted(connection, change);
+        IncomingApply::apply_with_appearance(connection, change, &CONTENT_KEY, None, Some(&fixture.store))
+    }
+
+    fn appearance_record(connection: &Connection) -> (RecordVersion, String) {
+        let (version, ciphertext): (String, String) = connection
+            .query_row("SELECT record_version_json, payload_ciphertext FROM vault_records WHERE entity_type = 'appearance' AND entity_id = 'vault'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap();
+        (serde_json::from_str(&version).unwrap(), ciphertext)
+    }
+
+    fn conflict_count(connection: &Connection) -> i64 {
+        connection.query_row("SELECT count(*) FROM sync_conflicts", [], |row| row.get(0)).unwrap()
+    }
+
+    fn owned(accent: &str, surface: &str, pending: bool) -> (String, String, bool) {
+        (accent.to_owned(), surface.to_owned(), pending)
+    }
+
+    #[test]
+    fn appearance_that_dominates_applies_and_older_or_equal_is_obsolete() {
+        let mut connection = connection();
+        let fixture = AppearanceFixture::new();
+        let first = appearance_change("phone", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1)]),
+            "2026-11-13T10:00:00Z", ChangeKind::Upsert, "vault", colors("blue", "slate"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &first).unwrap(), ApplyOutcome::Applied);
+        assert_eq!(fixture.ids(), owned("blue", "slate", false));
+        // Unknown ids from a newer palette are kept as received.
+        let second = appearance_change("phone", 2, &first.hash, RecordVersion::from_entries([("phone", 2)]),
+            "2026-11-13T09:00:00Z", ChangeKind::Upsert, "vault", colors("ultraviolet", "aurora-2"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &second).unwrap(), ApplyOutcome::Applied,
+            "a dominating version applies even with an older time");
+        assert_eq!(fixture.ids(), owned("ultraviolet", "aurora-2", false));
+        assert_eq!(appearance_record(&connection), (RecordVersion::from_entries([("phone", 2)]), second.payload_ciphertext.clone()));
+
+        let older = appearance_change("tablet", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1)]),
+            "2026-11-13T12:00:00Z", ChangeKind::Upsert, "vault", colors("red", "stone"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &older).unwrap(), ApplyOutcome::Obsolete);
+        let equal = appearance_change("tablet", 2, &older.hash, RecordVersion::from_entries([("phone", 2)]),
+            "2026-11-13T12:00:00Z", ChangeKind::Upsert, "vault", colors("red", "stone"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &equal).unwrap(), ApplyOutcome::Obsolete);
+        assert_eq!(fixture.ids(), owned("ultraviolet", "aurora-2", false));
+        assert_eq!(IncomingApply::apply_with_appearance(&mut connection, &second, &CONTENT_KEY, None, Some(&fixture.store)).unwrap(),
+            ApplyOutcome::Replay);
+        assert_eq!((applied_count(&connection), conflict_count(&connection)), (4, 0));
+        assert_eq!(fixture.seen.lock().unwrap().len(), 2, "one event per stored change");
+    }
+
+    #[test]
+    fn concurrent_appearance_uses_last_writer_wins_both_ways_and_keeps_the_maximum_version() {
+        let mut connection = connection();
+        let fixture = AppearanceFixture::new();
+        connection
+            .execute("INSERT INTO vault_records (entity_type, entity_id, payload_ciphertext, revision, record_version_json)
+                      VALUES ('appearance', 'vault', 'local-ciphertext', 1, '{\"counters\":{\"pc\":1}}')", [])
+            .unwrap();
+        fixture.store.save(&crate::appearance::Stored {
+            accent: "teal".to_owned(), surface: "ocean".to_owned(),
+            updated_at_utc: Some("2026-11-13T10:00:00Z".to_owned()), updated_by_device: Some("pc".to_owned()),
+            pending_sync: false,
+        }).unwrap();
+
+        let later = appearance_change("phone", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1)]),
+            "2026-11-13T10:00:05Z", ChangeKind::Upsert, "vault", colors("blue", "slate"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &later).unwrap(), ApplyOutcome::Applied);
+        assert_eq!(fixture.ids(), owned("blue", "slate", false), "the later writer wins");
+        assert_eq!(appearance_record(&connection),
+            (RecordVersion::from_entries([("pc", 1), ("phone", 1)]), later.payload_ciphertext.clone()));
+
+        let earlier = appearance_change("tablet", 1, GENESIS_HASH, RecordVersion::from_entries([("tablet", 1)]),
+            "2026-11-13T09:59:00Z", ChangeKind::Upsert, "vault", colors("red", "stone"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &earlier).unwrap(), ApplyOutcome::Applied);
+        assert_eq!(fixture.ids(), owned("blue", "slate", false), "the earlier writer loses");
+        assert_eq!(appearance_record(&connection),
+            (RecordVersion::from_entries([("pc", 1), ("phone", 1), ("tablet", 1)]), later.payload_ciphertext.clone()),
+            "the stored version includes both, the stored value stays");
+        assert_eq!(conflict_count(&connection), 0);
+        assert_eq!(fixture.seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_pending_local_appearance_competes_with_incoming_changes() {
+        let mut connection = connection();
+        let fixture = AppearanceFixture::new();
+        fixture.store.set_local("red", "stone", Some("pc")).unwrap();
+        let older = appearance_change("phone", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1)]),
+            "2020-01-01T00:00:00Z", ChangeKind::Upsert, "vault", colors("blue", "slate"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &older).unwrap(), ApplyOutcome::Applied);
+        assert_eq!(fixture.ids(), owned("red", "stone", true), "an older incoming value loses; the choice stays pending");
+        assert_eq!(appearance_record(&connection).0, RecordVersion::from_entries([("phone", 1)]),
+            "the record still holds the incoming version, so the later write dominates it");
+
+        let newer = appearance_change("phone", 2, &older.hash, RecordVersion::from_entries([("phone", 2)]),
+            "2099-01-01T00:00:00Z", ChangeKind::Upsert, "vault", colors("blue", "slate"));
+        assert_eq!(apply_appearance(&mut connection, &fixture, &newer).unwrap(), ApplyOutcome::Applied);
+        assert_eq!(fixture.ids(), owned("blue", "slate", false), "a later incoming value wins and clears pending");
+        assert_eq!(conflict_count(&connection), 0);
+        let operations: i64 = connection
+            .query_row("SELECT count(*) FROM sync_operations WHERE device_id = 'pc'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(operations, 0, "applying never writes a change");
+    }
+
+    #[test]
+    fn appearance_deletes_bad_ids_and_other_records_are_unreadable() {
+        let mut connection = connection();
+        let fixture = AppearanceFixture::new();
+        let version = |sequence| RecordVersion::from_entries([("phone", sequence)]);
+        let delete = appearance_change("phone", 1, GENESIS_HASH, version(1), "2026-11-13T10:00:00Z",
+            ChangeKind::Delete, "vault", json!({"deleted": true}));
+        assert!(matches!(apply_appearance(&mut connection, &fixture, &delete), Err(super::ApplyError::InvalidPayload)));
+        let bad_id = appearance_change("phone", 2, &delete.hash, version(2), "2026-11-13T10:00:00Z",
+            ChangeKind::Upsert, "vault", colors("Blue!", "slate"));
+        assert!(matches!(apply_appearance(&mut connection, &fixture, &bad_id), Err(super::ApplyError::InvalidPayload)));
+        let other = appearance_change("phone", 3, &bad_id.hash, version(3), "2026-11-13T10:00:00Z",
+            ChangeKind::Upsert, "theme", colors("blue", "slate"));
+        assert!(matches!(apply_appearance(&mut connection, &fixture, &other), Err(super::ApplyError::InvalidPayload)));
+        let fine = appearance_change("phone", 4, &other.hash, version(4), "2026-11-13T10:00:00Z",
+            ChangeKind::Upsert, "vault", colors("blue", "slate"));
+        insert_persisted(&connection, &fine);
+        assert!(matches!(IncomingApply::apply_with_appearance(&mut connection, &fine, &CONTENT_KEY, None, None),
+            Err(super::ApplyError::UnsupportedEntity)), "without a store the change waits");
+        assert_eq!(IncomingApply::apply_with_appearance(&mut connection, &fine, &CONTENT_KEY, None, Some(&fixture.store)).unwrap(),
+            ApplyOutcome::Applied);
+        assert_eq!(fixture.ids(), owned("blue", "slate", false));
+        assert_eq!(applied_count(&connection), 1);
     }
 }

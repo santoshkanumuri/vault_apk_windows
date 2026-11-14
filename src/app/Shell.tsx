@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { SearchContext } from "./search";
 import { Activity, ArrowLeft, Clock3, CircleHelp, CreditCard, Ellipsis, FileText, House, KeyRound, LockKeyhole, MonitorSmartphone, Moon, Search, Settings, Sun, UserRound, type LucideIcon } from "lucide-react";
 import { IconButton } from "../components/Button";
+import { api, onQuickSearch } from "../lib/api";
 import { Kbd } from "../components/Display";
 import { BrandMark } from "../pages/Unlock";
 import { HomePage } from "../pages/Home";
@@ -78,6 +79,24 @@ export function Shell() {
   const bottomSection = bottomNav.some((item) => item.id === section) ? section : "more";
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
+
+  // The system-wide quick search shortcut. The app only tells us it was pressed recently (the
+  // window is unlocked here, so the lock was never bypassed). Pressed again with the palette open,
+  // it hides the window.
+  const searchOpenRef = useRef(false);
+  searchOpenRef.current = searchOpen;
+  useEffect(() => {
+    const handle = async (hadFocus: boolean) => {
+      const requested = await api.takeQuickSearchRequest().catch(() => false);
+      if (!requested) return;
+      if (hadFocus && searchOpenRef.current) {
+        setSearchOpen(false);
+        void api.hideMainWindow().catch(() => {});
+      } else if (!document.querySelector("dialog[open]")) setSearchOpen(true);
+    };
+    void handle(false);
+    return onQuickSearch((hadFocus) => void handle(hadFocus));
+  }, []);
   const toggleTheme = () => {
     const next = toggle();
     toast.success(next === "dark" ? "Dark theme on" : "Light theme on");

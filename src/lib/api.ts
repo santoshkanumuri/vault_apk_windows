@@ -158,7 +158,28 @@ export async function call<T>(command: string, args?: Record<string, unknown>): 
   return invoke<T>(command, args);
 }
 
+export type QuickSearchStatus = {
+  enabled: boolean;
+  preset: string;
+  shortcut: string;
+  /** "inUse" means another app already owns the key. */
+  state: "off" | "active" | "inUse";
+  presets: Array<{ id: string; label: string }>;
+};
+
 export type CardCodeRequest = { id: string; title: string; card: string; site: string; helloAvailable: boolean };
+
+/**
+ * The vault appearance, synced to the whole group (protocol `appearance-v1`). Ids follow
+ * `^[a-z][a-z0-9-]{0,31}$`; an id this build's palette does not know (a newer palette) is kept as
+ * received, so show the default for it. `pendingSync`: chosen here, not yet sent to the group.
+ */
+export type Appearance = { accent: string; surface: string; pendingSync: boolean };
+
+/** The Tauri event sent to every window when the stored appearance changes (here or by sync). */
+export const APPEARANCE_CHANGED_EVENT = "appearance-changed";
+/** The dev mock's stand-in for the Tauri event, sent on `window`. */
+export const MOCK_APPEARANCE_EVENT = "nuvori-mock-appearance-changed";
 
 /**
  * Which window this page runs in: "main", the small "unlock" window, or the "card-code" approval
@@ -177,6 +198,24 @@ export function onVaultChanged(handler: () => void): () => void {
   return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
 }
 
+/** Runs `handler` when the quick search shortcut is pressed. `hadFocus` is true if Nuvori was already in front. */
+export function onQuickSearch(handler: (hadFocus: boolean) => void): () => void {
+  if (usingDevMock) return () => {};
+  const pending = listen<boolean>("quick-search", (event) => handler(event.payload === true));
+  return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
+}
+
+/** Runs `handler` with the new appearance whenever it changes. Returns the unsubscribe function. */
+export function onAppearanceChanged(handler: (appearance: Appearance) => void): () => void {
+  if (usingDevMock) {
+    const listener = (event: Event) => handler((event as CustomEvent<Appearance>).detail);
+    window.addEventListener(MOCK_APPEARANCE_EVENT, listener);
+    return () => window.removeEventListener(MOCK_APPEARANCE_EVENT, listener);
+  }
+  const pending = listen<Appearance>(APPEARANCE_CHANGED_EVENT, (event) => handler(event.payload));
+  return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
+}
+
 export const api = {
   snapshot: () => call<AppSnapshot>("app_snapshot"),
   createVault: (password: string) => call<AppSnapshot>("create_vault", { password }),
@@ -189,6 +228,14 @@ export const api = {
   stopSharing: () => call<AppSnapshot>("stop_sharing"),
   resetVault: (password: string) => call<AppSnapshot>("reset_vault", { password }),
   showMainWindow: () => call<void>("show_main_window"),
+  hideMainWindow: () => call<void>("hide_main_window"),
+  quickSearchStatus: () => call<QuickSearchStatus>("quick_search_status"),
+  setQuickSearch: (enabled: boolean, preset?: string) => call<QuickSearchStatus>("set_quick_search", { enabled, preset: preset ?? null }),
+  takeQuickSearchRequest: () => call<boolean>("take_quick_search_request"),
+  /** Works while the vault is locked. */
+  getAppearance: () => call<Appearance>("get_appearance"),
+  /** Saves the choice on this PC and sends it to the group once every device can read it. */
+  setAppearance: (accent: string, surface: string) => call<Appearance>("set_appearance", { accent, surface }),
   closeUnlockPrompt: () => call<void>("close_unlock_prompt"),
   pendingCardCode: () => call<CardCodeRequest | null>("pending_card_code"),
   approveCardCode: (id: string, password?: string) => call<void>("approve_card_code", { id, password: password ?? null }),

@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod appearance;
 pub mod browser;
 pub mod browser_ipc;
 mod browser_setup;
@@ -26,6 +27,7 @@ pub mod photo_blobs;
 pub mod portable_backup;
 pub mod progress;
 pub mod protocol;
+pub mod quick_search;
 pub mod snapshot;
 pub mod snapshot_import;
 mod store_build;
@@ -1570,32 +1572,28 @@ async fn hello_available() -> bool {
 #[tauri::command]
 async fn enable_hello(
     password: String,
-    window: tauri::WebviewWindow,
     state: State<'_, ManagedState>,
 ) -> Result<AppSnapshot, String> {
-    let hwnd = window
-        .hwnd()
-        .map_err(|_| "Windows Hello needs an app window")?
-        .0 as isize;
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut password = Zeroizing::new(password);
-        {
+        let key = {
             let app = state.lock().map_err(|_| "Vault state is unavailable")?;
-            if app.unlocked.is_none() {
-                return Err("Unlock the vault first".to_owned());
-            }
+            let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
             app.store
                 .verify_password(&password)
                 .map_err(public_vault_error)?;
-        }
+            Zeroizing::new(*vault.key_for_hello())
+        };
         password.zeroize();
-        hello::verify(windows::Win32::Foundation::HWND(hwnd as *mut _))?;
+        // The Hello prompts run without the vault lock held.
+        let sealed = hello::enroll(&key)?;
         let app = state.lock().map_err(|_| "Vault state is unavailable")?;
         let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
-        app.store
-            .enable_hello(vault.key_for_hello())
-            .map_err(public_vault_error)?;
+        if *vault.key_for_hello() != *key {
+            return Err("The vault changed while Windows Hello was open. Try again.".to_owned());
+        }
+        app.store.enable_hello(&sealed).map_err(public_vault_error)?;
         activity::log(Level::Success, Category::Security, "Windows Hello unlock turned on");
         app.snapshot()
     })
@@ -1617,27 +1615,42 @@ async fn unlock_hello(
     let state = state.inner().clone();
     let browser = browser.inner().clone();
     let snapshot = tauri::async_runtime::spawn_blocking(move || -> Result<AppSnapshot, String> {
-        {
+        let saved = {
             let app = state.lock().map_err(|_| "Vault state is unavailable")?;
             if !app.store.hello_enabled() {
                 return Err(
                     "Set up Windows Hello after unlocking with your master password".to_owned(),
                 );
             }
-        }
-        hello::verify(windows::Win32::Foundation::HWND(hwnd as *mut _)).inspect_err(|_| {
+            app.store.hello_file().map_err(public_vault_error)?
+        };
+        let failed = |_: &String| {
             activity::log(Level::Warning, Category::Security, "Windows Hello unlock failed");
-        })?;
+        };
+        // The Hello prompts run without the vault lock held.
+        let legacy = hello::is_legacy(&saved);
+        let key = if legacy {
+            // Legacy path (DPAPI-only file from Nuvori 2.2.3 and earlier): consent prompt, then
+            // DPAPI, once. The file is saved again in the Hello-bound format below. Remove this
+            // branch in a later release.
+            hello::verify(windows::Win32::Foundation::HWND(hwnd as *mut _)).inspect_err(failed)?;
+            hello::open_legacy(&saved).inspect_err(failed)?
+        } else {
+            hello::unseal(&saved).inspect_err(failed)?
+        };
         let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
-        let vault = app.store.unlock_hello().map_err(|error| {
+        let vault = app.store.unlock_hello(&key).map_err(|error| {
             activity::log(Level::Warning, Category::Security, "Windows Hello unlock failed");
             public_vault_error(error)
         })?;
         app.unlocked = Some(vault);
         let snapshot = app.snapshot()?;
         drop(app);
-        browser.set_provider(Some(Arc::new(VaultBrowserProvider { state })));
+        browser.set_provider(Some(Arc::new(VaultBrowserProvider { state: state.clone() })));
         activity::log(Level::Success, Category::Vault, "Vault unlocked with Windows Hello");
+        if legacy {
+            upgrade_legacy_hello(&state, &key, &saved);
+        }
         Ok(snapshot)
     })
     .await
@@ -1646,15 +1659,53 @@ async fn unlock_hello(
     Ok(snapshot)
 }
 
-#[tauri::command]
-fn disable_hello(state: State<'_, ManagedState>) -> Result<AppSnapshot, String> {
-    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
-    if app.unlocked.is_none() {
-        return Err("Unlock the vault first".to_owned());
+/// Saves a legacy (DPAPI-only) Hello unlock again in the Hello-bound format. This shows one more
+/// Hello prompt. On cancel or error the legacy file stays, and the next Hello unlock tries again.
+// Remove together with the legacy branch of `unlock_hello` in a later release.
+fn upgrade_legacy_hello(state: &ManagedState, key: &[u8; 32], legacy: &[u8]) {
+    let result = hello::enroll(key).and_then(|sealed| {
+        let app = state.lock().map_err(|_| "Vault state is unavailable".to_owned())?;
+        // Skip if Hello was turned off or set up again while the prompt was open.
+        if app.store.hello_file().ok().as_deref() != Some(legacy) {
+            return Ok(());
+        }
+        app.store.enable_hello(&sealed).map_err(public_vault_error)
+    });
+    match result {
+        Ok(()) => activity::log(
+            Level::Success,
+            Category::Security,
+            "Windows Hello unlock now uses a Windows Hello key",
+        ),
+        Err(error) => activity::diagnostic(
+            Category::Security,
+            "Windows Hello unlock upgrade will be tried again at the next Hello unlock",
+            error,
+        ),
     }
-    app.store.disable_hello().map_err(public_vault_error)?;
-    activity::log(Level::Info, Category::Security, "Windows Hello unlock turned off");
-    app.snapshot()
+}
+
+#[tauri::command]
+async fn disable_hello(state: State<'_, ManagedState>) -> Result<AppSnapshot, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snapshot = {
+            let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+            if app.unlocked.is_none() {
+                return Err("Unlock the vault first".to_owned());
+            }
+            app.store.disable_hello().map_err(public_vault_error)?;
+            activity::log(Level::Info, Category::Security, "Windows Hello unlock turned off");
+            app.snapshot()?
+        };
+        // The file is gone, so the Hello key alone opens nothing; a failure here is only logged.
+        if let Err(error) = hello::delete_credential() {
+            activity::diagnostic(Category::Security, "Windows Hello key cleanup failed", error);
+        }
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|_| "Windows Hello setup stopped unexpectedly".to_owned())?
 }
 
 #[tauri::command]
@@ -2109,6 +2160,53 @@ fn public_vault_error(error: VaultError) -> String {
     }
 }
 
+// Synced appearance commands. The rules live in `appearance.rs`.
+
+/// Works while the vault is locked: the unlock screen uses it.
+#[tauri::command]
+fn get_appearance() -> Result<appearance::View, String> {
+    appearance::installed().map(appearance::AppearanceStore::view).ok_or_else(|| "Appearance is unavailable".to_owned())
+}
+
+#[tauri::command]
+async fn set_appearance(accent: String, surface: String, state: State<'_, ManagedState>) -> Result<appearance::View, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || appearance::set_from_ui(&state, &accent, &surface))
+        .await
+        .map_err(|_| "The appearance could not be saved".to_owned())?
+}
+
+// Quick search shortcut commands. The shortcut itself lives in `quick_search.rs`.
+
+#[tauri::command]
+fn quick_search_status(search: State<'_, quick_search::QuickSearch>) -> quick_search::Status {
+    search.status()
+}
+
+#[tauri::command]
+fn set_quick_search(
+    app: AppHandle,
+    search: State<'_, quick_search::QuickSearch>,
+    enabled: bool,
+    preset: Option<String>,
+) -> Result<quick_search::Status, String> {
+    search.change(&app, enabled, preset.as_deref())
+}
+
+/// The unlocked main window asks whether the shortcut was pressed recently. Answers yes once.
+#[tauri::command]
+fn take_quick_search_request(search: State<'_, quick_search::QuickSearch>) -> bool {
+    search.take_request()
+}
+
+/// Hides the main window to the tray (the shortcut pressed again while the palette is open).
+#[tauri::command]
+fn hide_main_window(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(desktop::MAIN_WINDOW) {
+        let _ = window.hide();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let background = desktop::background_launch();
@@ -2129,6 +2227,7 @@ pub fn run() {
         return;
     };
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
             let directory = app.path().app_data_dir()?;
             if passkey_plugin::storage_is_redirected(&directory) {
@@ -2163,11 +2262,20 @@ pub fn run() {
                 },
             }));
             app.manage(Arc::new(Mutex::new(AppState {
-                store: VaultStore::new(directory),
+                store: VaultStore::new(directory.clone()),
                 unlocked: None,
             })));
             app.manage(Arc::new(BrowserIpcServer::start()?));
             app.manage(Arc::new(SyncController::default()));
+            app.manage(quick_search::QuickSearch::new(directory.clone()));
+            app.state::<quick_search::QuickSearch>().apply(app.handle());
+            let handle = app.handle().clone();
+            appearance::install(appearance::AppearanceStore::with_notify(&directory, move |view| {
+                let _ = handle.emit(appearance::EVENT, view);
+            }));
+            browser_ipc::set_appearance_source(|| {
+                appearance::installed().map(|store| { let stored = store.load(); (stored.accent, stored.surface) }).unwrap_or_default()
+            });
             start_lan_listener(app.state::<ManagedState>().inner().clone(), app.state::<Arc<PairingController>>().inner().clone(), app.state::<Arc<SyncController>>().inner().clone());
             start_background_sync(app.state::<ManagedState>().inner().clone(), app.state::<Arc<PairingController>>().inner().clone(), app.state::<Arc<SyncController>>().inner().clone());
             let handle = app.handle().clone();
@@ -2255,6 +2363,12 @@ pub fn run() {
             leave_group,
             dismiss_removed_notice,
             show_main_window,
+            quick_search_status,
+            set_quick_search,
+            take_quick_search_request,
+            get_appearance,
+            set_appearance,
+            hide_main_window,
             close_unlock_prompt,
             pending_card_code,
             approve_card_code,

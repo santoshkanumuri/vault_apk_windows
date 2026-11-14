@@ -206,6 +206,33 @@
 
   const SURFACES = [];
 
+  // Accent and background chosen in the desktop app (cached by the background script).
+  // Only validated ids from chrome.storage.local pick entries of the bundled palette.
+  const PALETTE = typeof NuvoriAppearancePalette === "object" ? NuvoriAppearancePalette : null;
+  let appearance = null;
+  const painters = new Set();
+  const isDark = (theme) => theme === "dark" || (theme !== "light" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
+  function paintAppearance(frame, theme) {
+    if (!PALETTE) return;
+    const accent = PALETTE.accents[appearance?.accent] || PALETTE.accents[PALETTE.defaults.accent];
+    const surface = PALETTE.surfaces[appearance?.surface] || PALETTE.surfaces[PALETTE.defaults.surface];
+    const mode = isDark(theme) ? "dark" : "light";
+    const a = accent[mode];
+    const b = surface[mode];
+    // The in-page panel uses the container color as its background, like before.
+    const vars = { "--primary": a.primary, "--on-primary": a.onPrimary, "--pc": a.primaryContainer, "--opc": a.onPrimaryContainer,
+      "--bg": b.container, "--surface2": b.containerHighest, "--hover": b.hover, "--text": b.text, "--muted": b.muted, "--hairline": b.hairline };
+    for (const [name, value] of Object.entries(vars)) frame.style.setProperty(name, value);
+  }
+  try {
+    chrome.storage?.local?.get("appearance").then((saved) => { appearance = saved?.appearance ?? null; for (const paint of painters) paint(); }).catch(() => {});
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local" || !changes.appearance) return;
+      appearance = changes.appearance.newValue ?? null;
+      for (const paint of painters) paint();
+    });
+  } catch { /* The default colors stay. */ }
+
   function createSurface(label) {
     const host = DOM.createElement.call(doc, "div");
     const root = host.attachShadow({ mode: "closed" });
@@ -248,10 +275,11 @@
       if (!event.relatedTarget || !frame.contains(event.relatedTarget)) focusInside = false;
     });
 
+    const paint = () => paintAppearance(frame, frame.getAttribute("data-theme"));
     const surface = {
       host, frame, label,
       get shown() { return shown && host.isConnected; },
-      setTheme(theme) { frame.setAttribute("data-theme", ["light", "dark"].includes(theme) ? theme : "system"); },
+      setTheme(theme) { frame.setAttribute("data-theme", ["light", "dark"].includes(theme) ? theme : "system"); paint(); },
       place(css) {
         if (css === placement) return;
         placement = css;
@@ -269,6 +297,8 @@
       show() {
         if (!host.isConnected) docRoot().append(host);
         repair();
+        painters.add(paint);
+        paint();
         if (!shown) {
           shown = true;
           shownAt = now();
@@ -283,6 +313,7 @@
       },
       hide() {
         if (!shown) return;
+        painters.delete(paint);
         shown = false;
         shownAt = Infinity;
         unobscured = false;

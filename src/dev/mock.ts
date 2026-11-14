@@ -1,7 +1,8 @@
 // Development-only stand-in for the Tauri backend so the UI can be previewed in a plain browser
 // (`npm run dev`, then open http://localhost:1420). Synthetic data only. Never bundled in production:
 // it is reached solely through a branch guarded by `import.meta.env.DEV`.
-import type { ActivityEvent, AppSnapshot, BrowserStatus, BuildStatus, CloudStatus, EntryPhoto, LocalNote, MembershipStatus, PairingStatus, PasskeySummary, SyncConflict, SyncStatus, VaultEntry, VaultGroup } from "../lib/api";
+import type { ActivityEvent, Appearance, AppSnapshot, BrowserStatus, BuildStatus, CloudStatus, EntryPhoto, LocalNote, MembershipStatus, PairingStatus, PasskeySummary, QuickSearchStatus, SyncConflict, SyncStatus, VaultEntry, VaultGroup } from "../lib/api";
+import { MOCK_APPEARANCE_EVENT } from "../lib/api";
 
 const now = Date.now();
 const minutes = (n: number) => now - n * 60_000;
@@ -17,6 +18,8 @@ const entry = (draft: Draft, age: number): VaultEntry => ({
 const state = {
   vault: "locked" as AppSnapshot["vaultState"],
   hello: true,
+  quickSearch: { enabled: true, preset: "ctrl-shift-space" },
+  appearance: { accent: "green", surface: "sage", pendingSync: false } as Appearance,
   enrolled: true,
   revision: 1,
   entries: [
@@ -79,7 +82,22 @@ function snapshot(): AppSnapshot {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const quickSearchPresets = [{ id: "ctrl-shift-space", label: "Ctrl+Shift+Space" }, { id: "ctrl-alt-n", label: "Ctrl+Alt+N" }, { id: "ctrl-shift-l", label: "Ctrl+Shift+L" }];
+const quickSearch = (): QuickSearchStatus => {
+  const preset = quickSearchPresets.find((item) => item.id === state.quickSearch.preset) ?? quickSearchPresets[0];
+  return { enabled: state.quickSearch.enabled, preset: preset.id, shortcut: preset.label, state: state.quickSearch.enabled ? "active" : "off", presets: quickSearchPresets };
+};
 const requireUnlocked = () => { if (state.vault !== "unlocked") throw "Unlock the vault first"; };
+const appearanceId = /^[a-z][a-z0-9-]{0,31}$/;
+/** Like the backend: saves the choice as pending, then "sends" it when unlocked and in a group. */
+const setAppearance = (accent: unknown, surface: unknown): Appearance => {
+  if (typeof accent !== "string" || typeof surface !== "string" || !appearanceId.test(accent) || !appearanceId.test(surface)) {
+    throw "Unknown accent or background";
+  }
+  state.appearance = { accent, surface, pendingSync: !(state.vault === "unlocked" && state.enrolled) };
+  window.dispatchEvent(new CustomEvent<Appearance>(MOCK_APPEARANCE_EVENT, { detail: { ...state.appearance } }));
+  return { ...state.appearance };
+};
 
 export async function mockInvoke(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
   await delay(command.startsWith("list") || command.endsWith("status") || command === "app_snapshot" ? 30 : 250);
@@ -95,7 +113,14 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "lock_vault": state.vault = "locked"; log("info", "vault", "Vault locked"); return snapshot();
     case "stop_sharing": state.enrolled = false; log("info", "pairing", "Stopped sharing"); return snapshot();
     case "reset_vault": state.vault = "notConfigured"; state.enrolled = false; return snapshot();
-    case "show_main_window": case "close_unlock_prompt": case "approve_card_code": case "decline_card_code": return null;
+    case "quick_search_status": return quickSearch();
+    case "set_quick_search":
+      state.quickSearch = { enabled: args.enabled === true, preset: typeof args.preset === "string" ? args.preset : state.quickSearch.preset };
+      return quickSearch();
+    case "take_quick_search_request": return false;
+    case "get_appearance": return { ...state.appearance };
+    case "set_appearance": return setAppearance(args.accent, args.surface);
+    case "hide_main_window": case "show_main_window": case "close_unlock_prompt": case "approve_card_code": case "decline_card_code": return null;
     case "pending_card_code": return { id: "preview", title: "Travel card", card: "Visa · •••• 1111 · 12/29", site: "shop.example", helloAvailable: false };
     case "list_entries": requireUnlocked(); return state.entries.map((e) => ({ ...e }));
     case "save_entry": {

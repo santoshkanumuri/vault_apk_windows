@@ -103,6 +103,8 @@ After updating, reload the extension and refresh open pages so the new content s
 
 The extension doesn't intercept WebAuthn. Sites keep using the browser's or the operating system's passkey provider. Any future support must sign only after a click in Nuvori. It must validate the origin and RP ID on Windows and bind a one-use approval to the credential, origin, RP ID and challenge.
 
+The popup and the in-page suggestions use the accent and background chosen in the Nuvori desktop app; the background script caches the ids from each status reply in `chrome.storage.local`.
+
 ## Checks
 
 `npm test` runs the extension tests: background message handlers, field classification, the content script with a fake DOM, and the popup. Run `npm run build` and `cargo test --manifest-path src-tauri/Cargo.toml` from the project root for the app.

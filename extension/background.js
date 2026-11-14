@@ -111,8 +111,21 @@ function cleanTitle(value) {
 
 let featureCache = null;
 
+// The desktop's accent and background ids ride on "status" responses; cache valid ones for the popup and pages.
+const APPEARANCE_ID = /^[a-z][a-z0-9-]{0,31}$/;
+
+async function noteAppearance(response) {
+  const value = response?.appearance;
+  if (!value || typeof value.accent !== "string" || typeof value.surface !== "string"
+    || !APPEARANCE_ID.test(value.accent) || !APPEARANCE_ID.test(value.surface)) return;
+  const saved = (await chrome.storage.local.get("appearance")).appearance;
+  if (saved?.accent === value.accent && saved?.surface === value.surface) return;
+  await chrome.storage.local.set({ appearance: { accent: value.accent, surface: value.surface } });
+}
+
 async function noteFeatures(response) {
   if (!["ok", "locked", "desktop_unavailable"].includes(response?.status)) return;
+  await noteAppearance(response).catch(() => {});
   const list = Array.isArray(response.features) ? response.features.filter((entry) => typeof entry === "string").slice(0, 32) : [];
   featureCache = { list, at: Date.now() };
   await chrome.storage.session?.set({ [FEATURES_KEY]: featureCache });

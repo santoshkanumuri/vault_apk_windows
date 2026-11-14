@@ -129,6 +129,8 @@ impl ChangeStore {
                  PRIMARY KEY (vault_id, peer_device_id)
              );",
         )?;
+        // Device-only: what each member last announced (the appearance write gate reads it).
+        connection.execute_batch(crate::appearance::PEER_FEATURES_SCHEMA)?;
         Ok(())
     }
 

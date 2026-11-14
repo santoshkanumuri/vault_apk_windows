@@ -321,6 +321,23 @@ impl SelectionGrants {
     }
 }
 
+/// Supplies the vault's (accent, background) ids; set by the app, absent in the native host.
+type AppearanceSource = Box<dyn Fn() -> (String, String) + Send + Sync>;
+static APPEARANCE_SOURCE: OnceLock<AppearanceSource> = OnceLock::new();
+
+pub fn set_appearance_source(source: impl Fn() -> (String, String) + Send + Sync + 'static) {
+    let _ = APPEARANCE_SOURCE.set(Box::new(source));
+}
+
+/// Adds the vault's accent and background ids to a status response (readable while locked).
+fn with_appearance(mut response: BrowserResponse) -> BrowserResponse {
+    response.appearance = APPEARANCE_SOURCE.get().map(|source| {
+        let (accent, surface) = source();
+        crate::browser::BrowserAppearance { accent, surface }
+    });
+    response
+}
+
 /// Native messaging host manifests checked by `browser_status` (HKCU, default value).
 pub const NATIVE_HOST_KEYS: [(&str, &str); 3] = [
     ("chrome", r"Software\Google\Chrome\NativeMessagingHosts\com.nuvori.desktop"),
@@ -885,11 +902,11 @@ fn handle_request(
         .clone();
     let Some(provider) = provider else {
         let locked = locked_response(request.request_id);
-        return Ok(if status_ping { locked.with_features() } else { locked });
+        return Ok(if status_ping { with_appearance(locked.with_features()) } else { locked });
     };
 
     match request.action {
-        BrowserAction::Status => Ok(ok_response(request.request_id, None, None).with_features()),
+        BrowserAction::Status => Ok(with_appearance(ok_response(request.request_id, None, None).with_features())),
         // Answered above, before the vault is consulted.
         BrowserAction::UnlockPrompt | BrowserAction::ShowApp => Ok(ok_response(request.request_id, None, None)),
         BrowserAction::QueryCredentials => {
@@ -951,7 +968,7 @@ fn handle_request(
                     message: "Choose the account again; this selection expired.".to_owned(),
                     credentials: None,
                     credential: None,
-                    sealed_login: None, features: None, item: None,
+                    sealed_login: None, features: None, appearance: None, item: None,
                 });
             }
             let selected = match provider.load_selected_credential(&record_id, &origin) {
@@ -970,7 +987,7 @@ fn handle_request(
                         .to_owned(),
                     credentials: None,
                     credential: None,
-                    sealed_login: None, features: None, item: None,
+                    sealed_login: None, features: None, appearance: None, item: None,
                 });
             };
             if credential.id != record_id {
@@ -1021,7 +1038,7 @@ fn handle_request(
             }
             let status_response = |request_id: String, status: &str, message: &str| BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id, status: status.to_owned(), message: message.to_owned(),
-                credentials: None, credential: None, sealed_login: None, features: None, item: None,
+                credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
             };
             let expired = "Choose the item again; this selection expired.";
             match request.action {
@@ -1098,7 +1115,7 @@ fn handle_request(
                 return Ok(BrowserResponse {
                     version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                     status: "rate_limited".into(), message: "Too many checks for this site. Try again in a minute.".into(),
-                    credentials: None, credential: None, sealed_login: None, features: None, item: None,
+                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
                 });
             }
             let bytes = URL_SAFE_NO_PAD.decode(sealed).map_err(|_| BrowserIpcError::InvalidRequest)?;
@@ -1125,7 +1142,7 @@ fn handle_request(
             };
             Ok(BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id, status: status.to_owned(),
-                message: message.to_owned(), credentials: None, credential: None, sealed_login: None, features: None, item: None,
+                message: message.to_owned(), credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
             })
         }
         BrowserAction::CommitLogin | BrowserAction::UpdateLogin | BrowserAction::ReviewLogin => {
@@ -1139,7 +1156,7 @@ fn handle_request(
                     version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                     status: "rate_limited".into(),
                     message: "Too many login checks for this site. Try again in a minute.".into(),
-                    credentials: None, credential: None, sealed_login: None, features: None, item: None,
+                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
                 });
             }
             let committing = !updating && !reviewing;
@@ -1174,7 +1191,7 @@ fn handle_request(
                 let Some(expected) = expected else {
                     return Ok(BrowserResponse { version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                         status: "selection_expired".into(), message: "Review this update again; its approval expired.".into(),
-                        credentials: None, credential: None, sealed_login: None, features: None, item: None, });
+                        credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, });
                 };
                 provider.update_login(&origin, &id, &pending.username, &pending.password, &expected).map(|_| true)
             } else if reviewing { provider.review_login(&origin, &pending.username, &pending.password) }
@@ -1215,7 +1232,7 @@ fn handle_request(
             Ok(BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                 status: status.to_owned(), message: message.to_owned(),
-                credentials, credential: None, sealed_login: None, features: None, item: None,
+                credentials, credential: None, sealed_login: None, features: None, appearance: None, item: None,
             })
         }
     }
@@ -1230,7 +1247,7 @@ fn locked_response(request_id: String) -> BrowserResponse {
         credentials: None,
         credential: None,
         sealed_login: None,
-        features: None, item: None,
+        features: None, appearance: None, item: None,
     }
 }
 
@@ -1247,7 +1264,7 @@ fn ok_response(
         credentials,
         credential,
         sealed_login: None,
-        features: None, item: None,
+        features: None, appearance: None, item: None,
     }
 }
 

@@ -275,9 +275,15 @@ struct Context {
 
 fn load(state: &ManagedState) -> Result<Context> {
     let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
-    let local = app.store.identity_store().get_or_create().map_err(|_| "Device identity unavailable")?;
+    let identity_store = app.store.identity_store();
+    let local = identity_store.get_or_create().map_err(|_| "Device identity unavailable")?;
     let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
     let _ = vault.publish_unsynced_photos();
+    // A waiting appearance choice is written now if the gate is open, and uploaded in this pass.
+    // Drive files carry no handshake, so a Drive pass never records peer features: the gate opens
+    // only from what members announced over Wi-Fi. Uploads are a broadcast mailbox and cannot be
+    // filtered per reader; the gate is what keeps appearance changes away from older builds.
+    crate::appearance::flush_installed(vault, &identity_store);
     let revision = u64::from(vault.local_change_count().map_err(storage_error)?);
     let blobs = vault.photo_blobs();
     let db = vault.connection();

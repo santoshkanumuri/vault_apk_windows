@@ -1,0 +1,106 @@
+{
+  "format": "nuvori-sync-appearance-vectors",
+  "version": 1,
+  "feature": "appearance-v1",
+  "entityType": "appearance",
+  "entityId": "vault",
+  "contentKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "vaultId": "vault-appearance-test",
+  "mutationId": "6f1c2a7e-3b9d-4f4e-9a51-0c2d8e7f1a20",
+  "aad": "nuvori-sync-appearance-v1:vault-appearance-test:6f1c2a7e-3b9d-4f4e-9a51-0c2d8e7f1a20:vault",
+  "idPattern": "^[a-z][a-z0-9-]{0,31}$",
+  "cases": [
+    {
+      "name": "known ids",
+      "plaintext": "{\"appearance\":{\"accent\":\"blue\",\"surface\":\"slate\"}}",
+      "payloadCiphertext": "3aXxeq2iiL_rZ1L6BAcuYiMEK0f-yJRm7HBDLRFMPa3fN6G36RIorjKGzMac5OaTlP2FOynN4HosUx0gGe8p27M9",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "expected": {
+        "accent": "blue",
+        "surface": "slate"
+      }
+    },
+    {
+      "name": "unknown ids from a newer palette are kept",
+      "plaintext": "{\"appearance\":{\"accent\":\"ultraviolet\",\"surface\":\"aurora-2\"},\"extra\":1}",
+      "payloadCiphertext": "3aXxeq2iiL_rZ1L6BAcuYiMEK0f-yJRm7GdDLAYPZ-bDLralql1v_33W2cue9aGLy-HyTcXthoYsEoPqgXLgvgnPfn7f0hgQ5sr_8r-966TMQxBEf5c",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "expected": {
+        "accent": "ultraviolet",
+        "surface": "aurora-2"
+      }
+    },
+    {
+      "name": "invalid id is rejected",
+      "plaintext": "{\"appearance\":{\"accent\":\"Blue!\",\"surface\":\"slate\"}}",
+      "payloadCiphertext": "3aXxeq2iiL_rZ1L6BAcuYiMEK0f-yJRm7FBDLRFPM6OOMaaj7hAu6SqendmR8ffUy_36W3fQBiHQL5sHaDZo16xyuw",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "expected": null
+    }
+  ],
+  "lastWriterWins": [
+    {
+      "current": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "aaaa"
+      },
+      "incoming": {
+        "at": "2026-11-13T10:00:01Z",
+        "device": "aaaa"
+      },
+      "incomingWins": true
+    },
+    {
+      "current": {
+        "at": "2026-11-13T10:00:01Z",
+        "device": "aaaa"
+      },
+      "incoming": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "zzzz"
+      },
+      "incomingWins": false
+    },
+    {
+      "current": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "aaaa"
+      },
+      "incoming": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "bbbb"
+      },
+      "incomingWins": true
+    },
+    {
+      "current": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "bbbb"
+      },
+      "incoming": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "aaaa"
+      },
+      "incomingWins": false
+    },
+    {
+      "current": {
+        "at": "2026-11-13T10:00:00.500Z",
+        "device": "aaaa"
+      },
+      "incoming": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "zzzz"
+      },
+      "incomingWins": false
+    },
+    {
+      "current": null,
+      "incoming": {
+        "at": "2026-11-13T10:00:00Z",
+        "device": "aaaa"
+      },
+      "incomingWins": true
+    }
+  ]
+}

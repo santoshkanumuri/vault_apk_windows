@@ -109,9 +109,19 @@ impl VaultStore {
         self.is_initialized() && self.directory.join(HELLO_FILE).exists()
     }
 
-    pub fn enable_hello(&self, key: &[u8; 32]) -> Result<(), VaultError> {
-        let wrapped = hello::protect(key).map_err(VaultError::Hello)?;
-        fs::write(self.directory.join(HELLO_FILE), wrapped)?;
+    /// The saved Windows Hello unlock, as `hello::seal` made it (or a legacy DPAPI-only file).
+    pub fn hello_file(&self) -> Result<Vec<u8>, VaultError> {
+        Ok(fs::read(self.directory.join(HELLO_FILE))?)
+    }
+
+    /// Saves a Windows Hello unlock made by `hello::seal`.
+    pub fn enable_hello(&self, sealed: &[u8]) -> Result<(), VaultError> {
+        if hello::is_legacy(sealed) {
+            return Err(VaultError::Hello(
+                "Windows Hello could not protect the vault key".to_owned(),
+            ));
+        }
+        fs::write(self.directory.join(HELLO_FILE), sealed)?;
         Ok(())
     }
 
@@ -123,10 +133,9 @@ impl VaultStore {
         Ok(())
     }
 
-    pub fn unlock_hello(&self) -> Result<UnlockedVault, VaultError> {
-        let wrapped = fs::read(self.directory.join(HELLO_FILE))?;
-        let key = Zeroizing::new(hello::unprotect(&wrapped).map_err(VaultError::Hello)?);
-        self.open_with_key(&key)
+    /// Opens the vault with a key that `hello::unseal` (or the legacy reader) returned.
+    pub fn unlock_hello(&self, key: &[u8; 32]) -> Result<UnlockedVault, VaultError> {
+        self.open_with_key(key)
     }
 
     pub fn verify_password(&self, password: &str) -> Result<(), VaultError> {
@@ -2824,19 +2833,49 @@ mod tests {
         vault
             .save_note(None, "Hello note", "Still encrypted", None)
             .unwrap();
-        store.enable_hello(vault.key_for_hello()).unwrap();
+        // A stand-in signer replaces the Windows Hello prompt; the file format and DPAPI are real.
+        let sealed = hello::seal(vault.key_for_hello(), hello::test_signer(1)).unwrap();
+        store.enable_hello(&sealed).unwrap();
         assert!(store.hello_enabled());
         drop(vault);
-        let reopened = store.unlock_hello().unwrap();
+        let key = hello::open(&store.hello_file().unwrap(), hello::test_signer(1)).unwrap();
+        let reopened = store.unlock_hello(&key).unwrap();
         assert_eq!(reopened.list_notes().unwrap()[0].body, "Still encrypted");
         drop(reopened);
+        // A different Hello key cannot open the file, and the vault stays intact.
+        assert!(hello::open(&store.hello_file().unwrap(), hello::test_signer(2)).is_err());
+        assert!(store.is_initialized() && store.hello_enabled());
         store.disable_hello().unwrap();
         assert!(!store.hello_enabled());
         let vault = store.unlock("twelve-character-password").unwrap();
-        store.enable_hello(vault.key_for_hello()).unwrap();
+        let sealed = hello::seal(vault.key_for_hello(), hello::test_signer(1)).unwrap();
+        store.enable_hello(&sealed).unwrap();
         drop(vault);
         store.reset_files().unwrap();
         assert!(!store.hello_enabled());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn legacy_hello_file_opens_once_and_is_replaced() {
+        let directory = std::env::temp_dir().join(format!("nuvori-hello-legacy-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let vault = store.create("twelve-character-password").unwrap();
+        let key = Zeroizing::new(*vault.key_for_hello());
+        drop(vault);
+        // A file from Nuvori 2.2.3 and earlier: the vault key under DPAPI only.
+        fs::write(directory.join(HELLO_FILE), hello::protect_legacy_for_test(&key)).unwrap();
+        assert!(store.hello_enabled());
+        let saved = store.hello_file().unwrap();
+        assert!(hello::is_legacy(&saved));
+        assert!(store.enable_hello(&saved).is_err(), "a legacy file is never saved again");
+        let legacy_key = hello::open_legacy(&saved).unwrap();
+        drop(store.unlock_hello(&legacy_key).unwrap());
+        // The upgrade the unlock command performs right after.
+        store.enable_hello(&hello::seal(&legacy_key, hello::test_signer(1)).unwrap()).unwrap();
+        let upgraded = store.hello_file().unwrap();
+        assert!(!hello::is_legacy(&upgraded));
+        assert_eq!(*hello::open(&upgraded, hello::test_signer(1)).unwrap(), *key);
         fs::remove_dir_all(directory).unwrap();
     }
 

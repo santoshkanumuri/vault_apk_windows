@@ -1,6 +1,6 @@
 # Nuvori for Windows
 
-Nuvori for Windows is the desktop companion for the Android vault. Version 2.2.3 uses Tauri 2, React, TypeScript, and Rust. See [release notes](docs/RELEASE-2.2.3.md).
+Nuvori for Windows is the desktop companion for the Android vault. Version 2.2.4 uses Tauri 2, React, TypeScript, and Rust. See [release notes](docs/RELEASE-2.2.4.md).
 
 This repository is still in development. The desktop app creates, unlocks, and locks a SQLCipher vault. It can create, edit, and delete cards, logins, authenticator codes, security questions, contact autofill profiles, notes, and folders. It can add, view, and delete local entry photos, and list and delete stored passkeys. Each local entry change commits an Android-compatible encrypted, signed operation and device head in the same database transaction. Existing local notes are added to that history once on unlock. Rust can verify and durably stage bounded batches of signed incoming changes, and apply received entries, folders, and passkeys after authentication. Windows accepts the managing Android phone's QR through a PC camera or its copied setup link. When the PC cannot reach the phone, Windows can show a QR for the managing phone to scan and then accept the phone's connection. Both paths verify the pairing code and master password, ask for matching-code approval, and import the encrypted vault copy while preserving existing Windows items. The new reverse connection path needs a live phone-to-PC test. Paired devices can exchange later edits over an authenticated LAN connection. Windows supports automatic discovery, incoming and outgoing sync, photo transfer, and conflict review while the vault is unlocked. A group supports six mobile devices and two Windows PCs. Separate physical computers and phones still need a full network test.
 
@@ -16,7 +16,23 @@ The extension also fills cards, addresses and authenticator codes, and offers to
 
 Nuvori keeps running in the Windows tray when you close its window, so browser filling keeps working. Use the tray icon to open Nuvori, lock the vault, or quit. When the browser starts, the extension asks Nuvori to show a small **Unlock Nuvori** window. If Nuvori isn't running, the browser host starts it in the background (`nuvori.exe --background`) with only that window. Starting Nuvori again while it runs brings the existing window forward instead of opening a second copy.
 
-Windows Hello is optional. Unlock with the master password, then open More and confirm that password once to enable Hello. Later unlocks can use the Windows PIN, face, or fingerprint. The master password remains the recovery path. Windows protects a copy of the vault key for the signed-in Windows account using DPAPI, and the app asks Windows Hello before opening that copy. This is a convenience unlock: another process already running as the same Windows user may be able to decrypt the DPAPI copy without the app's Hello prompt. Turn off Hello in More to remove that copy. Reset vault removes it too.
+Press **Ctrl+Shift+Space** in any Windows app to open Nuvori's search from the tray (Ctrl+K inside the app does the same). A locked vault shows the unlock screen first, and the search opens after you unlock within a minute. The shortcut never unlocks, copies, or types anything by itself. Change the key (Ctrl+Alt+N or Ctrl+Shift+L) or turn it off in **Settings > Security > Quick search shortcut**; Settings shows "In use by another app" if Windows already gave the key to another program.
+
+Windows Hello is optional. Unlock with the master password, then open More and confirm that password once to enable Hello. Later unlocks can use the Windows PIN, face, or fingerprint. The master password remains the recovery path, and it never depends on Hello.
+
+How the Hello copy of the vault key is protected:
+
+- Enabling Hello creates a Windows Hello key named "Nuvori vault unlock" (`KeyCredentialManager`). Its private key stays inside Windows Hello, and Windows uses it only after your PIN, face, or fingerprint.
+- Nuvori asks that key to sign a random challenge. The key-encryption key is HKDF-SHA256 of the signature. AES-256-GCM encrypts the vault key under it.
+- DPAPI wraps the result for the signed-in Windows account as a second layer (`hello-unlock-v1.bin`, format 2).
+- So another program that runs as the same Windows user can remove the DPAPI layer, but it cannot open the vault key without a Hello gesture.
+- If Windows Hello is reset or the Hello key changes, Hello unlock stops with a message. Unlock with the master password, then turn Hello off and on again in More.
+
+Nuvori 2.2.3 and earlier saved the vault key under DPAPI only. On the first Hello unlock after the update, Nuvori opens that old copy once and saves it again in the new format. Windows can show one extra Hello prompt for this. If you cancel it, the old copy stays and Nuvori tries again at the next Hello unlock.
+
+Turn off Hello in More to remove the copy and the Hello key. Reset vault removes the copy too.
+
+Pick an accent color (16) and a background (8) in **Settings > App**. The choice syncs with paired devices that run Nuvori 2.2.4 or newer, and the browser extension follows the colors you pick on the desktop.
 
 ## Why Tauri
 
@@ -29,7 +45,7 @@ React Native for Windows was considered. It makes more sense when the mobile app
 
 ## Install or distribute
 
-Download `Nuvori_2.2.3_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
+Download `Nuvori_2.2.4_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
 
 The browser extension **Nuvori Password Fill** comes from the Chrome Web Store. See [extension/README.md](extension/README.md).
 

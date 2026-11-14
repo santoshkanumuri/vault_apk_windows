@@ -121,7 +121,7 @@ fn unlock_prompt(request: BrowserRequest) -> BrowserResponse {
                 credentials: None,
                 credential: None,
                 sealed_login: None,
-                features: None, item: None,
+                features: None, appearance: None, item: None,
             },
             Err(_) => BrowserResponse::unavailable(request_id),
         },
@@ -281,7 +281,7 @@ fn seal_login(mut request: BrowserRequest) -> Result<BrowserResponse, Box<dyn st
         message: String::new(),
         credentials: None,
         credential: None,
-        sealed_login: Some(sealed), features: None, item: None,
+        sealed_login: Some(sealed), features: None, appearance: None, item: None,
     })
 }
 
@@ -306,7 +306,7 @@ fn seal_details(mut request: BrowserRequest) -> Result<BrowserResponse, Box<dyn 
         message: String::new(),
         credentials: None,
         credential: None,
-        sealed_login: Some(sealed), features: None, item: None,
+        sealed_login: Some(sealed), features: None, appearance: None, item: None,
     })
 }
 

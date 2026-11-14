@@ -273,9 +273,18 @@ pub struct BrowserResponse {
     /// Present on `status` responses only. See `BROWSER_FEATURES`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features: Option<Vec<String>>,
+    /// `status` responses: the vault's accent and background ids, so the extension matches the app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<BrowserAppearance>,
     /// `fill_item` and `fill_cvv`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<FilledItem>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+pub struct BrowserAppearance {
+    pub accent: String,
+    pub surface: String,
 }
 
 impl BrowserResponse {
@@ -288,7 +297,7 @@ impl BrowserResponse {
             credentials: None,
             credential: None,
             sealed_login: None,
-            features: None, item: None,
+            features: None, appearance: None, item: None,
         }
     }
 
@@ -307,7 +316,7 @@ impl BrowserResponse {
             credentials: None,
             credential: None,
             sealed_login: None,
-            features: None, item: None,
+            features: None, appearance: None, item: None,
         }
     }
 }

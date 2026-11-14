@@ -115,6 +115,7 @@ impl PreparedEnrollment {
             &identity,
         )?;
         transaction.commit()?;
+        adopt_appearance(&self.metadata);
         Ok(())
     }
 }
@@ -129,7 +130,29 @@ pub fn commit_empty(
     require_empty(&transaction)?;
     insert_snapshot(&transaction, &metadata, &backup, &present, current_records)?;
     transaction.commit()?;
+    adopt_appearance(&metadata);
     Ok(())
+}
+
+/// The group's appearance change a joining device adopts (`appearance::snapshot_choice`).
+fn appearance_choice(metadata: &VerifiedSnapshotMetadata) -> Option<(&ChangeRecord, String, String)> {
+    let operations: Vec<&ChangeRecord> = metadata
+        .operations
+        .iter()
+        .filter(|operation| operation.entity_type == crate::appearance::ENTITY_TYPE)
+        .collect();
+    crate::appearance::snapshot_choice(&operations, &*metadata.content_key)
+}
+
+/// After the commit: a joining device shows the group's appearance. Best effort: the next
+/// appearance change reaches this device through sync anyway.
+fn adopt_appearance(metadata: &VerifiedSnapshotMetadata) {
+    if let Some(store) = crate::appearance::installed()
+        && let Some((operation, accent, surface)) = appearance_choice(metadata)
+        && let Err(error) = crate::appearance::adopt_from_snapshot(store, operation, accent, surface)
+    {
+        crate::activity::diagnostic(crate::activity::Category::Pairing, "Could not save the group's appearance", error);
+    }
 }
 
 type CurrentRecord<'a> = (&'a SnapshotRecordState, &'a ChangeRecord);
@@ -177,6 +200,14 @@ fn validate_snapshot<'a>(
     let mut current_records = Vec::new();
     for record in &metadata.records {
         let key = (record.entity_type.as_str(), record.entity_id.as_str());
+        if key == (crate::appearance::ENTITY_TYPE, crate::appearance::ENTITY_ID) {
+            // Keep the group's version (it may be a merge of concurrent changes) with the change
+            // that holds its value; the value itself goes to appearance.json after the commit.
+            if let Some((operation, ..)) = appearance_choice(metadata) {
+                current_records.push((record, operation));
+            }
+            continue;
+        }
         if !matches!(key.0, "entry" | "group" | "passkey" | "photo" | "photo_cover") {
             continue;
         }

@@ -11,7 +11,10 @@ pub const RECOVERY_SECRET_BITS: u16 = 256;
 /// accepts a REMOVE that names the removed device's last change, and accepts that device's
 /// changes up to it.
 pub const REMOVAL_CUTOFF_FEATURE: &str = "removal-cutoff-v1";
-pub const SYNC_FEATURES: [&str; 1] = [REMOVAL_CUTOFF_FEATURE];
+/// Announced by builds that read the synced vault appearance (`appearance.rs`). A build writes an
+/// appearance change only when every other active member announced it.
+pub const APPEARANCE_FEATURE: &str = "appearance-v1";
+pub const SYNC_FEATURES: [&str; 2] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE];
 
 /// `cutoff1:<sequence>:<hash>` in a REMOVE event's subject key field (Android `RemovalCutoff`).
 /// `Ok(None)` for an empty field; `Err` for anything else that is not a valid cutoff.
@@ -179,6 +182,16 @@ impl RecordVersion {
         }
     }
 
+    /// The pointwise maximum of both versions: the smallest version that includes both.
+    pub fn merged(&self, other: &Self) -> Self {
+        let mut counters = self.counters.clone();
+        for (device_id, counter) in &other.counters {
+            let entry = counters.entry(device_id.clone()).or_default();
+            *entry = (*entry).max(*counter);
+        }
+        Self { counters }
+    }
+
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.counters.is_empty() {
             return Err(ProtocolError::EmptyRecordVersion);
@@ -245,6 +258,10 @@ mod tests {
         let right = RecordVersion::from_entries([("device-a", 1), ("device-b", 2)]);
 
         assert_eq!(left.relation_to(&right), VersionRelation::Concurrent);
+        let merged = left.merged(&right);
+        assert_eq!(merged, RecordVersion::from_entries([("device-a", 2), ("device-b", 2)]));
+        assert_eq!(merged.relation_to(&left), VersionRelation::After);
+        assert_eq!(merged.relation_to(&right), VersionRelation::After);
     }
 
     #[test]

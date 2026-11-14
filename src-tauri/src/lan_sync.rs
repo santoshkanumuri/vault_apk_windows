@@ -650,6 +650,8 @@ fn exchange_role(
         let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
         // Photos added before pairing or migrated into the group get their signed change now.
         let _ = vault.publish_unsynced_photos();
+        // An appearance choice waiting for the write gate is written now if the gate is open.
+        crate::appearance::flush_installed(vault, &signer);
         let blobs = vault.photo_blobs();
         let db = vault.connection();
         let (id, transport, content): (String, Vec<u8>, Vec<u8>) = db
@@ -797,6 +799,19 @@ fn exchange_role(
     }
     if server { tracker.begin(); }
     let relay_removed = session.peer_features.iter().any(|feature| feature == crate::protocol::REMOVAL_CUTOFF_FEATURE);
+    // Appearance changes are relayed to every peer, also one without `appearance-v1`: a chain is
+    // verified link by link, so leaving one change out (or stopping before it) blocks the author's
+    // chain on that peer just as a rejection would. The write gate (`appearance::gate_open`) is
+    // what keeps appearance changes away from older builds. Same rule as Android.
+    // The peer is now an authenticated active member: remember what it announced (the appearance
+    // write gate reads it), and write a waiting appearance change if that opened the gate, so it
+    // goes out in this session. A storage failure here must not stop the exchange.
+    let _ = with_vault(state, &vault_id, &accepted.head, |vault| {
+        crate::appearance::record_peer_features(vault.connection(), &vault_id, &session.peer.device_id, &session.peer_features)
+            .map_err(storage_error)?;
+        crate::appearance::flush_installed(vault, &signer);
+        Ok(())
+    });
     let rounds = exchange_rounds_role(
         &mut channel,
         state,
@@ -1227,7 +1242,9 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
                     | ApplyError::MissingEntryDependency
                     | ApplyError::MissingPhotoBlob
                     | ApplyError::MissingPhotoDependency
-                    | ApplyError::UnsupportedEntity,
+                    | ApplyError::UnsupportedEntity
+                    // appearance.json could not be written: try again next pass.
+                    | ApplyError::AppearanceStorage,
                 ) => {}
                 // A change this PC cannot read is set aside, as Android quarantines it: it stays
                 // counted as waiting, and the other changes and the rest of the pass go on.
