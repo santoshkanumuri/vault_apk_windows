@@ -65,7 +65,7 @@ Open Apps and games > Nuvori > Start your submission. Fill in each section.
 
 - **Category**: Security. (Productivity is the alternative.)
 - **Privacy policy URL**: the link in [What you need](#what-you-need).
-- **Website**: the page where people download Nuvori for Android and the browser extension.
+- **Website**: `https://github.com/santoshkanumuri/vault_apk_windows`. Certification opens this link and fails the submission (policy 10.1.2.7) if it does not load. The 2.2.3 submission failed with `https://santoshkanumuri.qzz.io`, which did not resolve in DNS. Open the link in a private window before each submission. Do not use `https://santoshkanumuri.github.io/vault_apk/`: only its `privacy-policy.html` exists, and the folder itself returns 404.
 - **Support contact info**: the contact email in the privacy policy.
 - **Product declarations**: select "This app depends on non-Microsoft drivers or NT services" **no**. Select "This product accesses, collects, or transmits personal information" **yes**. The vault holds personal data, and sync sends encrypted data to the user's own devices and Google Drive.
 - **System requirements**: Windows 10 version 2004 (build 19041) or newer, x64. Note under additional requirements: "Passkeys in Windows needs a recent Windows 11 update."
