@@ -32,6 +32,8 @@ export type VaultEntry = {
   notes: string;
   tags: string;
   favorite: boolean;
+  /** Card color as opaque ARGB (0xFFRRGGBB); synced with the phone. */
+  color?: number;
   createdAt: number;
   updatedAt: number;
   groupIds: string[];
@@ -66,6 +68,8 @@ export type SyncStatus = {
   wifiCheckSeconds?: number;
   /** How often it checks Google Drive: 15, 60 or 300; 0 = only on Sync now. */
   driveCheckSeconds?: number;
+  /** One pass over Wi-Fi and Google Drive each time Nuvori opens, also with automatic sync off. */
+  syncOnOpen?: boolean;
 };
 export type SyncReport = { peersChecked: number; peersWaiting: number; sent: number; received: number; waitingToApply: number; conflicts: number; /** The pass also went through Google Drive. */ cloud?: boolean };
 /** Sync through the user's own Google Drive. */
@@ -267,6 +271,8 @@ export const api = {
   setSyncSchedule: (schedule: { wifiSeconds?: number; driveSeconds?: number }) =>
     call<void>("set_sync_schedule", { wifiSeconds: schedule.wifiSeconds ?? null, driveSeconds: schedule.driveSeconds ?? null }),
   syncNow: (address: string) => call<SyncReport>("sync_now", { address }),
+  /** Turns "Sync when Nuvori opens" on or off on this PC. */
+  setSyncOnOpen: (enabled: boolean) => call<void>("set_sync_on_open", { enabled }),
 
   pairingStatus: () => call<PairingStatus>("pairing_status"),
   startPairing: (setupLink: string, masterPassword: string) => call<void>("start_pairing", { setupLink, masterPassword }),

@@ -16,6 +16,10 @@ The extension also fills cards, addresses and authenticator codes, and offers to
 
 Nuvori keeps running in the Windows tray when you close its window, so browser filling keeps working. Use the tray icon to open Nuvori, lock the vault, or quit. When the browser starts, the extension asks Nuvori to show a small **Unlock Nuvori** window. If Nuvori isn't running, the browser host starts it in the background (`nuvori.exe --background`) with only that window. Starting Nuvori again while it runs brings the existing window forward instead of opening a second copy.
 
+The Cards page shows your cards as a wallet of card faces in their own colors, with the network logo, cardholder and expiry, and only the last four digits of the number; hover a card to copy its number or security code, or switch to **List** for a compact view. A card's page shows the same face larger; its number and security code stay hidden until you choose Show. Edit a card to pick any color: a saturation and brightness square, a hue slider, an exact #RRGGBB value, or a color from your other cards. The color syncs with the phone.
+
+Opening Nuvori syncs on its own: when its window comes to the front (Start menu, tray, or switching back to it), Nuvori checks paired devices on this Wi-Fi and Google Drive once, also when automatic sync is off. A locked vault syncs right after you unlock. Opening it again within a minute does not start another check. Turn it off with **Sync when Nuvori opens** on the Sync page.
+
 Press **Ctrl+Shift+Space** in any Windows app to open Nuvori's search from the tray (Ctrl+K inside the app does the same). A locked vault shows the unlock screen first, and the search opens after you unlock within a minute. The shortcut never unlocks, copies, or types anything by itself. Change the key (Ctrl+Alt+N or Ctrl+Shift+L) or turn it off in **Settings > Security > Quick search shortcut**; Settings shows "In use by another app" if Windows already gave the key to another program.
 
 Windows Hello is optional. Unlock with the master password, then open More and confirm that password once to enable Hello. Later unlocks can use the Windows PIN, face, or fingerprint. The master password remains the recovery path, and it never depends on Hello.
@@ -45,7 +49,7 @@ React Native for Windows was considered. It makes more sense when the mobile app
 
 ## Install or distribute
 
-Download `Nuvori_2.2.4_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
+Download `Nuvori_2.2.7_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
 
 The browser extension **Nuvori Password Fill** comes from the Chrome Web Store. See [extension/README.md](extension/README.md).
 
@@ -132,3 +136,6 @@ store-assets/                Chrome Web Store screenshots and promo images
 - The app must preserve concurrent conflicts for review instead of silently choosing a winner.
 - Local secret changes stay in the encrypted vault until an authenticated peer path is connected.
 
+## Third-party notices
+
+Payment-network marks on cards are adapted from [svg-credit-card-payment-icons](https://github.com/aaronfagan/svg-credit-card-payment-icons) under the [Apache-2.0 license](docs/licenses/payment-icons-LICENSE.txt), except the American Express mark, which uses the [Simple Icons](https://simpleicons.org/) path under CC0 1.0; `scripts/make-network-marks.py` generates them from the Android app's copies. The RuPay logo comes from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:RuPay.svg) as a public-domain text logo; RuPay remains an NPCI trademark. Network names and logos identify stored cards and do not imply affiliation or endorsement.

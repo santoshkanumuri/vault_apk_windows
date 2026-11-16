@@ -29,8 +29,13 @@ const state = {
     entry({ type: "PASSWORD", title: "Netflix", primaryValue: "family@example.com", secondaryValue: "popcorn-night-42", tertiaryValue: "netflix.com" }, 2000),
     entry({ type: "PASSWORD", title: "Bank of Example", primaryValue: "jdoe", secondaryValue: "vault-door-77", tertiaryValue: "https://online.bank.example", favorite: true, tags: "finance" }, 4000),
     ...Array.from({ length: 24 }, (_, i) => entry({ type: "PASSWORD", title: `Service ${String.fromCharCode(65 + i)}${i % 3 === 0 ? " Cloud" : ""}`, primaryValue: `user${i}@example.com`, secondaryValue: `pw-${i}-xyz`, tertiaryValue: `https://service${i}.example.com` }, 5000 + i * 90)),
-    entry({ type: "CARD", title: "Travel card", primaryValue: "4111111111111111", secondaryValue: "J DOE", tertiaryValue: "08/29", fourthValue: "123", network: "Visa", favorite: true }, 90),
-    entry({ type: "CARD", title: "Groceries debit", primaryValue: "5555555555554444", secondaryValue: "J DOE", tertiaryValue: "11/27", fourthValue: "456", network: "Mastercard", cardKind: "DEBIT" }, 3000),
+    entry({ type: "CARD", title: "Travel card", primaryValue: "4111111111111111", secondaryValue: "J DOE", tertiaryValue: "08/29", fourthValue: "123", network: "Visa", favorite: true, color: 0xff315b8c }, 90),
+    entry({ type: "CARD", title: "Groceries debit", primaryValue: "5555555555554444", secondaryValue: "J DOE", tertiaryValue: "11/27", fourthValue: "456", network: "Mastercard", cardKind: "DEBIT", color: 0xfff5ebdd }, 3000),
+    entry({ type: "CARD", title: "Everyday credit", primaryValue: "378282246310005", secondaryValue: "JAMIE DOE", tertiaryValue: "03/28", fourthValue: "1234", network: "American Express", color: 0xff202020 }, 4000),
+    entry({ type: "CARD", title: "Rewards", primaryValue: "5105105105105100", secondaryValue: "J DOE", tertiaryValue: "06/30", fourthValue: "789", network: "", color: 0xff7a1fa2 }, 5000),
+    entry({ type: "CARD", title: "Home bills", primaryValue: "6074819900004939", secondaryValue: "J DOE", tertiaryValue: "01/29", fourthValue: "321", network: "RuPay", cardKind: "DEBIT", color: 0xffffffff }, 6000),
+    entry({ type: "CARD", title: "Business", primaryValue: "3530111333300000", secondaryValue: "DOE TRADING", tertiaryValue: "10/27", fourthValue: "654", network: "JCB", color: 0xff0b1849 }, 7000),
+    entry({ type: "CARD", title: "Shopping", primaryValue: "6011111111111117", secondaryValue: "J DOE", tertiaryValue: "12/28", fourthValue: "987", network: "", color: 0xffe4b028 }, 8000),
     entry({ type: "AUTHENTICATOR", title: "GitHub", primaryValue: "dev@example.com", secondaryValue: "JBSWY3DPEHPK3PXP" }, 50),
     entry({ type: "AUTHENTICATOR", title: "AWS root", primaryValue: "ops@example.com", secondaryValue: "GEZDGNBVGY3TQOJQ", favorite: true }, 500),
     entry({ type: "AUTHENTICATOR", title: "Dropbox", primaryValue: "me@example.com", secondaryValue: "MFRGGZDFMZTWQ2LK", totpDigits: 8 }, 900),
@@ -44,7 +49,7 @@ const state = {
   groups: [{ id: "g-work", name: "Work", notes: "", folderType: "PASSWORD" }, { id: "g-home", name: "Home", notes: "", folderType: "" }] as VaultGroup[],
   passkeys: [{ id: id(), rpId: "github.com", username: "dev@example.com", displayName: "Dev", createdAt: minutes(30000) }] as PasskeySummary[],
   photos: new Map<string, EntryPhoto[]>(),
-  sync: { lastSync: new Date(minutes(3)).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "192.168.1.24", automatic: true, running: false, message: "Sent 2 changes and received 1.", phase: "idle", progressDone: 0, progressTotal: 0, lastError: "", lastAttempt: new Date(minutes(1)).toISOString(), consecutiveFailures: 0, nextRetrySeconds: 0, wifiCheckSeconds: 60, driveCheckSeconds: 15 } as SyncStatus,
+  sync: { lastSync: new Date(minutes(3)).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "192.168.1.24", automatic: true, running: false, message: "Sent 2 changes and received 1.", phase: "idle", progressDone: 0, progressTotal: 0, lastError: "", lastAttempt: new Date(minutes(1)).toISOString(), consecutiveFailures: 0, nextRetrySeconds: 0, wifiCheckSeconds: 60, driveCheckSeconds: 15, syncOnOpen: true } as SyncStatus,
   pairing: { stage: "", confirmation: "", message: "", invitation: "" } as PairingStatus,
   activity: [] as ActivityEvent[],
   conflicts: [] as SyncConflict[],
@@ -159,6 +164,7 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       if (args.wifiSeconds != null) state.sync.wifiCheckSeconds = Number(args.wifiSeconds);
       if (args.driveSeconds != null) { state.sync.driveCheckSeconds = Number(args.driveSeconds); state.cloud.checkSeconds = Number(args.driveSeconds); }
       return null;
+    case "set_sync_on_open": state.sync.syncOnOpen = Boolean(args.enabled); return null;
     case "sync_now": {
       state.sync = { ...state.sync, running: true, phase: "connecting", progressDone: 0, progressTotal: 0, lastAttempt: new Date().toISOString() };
       log("progress", "sync", "Sync started");

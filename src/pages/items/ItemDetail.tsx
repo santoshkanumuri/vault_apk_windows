@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Folder, ImagePlus, Pencil, Star, Trash2, X } from "lucide-react";
 import { Button, IconButton } from "../../components/Button";
 import { Avatar, CountdownRing, EmptyState } from "../../components/Display";
+import { CardFace } from "../../components/CardFace";
 import { CopyButton, DetailField } from "../../components/DetailField";
 import { Spinner } from "../../components/Spinner";
 import { useConfirm } from "../../app/confirm";
@@ -85,8 +86,9 @@ export function ItemDetailPage({ id }: { id: string }) {
 
   return (
     <div className="page page-narrow">
+      {entry.type === "CARD" && <div className="detail-card"><CardFace entry={entry} size="lg" /></div>}
       <section className="detail-hero">
-        <Avatar title={entry.title} size="lg" />
+        {entry.type !== "CARD" && <Avatar title={entry.title} size="lg" />}
         <div className="detail-hero-text">
           <h2>{entry.title || "Untitled"}</h2>
           <p>{typeLabel(entry.type)}{entry.type === "CARD" && entry.network ? ` · ${entry.network}` : ""}{entry.type === "PASSWORD" && entry.tertiaryValue ? ` · ${hostFromUrl(entry.tertiaryValue)}` : ""}</p>

@@ -2414,7 +2414,7 @@ dependencies = [
 
 [[package]]
 name = "nuvori"
-version = "2.2.4"
+version = "2.2.7"
 dependencies = [
  "aes-gcm",
  "argon2",

@@ -1,10 +1,14 @@
 // Nuvori content script: inline account suggestions and save/update prompts.
-// Runs in HTTPS pages, in the extension's isolated world. In a frame it only reports a focused
-// card, address or code field and fills what the top page chose; it draws nothing there.
+// Runs in HTTPS pages and their frames (also frames a page builds without an address, which
+// share its origin), in the extension's isolated world. In a frame it only reports a focused
+// login, card, address or code field, fills what the top page chose, and reports a submitted
+// login; the top page draws the list and the save card.
 // All UI lives in closed shadow roots; every action needs a trusted user gesture
 // on that UI after it has been visible and unobscured for ACTIVATION_DELAY_MS.
 (() => {
-  if (location.protocol !== "https:") return;
+  // self.origin: an about:blank or srcdoc frame has the origin of the page that made it.
+  const ownOrigin = typeof globalThis.origin === "string" ? globalThis.origin : `${location.protocol}//${location.host}`;
+  if (!ownOrigin.startsWith("https://")) return;
   const IN_FRAME = window !== window.top;
   if (typeof NuvoriFields === "undefined" || globalThis.__nuvoriInline) return;
   globalThis.__nuvoriInline = true;
@@ -146,6 +150,10 @@
 .mark,.avatar{display:inline-grid;place-items:center;flex:none;background:var(--pc);color:var(--opc)}
 .mark{width:20px;height:20px;border-radius:6px}.mark svg{width:12px;height:12px}
 .avatar{width:32px;height:32px;border-radius:8px}.avatar svg{width:16px;height:16px}
+.card-swatch{position:relative;flex:none;width:44px;height:28px;border-radius:6px;box-shadow:0 1px 2px rgb(0 0 0 / .25)}
+.card-swatch.edge{box-shadow:inset 0 0 0 1px rgb(127 127 127 / .45)}
+.card-swatch .chip{position:absolute;left:5px;top:5px;width:9px;height:7px;border-radius:2px;background:linear-gradient(135deg,#f1e2ae,#c8a85e)}
+.card-swatch .digits{position:absolute;right:5px;bottom:3px;font:600 9px/1 ui-monospace,Consolas,monospace;letter-spacing:.04em}
 .list{list-style:none;margin:0;padding:4px 0;max-height:240px;overflow-y:auto}
 .option{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 12px;cursor:pointer;outline:none}
 .option:hover,.option[aria-selected="true"]{background:var(--hover)}
@@ -165,6 +173,7 @@
 .spin{animation:nv-spin 900ms linear infinite}@keyframes nv-spin{to{transform:rotate(360deg)}}
 .foot{display:flex;align-items:center;border-top:1px solid var(--hairline);padding:4px}
 .link,.btn{all:unset;box-sizing:border-box;font:inherit;cursor:pointer}
+[hidden]{display:none !important}
 .link{font-size:12px;color:var(--muted);padding:6px 8px;border-radius:8px}
 .link:hover{background:var(--hover);color:var(--text)}
 .link:focus-visible,.btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
@@ -195,6 +204,11 @@
 .btn.primary:hover{filter:brightness(1.06)}
 .btn.quiet{border-color:transparent;color:var(--muted);margin-inline-start:auto}
 .btn[aria-disabled="true"]{opacity:.55;cursor:default}
+.search-box{padding:8px 8px 0}
+.input.search{min-height:34px}
+.empty{padding:12px;color:var(--muted);font-size:12px;list-style:none}
+.confirm .title{font-weight:600;margin-bottom:2px}
+.confirm .actions{margin-top:10px}
 @media (prefers-reduced-motion:reduce){.panel,.spin{animation:none}}
 @media (forced-colors:active){.panel{border-color:CanvasText}.btn{border-color:ButtonText}.option[aria-selected="true"]{outline:2px solid Highlight}}
 `;
@@ -401,10 +415,30 @@
     return hit === input || (hit instanceof HTMLLabelElement && hit.control === input);
   }
 
-  // Every input of the field's document or shadow root: the classifier picks the
-  // credential form itself, and with several such forms only the focused one counts.
+  const MAX_DEEP_NODES = 20000;
+  /**
+   * Inputs of the document and of every open shadow root inside it, in tree order. Web-component
+   * forms often put the username and the password in different shadow roots.
+   */
+  function deepInputs() {
+    const out = [];
+    let budget = MAX_DEEP_NODES;
+    const walk = (scope, depth) => {
+      for (const node of queryIn(scope, "*")) {
+        if (--budget < 0) return;
+        if (isInput(node)) out.push(node);
+        const shadow = depth < 8 ? DOM.shadowRoot.call(node) : null;
+        if (shadow) walk(shadow, depth + 1);
+      }
+    };
+    walk(doc, 0);
+    return out;
+  }
+
+  // Every input of the page, across shadow roots: the classifier picks the credential form
+  // itself, and with several such forms only the focused one counts.
   function scopeInputs(field) {
-    const list = inputsIn(rootOf(field));
+    const list = deepInputs();
     return list.includes(field) ? list : [...list, field];
   }
   const CLASSIFY = { live: (input) => usable(input), groupOf: (input) => input.form || null };
@@ -479,8 +513,9 @@
   let dismissedField = null;
 
   const dropdown = {
-    surface: null, panel: null, body: null, hostLabel: null, kindLabel: null, showAll: null, field: null, open: false,
+    surface: null, panel: null, body: null, hostLabel: null, kindLabel: null, showAll: null, searchAll: null, field: null, open: false,
     kind: "login", accounts: [], options: [], active: -1, requestId: 0, loadingTimer: 0, blurTimer: 0, frame: 0,
+    frameTarget: null, search: null, every: false,
   };
 
   function ensureDropdown() {
@@ -495,6 +530,12 @@
       void openItems(dropdown.field, "code", { all: true, force: true });
     } });
     dropdown.showAll = showAll;
+    // Logins: every saved login, to fill one saved for another site (or for none) here.
+    const searchAll = el("button", { class: "link", type: "button", text: "Search all logins", hidden: true, onclick: (event) => {
+      if (!surface.canActivate(event, searchAll)) return;
+      void openSearch();
+    } });
+    dropdown.searchAll = searchAll;
     const dontSuggest = el("button", { class: "link", type: "button", text: "Don't suggest on this site", onclick: (event) => {
       if (!surface.canActivate(event, dontSuggest)) return;
       suggestionsOff = true;
@@ -504,7 +545,7 @@
     dropdown.panel = el("div", { class: "panel", role: "dialog", "aria-label": "Nuvori saved logins" },
       el("div", { class: "head" }, el("span", { class: "mark" }, icon("key")), el("span", { class: "brand", text: "Nuvori" }), dropdown.kindLabel, dropdown.hostLabel),
       dropdown.body,
-      el("div", { class: "foot" }, dontSuggest, showAll));
+      el("div", { class: "foot" }, dontSuggest, searchAll, showAll));
     // Keep focus in the page field while the pointer is used on the list.
     dropdown.panel.addEventListener("mousedown", (event) => event.preventDefault());
     dropdown.panel.addEventListener("keydown", onListKey);
@@ -525,6 +566,8 @@
 
   function renderAccounts(accounts) {
     const list = el("ul", { class: "list", role: "listbox", "aria-label": "Saved logins for this site" });
+    dropdown.every = false;
+    dropdown.search = null;
     dropdown.accounts = accounts;
     dropdown.options = accounts.map((account, index) => {
       const option = el("li", { class: "option", role: "option", tabindex: "-1", "aria-selected": "false", id: `nuvori-option-${index}` },
@@ -548,15 +591,57 @@
     dropdown.body.replaceChildren(list);
   }
 
+  /** The card as it looks in Nuvori: its own color, a chip, and its last four digits from the label. */
+  function cardSwatch(item) {
+    const rgb = item.color % 0x1000000;
+    const channel = (shift) => { const c = Math.floor(rgb / shift) % 256 / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const light = 0.2126 * channel(0x10000) + 0.7152 * channel(0x100) + 0.0722 * channel(1);
+    const ink = (light + 0.05) / 0.05 >= 1.05 / (light + 0.05) ? "#000" : "#fff";
+    const last4 = /(\d{4})(?!.*\d)/.exec(item.subtitle || "")?.[1] || "";
+    const swatch = el("span", { class: "card-swatch", "aria-hidden": "true" }, el("span", { class: "chip" }), el("span", { class: "digits", text: last4 }));
+    // Set through the style object, which page Content-Security-Policy rules do not block.
+    swatch.style.background = "#" + rgb.toString(16).padStart(6, "0");
+    swatch.style.color = ink;
+    if (light > 0.9 || light < 0.03) swatch.className += " edge";
+    return swatch;
+  }
+
+  /** What each address part fills, exactly as fillProfileInto fills it. */
+  function profileValues(profile) {
+    const words = String(profile.name || "").trim().split(/\s+/).filter(Boolean);
+    return {
+      ...profile,
+      given: words.length > 1 ? words.slice(0, -1).join(" ") : words[0] || "",
+      family: words.length > 1 ? words[words.length - 1] : "",
+    };
+  }
+
+  /**
+   * An address row shows the value the focused field receives ("alice@example.com"), and below it
+   * the address's name and two more of its values ("Home · Alice Smith · 12 Main St"). Without the
+   * values (an older desktop app) or for a part the address lacks, it shows the name and label.
+   */
+  function profileRow(item) {
+    const fallback = { title: item.title || item.subtitle || KINDS.profile.label, sub: item.subtitle || "" };
+    const preview = item.preview;
+    if (!preview || typeof preview !== "object") return fallback;
+    const main = dropdown.role ? String(profileValues(preview)[dropdown.role] || "").trim() : "";
+    if (!main) return fallback;
+    const others = ["name", "email", "phone", "address1", "city", "postalCode"]
+      .map((key) => String(preview[key] || "").trim()).filter((value) => value && value !== main);
+    return { title: main, sub: [item.title, ...others.slice(0, 2)].filter(Boolean).join(" · ") };
+  }
+
   function renderItems(kind, items) {
     const list = el("ul", { class: "list", role: "listbox", "aria-label": `Saved ${KINDS[kind].label.toLowerCase()}` });
     dropdown.accounts = items;
     dropdown.options = items.map((item, index) => {
+      const row = kind === "profile" ? profileRow(item) : { title: item.title || item.subtitle || KINDS[kind].label, sub: item.subtitle || "" };
       const option = el("li", { class: "option", role: "option", tabindex: "-1", "aria-selected": "false", id: `nuvori-option-${index}` },
-        el("span", { class: "avatar" }, icon(KINDS[kind].icon)),
+        kind === "card" && Number.isSafeInteger(item.color) ? cardSwatch(item) : el("span", { class: "avatar" }, icon(KINDS[kind].icon)),
         el("span", { class: "text" },
-          el("span", { class: "title", text: item.title || item.subtitle || KINDS[kind].label }),
-          el("span", { class: "sub", text: item.subtitle || "" })));
+          el("span", { class: "title", text: row.title }),
+          el("span", { class: "sub", text: row.sub })));
       option.addEventListener("click", (event) => {
         if (!dropdown.surface.canActivate(event, option)) return;
         void chooseItem(item);
@@ -575,7 +660,7 @@
     if (kind !== "login" && status === "ok" && response.items?.length) return renderItems(kind, response.items);
     if (kind !== "login" && status === "ok") return renderState("info", KINDS[kind].empty);
     if (status === "ok" && response.accounts?.length) return renderAccounts(response.accounts);
-    if (status === "ok") return renderState("info", "No saved login for this site. Sign in and Nuvori will offer to save it.");
+    if (status === "ok") return renderState("info", "No login saved for this site yet. Sign in and Nuvori will offer to save it, or search all your logins.", searchButton());
     if (status === "locked") return renderState("warning", "Nuvori is locked. Unlock it to fill this site.", unlockButton("Unlock Nuvori"));
     if (status === "missing") return renderState("neutral", response.message || "This login is no longer available for this site.");
     if (status === "offline") return renderState("error", "Nuvori for Windows isn't running.", unlockButton("Start Nuvori"));
@@ -588,6 +673,104 @@
       return renderState("error", "Can't reach Nuvori for Windows. Open the app, or open the extension for setup help.", help);
     }
     return renderState("error", response?.message || "Nuvori couldn't finish that. Try again.");
+  }
+
+  function searchButton() {
+    const button = el("button", { class: "btn", type: "button", text: "Search all logins", onclick: (event) => {
+      if (!dropdown.surface.canActivate(event, button)) return;
+      void openSearch();
+    } });
+    return button;
+  }
+
+  /** "app.example.com" and "example.com" name the same saved site for the confirm step. */
+  const sameHost = (site, host) => {
+    const a = String(site || "").toLowerCase().replace(/^www\./, "");
+    const b = String(host || "").toLowerCase().replace(/^www\./, "");
+    return Boolean(a) && (a === b || b.endsWith(`.${a}`) || a.endsWith(`.${b}`));
+  };
+  const MAX_SEARCH_ROWS = 50;
+
+  /** Every saved login, with a search box: the user may fill any of them on this page. */
+  async function openSearch() {
+    const field = dropdown.field;
+    if (!field?.isConnected) return;
+    const frame = dropdown.frameTarget;
+    dropdown.kind = "login";
+    dropdown.showAll.setAttribute("hidden", "");
+    dropdown.searchAll.setAttribute("hidden", "");
+    const request = ++dropdown.requestId;
+    renderState("progress", "Loading your logins…");
+    const response = await send({ action: "inline_all_logins", ...(frame ? { frameId: frame.frameId } : {}) });
+    if (request !== dropdown.requestId || dropdown.field !== field || !dropdown.open) return;
+    if (response?.status === "unsupported") { renderState("info", "Update Nuvori for Windows to search all your logins here."); return; }
+    if (response?.status !== "ok") { renderResponse(response); return; }
+    if (!response.accounts?.length) { renderState("info", "No logins are saved in Nuvori yet."); return; }
+    renderSearch(response.accounts, typeof response.host === "string" ? response.host : location.host);
+  }
+
+  function renderSearch(accounts, host) {
+    const input = el("input", { class: "input search", type: "search", placeholder: "Search by name, account or site",
+      "aria-label": "Search all logins", autocomplete: "off", spellcheck: "false" });
+    const list = el("ul", { class: "list", role: "listbox", "aria-label": "All saved logins" });
+    const box = el("div", { class: "search-box" }, input);
+    const draw = () => {
+      const words = String(input.value || "").toLowerCase().split(/\s+/).filter(Boolean);
+      const found = accounts.filter((account) => {
+        const text = `${account.title || ""} ${account.username || ""} ${account.site || ""}`.toLowerCase();
+        return words.every((word) => text.includes(word));
+      }).slice(0, MAX_SEARCH_ROWS);
+      dropdown.accounts = found;
+      dropdown.options = found.map((account, index) => {
+        const option = el("li", { class: "option", role: "option", tabindex: "-1", "aria-selected": "false", id: `nuvori-option-${index}` },
+          el("span", { class: "avatar" }, icon("key")),
+          el("span", { class: "text" },
+            el("span", { class: "title", text: account.title || account.username || "Saved login" }),
+            el("span", { class: "sub", text: [account.username, account.site].filter(Boolean).join(" · ") || "No username" })));
+        option.addEventListener("click", (event) => {
+          if (!dropdown.surface.canActivate(event, option)) return;
+          pickFromSearch(account, host);
+        });
+        option.addEventListener("mousemove", () => highlight(index, false));
+        return option;
+      });
+      dropdown.active = -1;
+      if (found.length) list.replaceChildren(...dropdown.options);
+      else list.replaceChildren(el("li", { class: "empty", text: "No login matches." }));
+    };
+    input.addEventListener("input", draw);
+    draw();
+    dropdown.every = true;
+    dropdown.search = input;
+    dropdown.body.replaceChildren(box, list);
+    position();
+    input.focus({ preventScroll: true });
+  }
+
+  /** A login saved for another site (or for none) fills only after the user confirms this page. */
+  function pickFromSearch(account, host) {
+    if (sameHost(account.site, host)) { void choose(account, { all: true }); return; }
+    const where = account.site ? `Nuvori saved this login for ${account.site}.` : "This login has no website saved.";
+    const fill = el("button", { class: "btn primary", type: "button", text: "Fill here", onclick: (event) => {
+      if (!dropdown.surface.canActivate(event, fill)) return;
+      void choose(account, { all: true });
+    } });
+    const back = el("button", { class: "btn quiet", type: "button", text: "Back", onclick: (event) => {
+      if (!dropdown.surface.canActivate(event, back)) return;
+      void openSearch();
+    } });
+    const box = el("div", { class: "state confirm", "data-tone": "warning", role: "alertdialog", "aria-label": "Fill a login saved for another site" },
+      icon("info"), el("div", {},
+        el("div", { class: "title", text: account.title || account.username || "Saved login" }),
+        el("div", { text: `${where} Fill it on ${host}?` }),
+        el("div", { class: "actions" }, fill, back)));
+    dropdown.options = [];
+    dropdown.accounts = [];
+    dropdown.active = -1;
+    dropdown.search = null;
+    dropdown.body.replaceChildren(box);
+    position();
+    fill.focus({ preventScroll: true });
   }
 
   /** Asks Nuvori to show its own unlock window. The password is typed there, never in the page. */
@@ -639,10 +822,12 @@
     ensureDropdown();
     dropdown.field = field;
     dropdown.surface.setTheme(theme);
-    dropdown.hostLabel.textContent = location.host;
+    dropdown.hostLabel.textContent = dropdown.frameTarget?.host || location.host;
     dropdown.kindLabel.textContent = dropdown.kind === "login" ? "" : KINDS[dropdown.kind].label;
     if (dropdown.kind === "code" && !dropdown.allCodes) dropdown.showAll.removeAttribute("hidden");
     else dropdown.showAll.setAttribute("hidden", "");
+    if (dropdown.kind === "login") dropdown.searchAll.removeAttribute("hidden");
+    else dropdown.searchAll.setAttribute("hidden", "");
     render();
     dropdown.surface.show();
     if (!dropdown.open) {
@@ -660,6 +845,8 @@
     dropdown.open = false;
     dropdown.options = [];
     dropdown.active = -1;
+    dropdown.search = null;
+    dropdown.every = false;
     dropdown.surface?.hide();
     if (refocus && wasOpen && dropdown.field?.isConnected) dropdown.field.focus({ preventScroll: true });
   }
@@ -692,8 +879,36 @@
     // Nothing to offer is not worth a popup. An identifier-first page stays quiet in every state;
     // a sign-in form stays quiet when no login is saved, until the user asks (click or the Down key).
     const hasAccounts = response?.status === "ok" && response.accounts?.length > 0;
+    // A contact or checkout form's email box looks like an identifier-first sign-in too. With no
+    // login to offer there, offer the saved addresses instead.
+    if (!hasAccounts && quiet && usable(field) && F.detailKind(field, controlsFor(field), DETAILS) === "profile") {
+      await openItems(field, "profile", { force });
+      return;
+    }
     if (!hasAccounts && (quiet || (!force && response?.status === "ok"))) { closeDropdown(); return; }
     showDropdown(field, () => renderResponse(response));
+  }
+
+  /**
+   * A login field inside a frame: the list (logins saved for the frame's own site) shows next to
+   * that frame. An identifier-first step stays quiet without a saved login; any other sign-in
+   * frame does too, until the user clicks the field again.
+   */
+  async function openFrameLogins(element, target, { quiet = false, force = false } = {}) {
+    if (suggestionsOff) return;
+    dropdown.frameTarget = target;
+    dropdown.kind = "login";
+    dropdown.field = element;
+    const request = ++dropdown.requestId;
+    clearTimeout(dropdown.loadingTimer);
+    const response = await send({ action: "inline_query", frameId: target.frameId });
+    if (request !== dropdown.requestId || dropdown.field !== element) return;
+    if (["light", "dark", "system"].includes(response?.theme)) theme = response.theme;
+    if (response?.status === "disabled") { closeDropdown(); return; }
+    const hasAccounts = response?.status === "ok" && response.accounts?.length > 0;
+    if (!hasAccounts && (quiet || (!force && response?.status === "ok"))) { closeDropdown(); return; }
+    dropdown.frameTarget = target;
+    showDropdown(element, () => renderResponse(response));
   }
 
   /**
@@ -701,14 +916,15 @@
    * wording) stay quiet unless there is something to offer; cards and codes also show
    * locked or offline states so the user can unlock from here.
    */
-  async function openItems(field, detail, { all = false, force = false, frame = undefined } = {}) {
+  async function openItems(field, detail, { all = false, force = false, frame = undefined, role = undefined } = {}) {
     const kind = detail === "code-weak" ? "code" : detail;
     const quiet = detail === "code-weak" || detail === "profile";
     if (frame !== undefined) dropdown.frameTarget = frame;
     dropdown.field = field;
+    dropdown.role = kind !== "profile" ? undefined : dropdown.frameTarget ? role : profileRoleOf(field);
     const request = ++dropdown.requestId;
     clearTimeout(dropdown.loadingTimer);
-    const response = await send({ action: "inline_items", kind, all });
+    const response = await send({ action: "inline_items", kind, all, ...(dropdown.frameTarget ? { frameId: dropdown.frameTarget.frameId } : {}) });
     if (request !== dropdown.requestId || dropdown.field !== field) return;
     if (!force && focusedField !== field) return;
     if (["light", "dark", "system"].includes(response?.theme)) theme = response.theme;
@@ -801,18 +1017,19 @@
     return card.hasCode ? fillableControl(parts.cvv) : null;
   }
 
+  /** The address part the field holds ("email", "postalCode"…), as filling sees it, or undefined. */
+  function profileRoleOf(field) {
+    const { profile: parts } = F.detailFields(controlsFor(field), DETAILS);
+    return Object.keys(parts).find((role) => parts[role] === field);
+  }
+
   function fillProfile(field, profile) {
     fillProfileInto(controlsFor(field), profile);
   }
 
   function fillProfileInto(controls, profile) {
     const { profile: parts } = F.detailFields(controls, DETAILS);
-    const words = String(profile.name || "").trim().split(/\s+/).filter(Boolean);
-    const values = {
-      ...profile,
-      given: words.length > 1 ? words.slice(0, -1).join(" ") : words[0] || "",
-      family: words.length > 1 ? words[words.length - 1] : "",
-    };
+    const values = profileValues(profile);
     for (const [role, control] of Object.entries(parts)) {
       const value = String(values[role] || "");
       const target = value && fillableControl(control);
@@ -853,16 +1070,24 @@
     }
   }
 
-  async function choose(account) {
+  async function choose(account, { all = false } = {}) {
     const field = dropdown.field;
     if (!field?.isConnected || !account) return;
+    const frame = dropdown.frameTarget;
     closeDropdown(); // Remove our UI before checking what is visible on the page.
+    if (frame) {
+      // The login goes straight to the frame; this page never sees it.
+      const result = await send({ action: "inline_fill_frame", kind: "login", id: account.id, frameId: frame.frameId, all });
+      if (result?.status !== "ok") { dropdown.frameTarget = frame; showDropdown(field, () => renderResponse(result)); }
+      return;
+    }
     const before = fillTargets(field);
     if (!before.username && !before.password) {
       showDropdown(field, () => renderState("error", "No visible sign-in field to fill."));
       return;
     }
-    const response = await send({ action: "inline_fill", credentialId: account.id, want: before.password ? "both" : "username" });
+    const want = before.password ? "both" : "username";
+    const response = await send(all ? { action: "inline_fill_any", id: account.id, want } : { action: "inline_fill", credentialId: account.id, want });
     if (response?.status !== "ok") {
       showDropdown(field, () => renderResponse(response));
       return;
@@ -886,19 +1111,28 @@
     if (!event.isTrusted) return;
     const count = dropdown.options.length;
     const field = dropdown.field;
+    // Typing in the search box: only the list keys leave it.
+    if (dropdown.search && eventTarget(event) === dropdown.search && !["ArrowDown", "Enter", "Escape", "Tab"].includes(event.key)) return;
+    if (dropdown.search && eventTarget(event) === dropdown.search && event.key === "Enter") {
+      if (count) highlight(0, true);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     switch (event.key) {
       case "ArrowDown":
         if (count) highlight(Math.min(dropdown.active + 1, count - 1), true);
         break;
       case "ArrowUp":
-        if (dropdown.active <= 0) { highlight(-1, false); field?.focus({ preventScroll: true }); }
+        if (dropdown.active <= 0) { highlight(-1, false); (dropdown.search || field)?.focus({ preventScroll: true }); }
         else highlight(dropdown.active - 1, true);
         break;
       case "Home": if (count) highlight(0, true); break;
       case "End": if (count) highlight(count - 1, true); break;
       case "Enter":
         if (dropdown.active >= 0 && dropdown.surface.canActivate(event, dropdown.options[dropdown.active])) {
-          if (dropdown.kind === "login") void choose(dropdown.accounts[dropdown.active]);
+          if (dropdown.every) pickFromSearch(dropdown.accounts[dropdown.active], dropdown.frameTarget?.host || location.host);
+          else if (dropdown.kind === "login") void choose(dropdown.accounts[dropdown.active]);
           else void chooseItem(dropdown.accounts[dropdown.active]);
         }
         break;
@@ -1219,29 +1453,101 @@
 
   // ---------------------------------------------------------------------------
   // Frames
+  //
+  // Which frame element holds a frame: the frame posts a one-time code to its parent window, and
+  // the browser stamps the message with the window that sent it (event.source), which the parent
+  // matches to one of its frame elements. A frame inside a frame passes the code on to its own
+  // parent with the inner frame's offset. Page scripts can see the code, but they cannot make a
+  // message come from another window, and the code only places the list on screen.
+
+  const NONCE = /^[0-9a-f]{32}$/;
+  const newNonce = () => [...crypto.getRandomValues(new Uint8Array(16))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  /** The frame element of this document whose window sent `source`, or null. */
+  const childFrame = (source) => source ? queryIn(doc, "iframe, frame").find((frame) => {
+    try { return frame.contentWindow === source; } catch { return false; }
+  }) || null : null;
+  const announce = (nonce, dx = 0, dy = 0) => {
+    try { window.parent.postMessage({ nuvoriFrame: nonce, dx, dy }, "*"); } catch { /* detached */ }
+  };
+  // nonce -> { element, dx, dy, at }: frames of this page that announced themselves (top page only).
+  const announced = new Map();
+  window.addEventListener?.("message", (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object" || typeof data.nuvoriFrame !== "string" || !NONCE.test(data.nuvoriFrame)) return;
+    const element = childFrame(event.source);
+    if (!element) return;
+    const dx = Number.isFinite(data.dx) ? data.dx : 0;
+    const dy = Number.isFinite(data.dy) ? data.dy : 0;
+    if (IN_FRAME) {
+      // Pass it up, with where that frame sits in this one.
+      const box = element.getBoundingClientRect();
+      announce(data.nuvoriFrame, dx + box.left + (element.clientLeft || 0), dy + box.top + (element.clientTop || 0));
+      return;
+    }
+    announced.set(data.nuvoriFrame, { element, dx, dy, at: now() });
+    while (announced.size > 32) announced.delete(announced.keys().next().value);
+  });
 
   if (IN_FRAME) {
     let frameField = null;
+    /** Tell the top page about a focused field here; it shows the list next to this frame. */
+    const report = (target, { force = false } = {}) => {
+      const rect = target.getBoundingClientRect();
+      const nonce = newNonce();
+      announce(nonce);
+      const box = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      const inputs = scopeInputs(target);
+      const login = F.suggestionKind(target, inputs, CLASSIFY);
+      if (login) {
+        frameField = target;
+        const pair = F.pairFields(target, inputs, CLASSIFY);
+        void send({ action: "frame_field", detail: "login", quiet: login === "username-step" && !force, force,
+          want: pair.password ? "both" : "username", rect: box, nonce });
+        return true;
+      }
+      const detail = F.detailKind(target, controlsFor(target), DETAILS);
+      if (!["card", "profile", "code"].includes(detail)) return false;
+      frameField = target;
+      void send({ action: "frame_field", detail, rect: box, nonce, ...(detail === "profile" ? { role: profileRoleOf(target) } : {}) });
+      return true;
+    };
     listen(doc, "focusin", (event) => {
       const target = eventTarget(event);
-      if (!isInput(target) || !usable(target)) return;
-      const detail = F.detailKind(target, controlsFor(target), DETAILS);
-      if (!["card", "profile", "code"].includes(detail)) return;
-      frameField = target;
-      const rect = target.getBoundingClientRect();
-      void send({ action: "frame_field", detail, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } });
+      if (filling) return;
+      if (isInput(target) && usable(target) && report(target)) return;
+      // Focus moved on to something we offer nothing for: the top page closes this frame's list.
+      if (frameField) { frameField = null; void send({ action: "frame_blur" }); }
+    }, true);
+    // Clicking the focused field again, or the Down key, asks for the list again (also with no saved login).
+    listen(doc, "click", (event) => {
+      const target = eventTarget(event);
+      if (event.isTrusted && !filling && isInput(target) && target === frameField && usable(target)) report(target, { force: true });
+    }, true);
+    listen(doc, "keydown", (event) => {
+      const target = eventTarget(event);
+      if (!event.isTrusted || !isInput(target) || target !== frameField) return;
+      if (event.key === "ArrowDown" && !event.altKey && usable(target)) report(target, { force: true });
+      else if (event.key === "Escape" || event.key === "Tab") void send({ action: "frame_blur" });
     }, true);
     // Only the extension's background sends this; a page cannot message a content script.
     chrome.runtime.onMessage?.addListener((message, sender, sendResponse) => {
-      if (message?.target !== "nuvori-frame" || message.action !== "fill_item" || sender?.id !== chrome.runtime.id) return false;
+      if (message?.target !== "nuvori-frame" || !["fill_item", "fill_login"].includes(message.action) || sender?.id !== chrome.runtime.id) return false;
       const field = frameField?.isConnected ? frameField : null;
-      const controls = field ? controlsFor(field) : controlsIn(doc);
       const before = fillCount;
       filling = true;
       try {
-        if (message.kind === "card" && message.card) fillCardInto(controls, { ...message.card, hasCode: false });
-        else if (message.kind === "profile" && message.profile) fillProfileInto(controls, message.profile);
-        else if (message.kind === "code" && message.code && field) fillCode(field, message.code);
+        if (message.action === "fill_login") {
+          // Only the focused sign-in form: its visible, hit-testable username and password fields.
+          const targets = field ? fillTargets(field) : { username: null, password: null };
+          if (targets.username && typeof message.username === "string" && message.username) setValue(targets.username, message.username);
+          if (targets.password && typeof message.password === "string" && message.password) setValue(targets.password, message.password);
+          (targets.password || targets.username)?.focus?.({ preventScroll: true });
+        } else {
+          const controls = field ? controlsFor(field) : controlsIn(doc);
+          if (message.kind === "card" && message.card) fillCardInto(controls, { ...message.card, hasCode: false });
+          else if (message.kind === "profile" && message.profile) fillProfileInto(controls, message.profile);
+          else if (message.kind === "code" && message.code && field) fillCode(field, message.code);
+        }
       } finally {
         filling = false;
         for (const key of Object.keys(message)) message[key] = undefined;
@@ -1249,21 +1555,84 @@
       sendResponse({ status: "ok", filled: fillCount - before });
       return false;
     });
+    // A login submitted here is saved for this frame's site; the save card shows on the top page.
+    listen(doc, "submit", (event) => {
+      if (!event.isTrusted || !(event.target instanceof HTMLFormElement)) return;
+      rememberStep(inputsIn(event.target));
+      void capture(inputsIn(event.target));
+    }, true);
+    listen(doc, "click", (event) => {
+      if (!event.isTrusted) return;
+      const button = event.composedPath().find((node) => node instanceof Element && (tagOf(node) === "BUTTON" ||
+        DOM.getAttribute.call(node, "role") === "button" ||
+        (tagOf(node) === "INPUT" && ["submit", "button"].includes(String(node.type).toLowerCase()))));
+      if (!button || button.form) return;
+      const inputs = formlessInputs(button);
+      rememberStep(inputs);
+      if (inputs.some((input) => F.isPasswordField(input) && input.value)) void capture(inputs);
+    }, true);
+    listen(doc, "keydown", (event) => {
+      if (!event.isTrusted || event.key !== "Enter") return;
+      const target = eventTarget(event);
+      if (!isInput(target) || target.form) return;
+      if (F.isPasswordField(target) && target.value) void capture(formlessInputs(target));
+      else rememberStep(formlessInputs(target));
+    }, true);
     return;
   }
 
-  // The top page shows the list for a field a frame reported, next to that frame.
+  // The top page shows the list for a field a frame reported, next to that frame, and the save
+  // card for a login submitted in a frame. Only the extension's background sends these.
   chrome.runtime.onMessage?.addListener((message, sender, sendResponse) => {
-    if (message?.target !== "nuvori-top" || message.action !== "frame_field" || sender?.id !== chrome.runtime.id) return false;
-    const element = queryIn(doc, "iframe, frame").find((frame) => {
-      try { return chrome.runtime.getFrameId(frame) === message.frameId; } catch { return false; }
-    });
-    if (!element || !usable(element) || suggestionsOff) { sendResponse({ status: "none" }); return false; }
-    const target = { frameId: message.frameId, element, rect: message.rect };
-    void openItems(element, message.detail, { force: true, frame: target });
-    sendResponse({ status: "ok" });
-    return false;
+    if (message?.target !== "nuvori-top" || sender?.id !== chrome.runtime.id) return false;
+    if (message.action === "show_prompt") {
+      if (message.prompt && !card.prompt) showCard(message.prompt, message.theme);
+      sendResponse({ status: "ok" });
+      return false;
+    }
+    if (message.action === "show_notice") {
+      notice("success", "Already saved in Nuvori.", message.theme);
+      sendResponse({ status: "ok" });
+      return false;
+    }
+    if (message.action === "frame_blur") {
+      if (dropdown.open && dropdown.frameTarget?.frameId === message.frameId && !dropdown.search) closeDropdown();
+      sendResponse({ status: "ok" });
+      return false;
+    }
+    if (message.action !== "frame_field") return false;
+    void showForFrame(message).then(sendResponse, () => sendResponse({ status: "none" }));
+    return true;
   });
+
+  /** The frame's announcement may arrive just after the background's message: wait for it briefly. */
+  async function announcedFrame(nonce) {
+    for (let waited = 0; waited <= 1000; waited += 50) {
+      const entry = typeof nonce === "string" ? announced.get(nonce) : undefined;
+      if (entry) { announced.delete(nonce); return entry; }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return null;
+  }
+
+  async function showForFrame(message) {
+    const found = await announcedFrame(message.nonce);
+    const element = found?.element;
+    if (!element?.isConnected) return { status: "not_found" };
+    if (!usable(element) || suggestionsOff) return { status: "none" };
+    const rect = message.rect && { left: message.rect.left + found.dx, top: message.rect.top + found.dy, width: message.rect.width, height: message.rect.height };
+    const target = { frameId: message.frameId, element, rect, host: typeof message.host === "string" ? message.host.slice(0, 253) : "" };
+    if (message.detail === "login") {
+      // Already showing this frame's list: keep it (and a search the user started).
+      if (dropdown.open && dropdown.frameTarget?.frameId === message.frameId && dropdown.kind === "login" && !message.force) {
+        dropdown.frameTarget = target;
+      } else void openFrameLogins(element, target, { quiet: message.quiet === true, force: message.force === true });
+    } else {
+      dropdown.kind = message.detail;
+      void openItems(element, message.detail, { force: true, frame: target, role: typeof message.role === "string" ? message.role : undefined });
+    }
+    return { status: "ok" };
+  }
 
   // ---------------------------------------------------------------------------
   // Page listeners

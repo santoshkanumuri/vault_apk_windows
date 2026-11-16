@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { History, Image, Laptop, Pencil, RefreshCw, Smartphone, Timer, Wifi } from "lucide-react";
+import { History, Image, Laptop, Pencil, RefreshCw, Smartphone, Timer, Wifi, Zap } from "lucide-react";
 import { Button, IconButton } from "../../components/Button";
 import { Card, SettingsGroup, SettingsRow } from "../../components/Display";
 import { DangerZone } from "../SettingsPage";
@@ -218,6 +218,19 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
     }
   };
 
+  const toggleOnOpen = async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      await api.setSyncOnOpen(enabled);
+      toast.success(enabled ? "Nuvori syncs each time you open it" : "Opening Nuvori no longer starts a sync");
+      await reload();
+    } catch (failure) {
+      toast.error(failure, "Couldn't change this setting.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const toggleAuto = async (automatic: boolean) => {
     setBusy(true);
     try {
@@ -248,6 +261,10 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
       </SettingsRow>
       <SettingsRow icon={RefreshCw} title="Sync automatically" description="Finds paired phones and PCs on your local network while unlocked. Sends new changes sooner and retries after a dropped connection."
         control={<Toggle label="Sync automatically" checked={status.automatic} disabled={busy || running} onChange={(value) => void toggleAuto(value)} />} />
+      {status.syncOnOpen !== undefined && (
+        <SettingsRow icon={Zap} title="Sync when Nuvori opens" description="Each time you open Nuvori, it checks paired devices on this Wi-Fi and Google Drive once, also when automatic sync is off."
+          control={<Toggle label="Sync when Nuvori opens" checked={status.syncOnOpen} disabled={busy || running} onChange={(value) => void toggleOnOpen(value)} />} />
+      )}
       {status.automatic && status.wifiCheckSeconds !== undefined && (
         <SettingsRow icon={Timer} title="Check devices every" description="How often this PC looks for paired devices on this Wi-Fi. Your own changes go out about 2 seconds after you save them."
           control={<Segmented label="Check devices every" size="sm" value={String(status.wifiCheckSeconds)} onChange={(value) => void changeInterval(value)}

@@ -154,7 +154,7 @@ function QuickAccess() {
           {items.map(({ entry }) => (
             <li key={entry.id} className={cx("qa-card", router.highlight === entry.id && "is-highlighted")} data-row-id={entry.id}>
               <button type="button" className="qa-open" onClick={() => void router.navigate({ page: "item", id: entry.id })} aria-label={`Open ${entry.title}`}>
-                <Avatar title={entry.title || "?"} />
+                <Avatar title={entry.title || "?"} cardColor={entry.type === "CARD" ? entry.color : undefined} />
                 <span className="qa-text">
                   <span className="qa-title"><span className="truncate">{entry.title || "Untitled"}</span>{entry.favorite && <Star className="fav-star" aria-label="Favorite" />}</span>
                   <span className="qa-subtitle truncate">{entrySubtitle(entry)}</span>

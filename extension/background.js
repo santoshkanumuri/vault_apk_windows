@@ -268,7 +268,38 @@ function queryOrigin(tabId, origin, { fresh = false } = {}) {
 }
 
 function forgetQueries(tabId) {
-  for (const key of [...queryCache.keys()]) if (key.startsWith(`${tabId}|`)) queryCache.delete(key);
+  for (const cache of [queryCache, allCache]) for (const key of [...cache.keys()]) if (key.startsWith(`${tabId}|`)) cache.delete(key);
+}
+
+// "Search all logins" ("all_logins" hosts): every saved login, listed for this page, so the user can fill
+// any of them here. Tokens from this listing release a login only on the page it was listed for.
+const allCache = new Map();
+
+function queryAll(tabId, origin, { fresh = false } = {}) {
+  const key = `${tabId}|${origin}`;
+  const hit = allCache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < (hit.status === "ok" ? QUERY_TTL_OK_MS : QUERY_TTL_OTHER_MS)) return hit.promise;
+  const entry = { at: Date.now(), status: undefined, promise: undefined };
+  entry.promise = (async () => {
+    let result;
+    try {
+      const response = await native("query_credentials", origin, { all: true });
+      if (response?.status === "ok" && Array.isArray(response.credentials)) {
+        result = { status: "ok", credentials: response.credentials.filter((choice) =>
+          typeof choice?.id === "string" && choice.id && typeof choice.selectionToken === "string") };
+      } else if (response?.status === "locked") result = { status: "locked", credentials: [] };
+      else if (response?.status === "desktop_unavailable") result = { status: "offline", credentials: [] };
+      else result = { status: "error", credentials: [] };
+    } catch (error) {
+      result = { status: hostErrorStatus(error), credentials: [] };
+    }
+    entry.status = result.status;
+    entry.at = Date.now();
+    return result;
+  })();
+  allCache.set(key, entry);
+  while (allCache.size > 16) allCache.delete(allCache.keys().next().value);
+  return entry.promise;
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +310,19 @@ const itemCache = new Map();
 // A filled card's security-code token, until the page asks for the code: "tab|origin|id" -> { token, at }.
 const cardCodeTokens = new Map();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** A card's own color from the host: an opaque ARGB whole number, or nothing. */
+const cardColor = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 0xffffffff ? value : undefined;
 const clip = (value, max = 256) => typeof value === "string" ? value.slice(0, max) : "";
+/** The parts of an address a field can hold, as the content script names them. */
+const PROFILE_ROLES = ["name", "given", "family", "email", "phone", "address1", "address2", "unit", "city", "state", "postalCode", "country"];
+const PREVIEW_KEYS = ["name", "email", "phone", "address1", "address2", "unit", "city", "state", "postalCode", "country"];
+/** An address's values from the host, for its suggestion row: known text parts only, or nothing. */
+function profilePreview(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const preview = {};
+  for (const key of PREVIEW_KEYS) if (typeof value[key] === "string" && value[key].trim()) preview[key] = value[key].trim().slice(0, 200);
+  return Object.keys(preview).length ? preview : undefined;
+}
 
 function queryItems(tabId, origin, kind, all = false, { fresh = false } = {}) {
   const key = `${tabId}|${origin}|${kind}|${all ? "all" : "match"}`;
@@ -340,14 +383,27 @@ async function handleItems(page, message) {
     : result.items;
   return {
     status: result.status, theme: settings.theme, host: hostOf(page.origin),
-    items: items.slice(0, 50).map((choice) => ({ id: choice.id, title: clip(choice.title), subtitle: clip(choice.username) })),
+    items: items.slice(0, 50).map((choice) => ({
+      id: choice.id, title: clip(choice.title), subtitle: clip(choice.username), color: cardColor(choice.color),
+      preview: kind === "profile" ? profilePreview(choice.preview) : undefined,
+    })),
   };
 }
 
-/** The page's tab still shows `origin`; secrets go back only then. */
-async function sameSite(page) {
-  const tab = await chrome.tabs.get(page.tabId).catch(() => null);
-  try { return new URL(tab?.url || "").origin === page.origin; } catch { return false; }
+/**
+ * Secrets go back only while the tab still shows the same page, and, for a field in a frame, while
+ * that frame still shows the same site. `target` is a page ({ tabId, origin }) or a frame field
+ * ({ tabId, origin, frameId, documentId, pageOrigin }).
+ */
+async function stillThere(target) {
+  const tab = await chrome.tabs.get(target.tabId).catch(() => null);
+  let top = "";
+  try { top = new URL(tab?.url || "").origin; } catch { return false; }
+  if (top !== (target.pageOrigin || target.origin)) return false;
+  if (target.frameId === undefined) return true;
+  const where = target.documentId ? { documentIds: [target.documentId] } : { frameIds: [target.frameId] };
+  const results = await chrome.scripting.executeScript({ target: { tabId: target.tabId, ...where }, func: () => self.origin }).catch(() => []);
+  return results?.[0]?.result === target.origin;
 }
 
 async function handleFillItem(page, message) {
@@ -381,7 +437,7 @@ async function handleFillItem(page, message) {
   if (response?.status === "desktop_unavailable") return { status: "offline" };
   const item = response?.item;
   if (response?.status !== "ok" || !item || item.id !== id || item.kind !== kind) return { status: "error", message: "Nuvori could not release this item. Try again." };
-  if (!(await sameSite(page))) return { status: "error", message: "The page changed. Try again." };
+  if (!(await stillThere(page))) return { status: "error", message: "The page changed. Try again." };
   if (kind === "card" && item.card) {
     const key = `${page.tabId}|${page.origin}|${id}`;
     cardCodeTokens.delete(key);
@@ -425,7 +481,7 @@ async function handleCardCode(page, message) {
   if (response?.status === "denied") return { status: "denied" };
   const code = response?.item?.card?.cvv;
   if (response?.status !== "ok" || typeof code !== "string" || !/^\d{3,4}$/.test(code)) return { status: "expired" };
-  if (!(await sameSite(page))) return { status: "error", message: "The page changed. Try again." };
+  if (!(await stillThere(page))) return { status: "error", message: "The page changed. Try again." };
   return { status: "ok", code };
 }
 
@@ -778,13 +834,16 @@ function promptView(prompt, item, features = []) {
   };
 }
 
-/** The pending item this exact page (tab + origin) may act on, or null. */
+/**
+ * The pending item this exact page (tab + origin) may act on, or null. A login typed into a frame
+ * is saved for the frame's site; its prompt shows on the page around it (`pageOrigin`).
+ */
 async function promptFor(page, id) {
   const prompts = await readPrompts();
   const prompt = prompts[page.tabId];
-  if (!prompt || prompt.origin !== page.origin || (id !== undefined && prompt.id !== id)) return { prompts, prompt: null };
+  if (!prompt || (prompt.pageOrigin || prompt.origin) !== page.origin || (id !== undefined && prompt.id !== id)) return { prompts, prompt: null };
   const items = await readPending();
-  const item = items.find((entry) => entry.id === prompt.id && entry.origin === page.origin && entry.tabId === page.tabId);
+  const item = items.find((entry) => entry.id === prompt.id && entry.origin === prompt.origin && entry.tabId === page.tabId);
   if (!item) {
     delete prompts[page.tabId];
     await writePrompts(prompts);
@@ -794,8 +853,8 @@ async function promptFor(page, id) {
 }
 
 // ---------------------------------------------------------------------------
-// Messages from content scripts (top frame, HTTPS only). The origin always comes
-// from the browser-supplied sender, never from the message.
+// Messages from content scripts. The origin always comes from the browser-supplied sender,
+// never from the message.
 
 function pageSender(sender) {
   if (!sender?.tab || typeof sender.tab.id !== "number" || sender.frameId !== 0 || typeof sender.url !== "string") return null;
@@ -806,79 +865,173 @@ function pageSender(sender) {
   return { tabId: sender.tab.id, origin: parsed.origin, url: sender.url };
 }
 
-// ---------------------------------------------------------------------------
-// Payment, address and code forms inside frames (often another site's, such as a payment
-// provider's). The frame draws nothing: it reports a focused field, the top page shows the list
-// next to the frame, and the chosen item goes only to that frame. A card also goes to the other
-// frames of the same origin, because payment forms often put number and expiry in separate
-// frames. Logins are never filled in a frame. A card's security code is not filled in a frame.
+/**
+ * A frame's HTTPS origin. A frame the page built without an address of its own (about:blank,
+ * about:srcdoc) has its creator's origin; the browser reports it as `sender.origin`.
+ */
+function senderOrigin(sender) {
+  let parsed;
+  try { parsed = new URL(sender.url); } catch { return null; }
+  if (parsed.protocol === "https:") return sender.origin === undefined || sender.origin === parsed.origin ? parsed.origin : null;
+  if (parsed.protocol !== "about:" || typeof sender.origin !== "string") return null;
+  try {
+    const origin = new URL(sender.origin);
+    return origin.protocol === "https:" && origin.origin === sender.origin ? sender.origin : null;
+  } catch { return null; }
+}
 
-const FRAME_DETAILS = ["card", "profile", "code"];
+// ---------------------------------------------------------------------------
+// Forms inside frames: logins (a site's own sign-in frame, or another site's), payment, address
+// and code forms. The frame draws nothing: it reports a focused field, the top page shows the list
+// next to that frame, and the chosen item goes only to that frame, for the frame's own site, like
+// a browser's password manager. A card also goes to the other frames of the same origin, because
+// payment forms often put number and expiry in separate frames. A card's security code is not
+// filled in a frame.
+
+const FRAME_DETAILS = ["login", "card", "profile", "code"];
 const FRAME_FIELD_TTL_MS = 60 * 1000;
 const MAX_FILL_FRAMES = 16;
-/** tabId -> { frameId, origin, detail, at }: the last frame field the user focused in that tab. */
+/** tabId -> the last frame field the user focused in that tab: { frameId, documentId, origin, detail, anchorFrameId, want, at }. */
 const frameFields = new Map();
 
 function frameSender(sender) {
   if (!sender?.tab || typeof sender.tab.id !== "number" || typeof sender.frameId !== "number" || sender.frameId === 0) return null;
   if (typeof sender.url !== "string") return null;
-  let parsed;
-  try { parsed = new URL(sender.url); } catch { return null; }
-  if (parsed.protocol !== "https:") return null;
-  if (sender.origin !== undefined && sender.origin !== parsed.origin) return null;
-  return { tabId: sender.tab.id, frameId: sender.frameId, origin: parsed.origin };
+  const origin = senderOrigin(sender);
+  if (!origin) return null;
+  return { tabId: sender.tab.id, frameId: sender.frameId, origin, documentId: typeof sender.documentId === "string" ? sender.documentId : undefined };
 }
 
 const finite = (value, limit) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= limit;
+
+/** The page shown in a tab: its origin and address, or null for anything but an HTTPS page. */
+async function tabPage(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  try {
+    const url = new URL(tab?.url || "");
+    return url.protocol === "https:" ? { tabId, origin: url.origin, url: url.href } : null;
+  } catch { return null; }
+}
 
 async function handleFrameField(frame, message) {
   const rect = message.rect;
   if (!FRAME_DETAILS.includes(message.detail) || !rect || !["left", "top"].every((key) => finite(rect[key], 100_000)) ||
       !["width", "height"].every((key) => finite(rect[key], 10_000) && rect[key] >= 0)) return { status: "error" };
+  const page = await tabPage(frame.tabId);
+  if (!page) return { status: "none" };
   const settings = await readSettings();
-  if (!settings.inlineSuggestions || !settings.fill[message.detail]) return { status: "disabled" };
-  frameFields.set(frame.tabId, { frameId: frame.frameId, origin: frame.origin, detail: message.detail, at: Date.now() });
+  const detail = message.detail;
+  if (!settings.inlineSuggestions || (detail !== "login" && !settings.fill[detail]) ||
+      settings.noSuggest.includes(page.origin) || settings.noSuggest.includes(frame.origin)) return { status: "disabled" };
+  // The frame posted this one-time code to its parent window; the top page finds the frame element by it.
+  if (typeof message.nonce !== "string" || !/^[0-9a-f]{32}$/.test(message.nonce)) return { status: "error" };
+  const field = {
+    frameId: frame.frameId, documentId: frame.documentId, origin: frame.origin, detail, anchorFrameId: frame.frameId,
+    want: message.want === "username" ? "username" : "both", at: Date.now(),
+  };
+  frameFields.set(frame.tabId, field);
   while (frameFields.size > 64) frameFields.delete(frameFields.keys().next().value);
   const shown = await chrome.tabs.sendMessage(frame.tabId, {
-    target: "nuvori-top", action: "frame_field", frameId: frame.frameId, detail: message.detail,
+    target: "nuvori-top", action: "frame_field", frameId: frame.frameId, nonce: message.nonce, detail,
+    quiet: message.quiet === true, force: message.force === true, host: hostOf(frame.origin),
+    role: detail === "profile" && PROFILE_ROLES.includes(message.role) ? message.role : undefined,
     rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
   }, { frameId: 0 }).catch(() => null);
   return { status: shown?.status === "ok" ? "ok" : "none" };
 }
 
+/** Where a list or a fill applies: the page itself, or the frame field it showed a list for (same tab, still fresh). */
+function scopeOf(page, message, kind) {
+  if (message.frameId === undefined) return page;
+  const field = frameFields.get(page.tabId);
+  if (!Number.isInteger(message.frameId) || !field || field.anchorFrameId !== message.frameId ||
+      Date.now() - field.at > FRAME_FIELD_TTL_MS || (kind && field.detail !== kind)) return null;
+  return { tabId: page.tabId, origin: field.origin, frameId: field.frameId, documentId: field.documentId, pageOrigin: page.origin, url: page.url, field };
+}
+
+const toFrame = (target, payload) => chrome.tabs.sendMessage(target.tabId, payload,
+  target.documentId ? { documentId: target.documentId } : { frameId: target.frameId }).catch(() => null);
+
 /** Frames of the tab whose origin is `origin`, by asking each frame (no extra permission). */
 async function framesOf(tabId, origin) {
-  const results = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => location.origin }).catch(() => []);
+  const results = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => self.origin }).catch(() => []);
   return (results || []).filter((entry) => entry.frameId !== 0 && entry.result === origin).map((entry) => entry.frameId).slice(0, MAX_FILL_FRAMES);
 }
 
-/** The top page chose an item for the frame field the user focused. */
+/** The top page chose an item or a login for the frame field the user focused. */
 async function handleFillFrame(page, message) {
-  const field = frameFields.get(page.tabId);
-  if (!field || field.frameId !== message.frameId || Date.now() - field.at > FRAME_FIELD_TTL_MS || field.detail !== message.kind) {
-    return { status: "missing", message: "Click the field again." };
+  const kind = message.kind;
+  const target = scopeOf(page, message, kind);
+  if (!target) return { status: "missing", message: "Click the field again." };
+  if (kind === "login") {
+    const result = await handleFill(target, { credentialId: message.id, want: target.field.want }, { all: message.all === true });
+    if (result.status !== "ok") return result;
+    const payload = { target: "nuvori-frame", action: "fill_login", username: result.username, password: result.password };
+    result.password = undefined;
+    const reply = await toFrame(target, payload);
+    payload.password = undefined;
+    frameFields.delete(page.tabId);
+    if (!(reply?.status === "ok" && Number.isInteger(reply.filled) && reply.filled > 0)) return { status: "error", message: "Couldn't fill the form in this frame." };
+    return { status: "ok", filled: reply.filled };
   }
-  const result = await handleFillItem(page, { kind: message.kind, id: message.id });
+  if (!ITEM_FEATURES[kind]) return { status: "error", message: "Choose it again." };
+  const result = await handleFillItem(target, { kind, id: message.id });
   // A security code is approved per page and filled only where it was asked for.
-  cardCodeTokens.delete(`${page.tabId}|${page.origin}|${message.id}`);
+  cardCodeTokens.delete(`${target.tabId}|${target.origin}|${message.id}`);
   if (result.status !== "ok") return result;
-  const payload = { target: "nuvori-frame", action: "fill_item", kind: message.kind };
+  const payload = { target: "nuvori-frame", action: "fill_item", kind };
   if (result.card) payload.card = { number: result.card.number, name: result.card.name, expiry: result.card.expiry };
   if (result.profile) payload.profile = result.profile;
   if (result.code) payload.code = result.code;
-  const targets = message.kind === "card" ? [field.frameId, ...(await framesOf(page.tabId, field.origin)).filter((id) => id !== field.frameId)] : [field.frameId];
   let filled = 0;
-  for (const frameId of targets) {
-    const reply = await chrome.tabs.sendMessage(page.tabId, payload, { frameId }).catch(() => null);
-    if (reply?.status === "ok" && Number.isInteger(reply.filled)) filled += reply.filled;
+  const reply = await toFrame(target, payload);
+  if (reply?.status === "ok" && Number.isInteger(reply.filled)) filled += reply.filled;
+  if (kind === "card") {
+    for (const frameId of (await framesOf(page.tabId, target.origin)).filter((id) => id !== target.frameId)) {
+      const other = await chrome.tabs.sendMessage(page.tabId, payload, { frameId }).catch(() => null);
+      if (other?.status === "ok" && Number.isInteger(other.filled)) filled += other.filled;
+    }
   }
   frameFields.delete(page.tabId);
   if (!filled) return { status: "error", message: "Couldn't fill the form in this frame." };
   return { status: "ok", filled, codeLeft: Boolean(result.card?.hasCode) };
 }
 
+/** Messages from frames: a focused field, an account name typed on a sign-in step, a submitted login. */
+async function handleFrameMessage(frame, message) {
+  if (message.action === "frame_field") return handleFrameField(frame, message);
+  if (message.action === "frame_blur") {
+    const field = frameFields.get(frame.tabId);
+    if (!field || field.frameId !== frame.frameId) return { status: "ok" };
+    await chrome.tabs.sendMessage(frame.tabId, { target: "nuvori-top", action: "frame_blur", frameId: field.anchorFrameId }, { frameId: 0 }).catch(() => null);
+    return { status: "ok" };
+  }
+  const page = await tabPage(frame.tabId);
+  if (!page) return { status: "error" };
+  const target = { tabId: frame.tabId, origin: frame.origin, url: page.url, pageOrigin: page.origin };
+  if (message.action === "remember_username") {
+    await rememberStep(target, message.username);
+    return { status: "ok" };
+  }
+  // A login typed into a frame is saved for the frame's site; the save card shows on the top page.
+  const result = await runInOrder(() => handleCapture(target, message));
+  const show = (payload) => chrome.tabs.sendMessage(frame.tabId, { target: "nuvori-top", ...payload }, { frameId: 0 }).catch(() => null);
+  if (result?.status === "review" && result.prompt) {
+    await show({ action: "show_prompt", prompt: result.prompt, theme: result.theme });
+    return { status: "shown" };
+  }
+  if (result?.status === "already_saved") {
+    await show({ action: "show_notice", tone: "success", text: "Already saved in Nuvori.", theme: (await readSettings()).theme });
+    return { status: "shown" };
+  }
+  return result;
+}
+
+const FRAME_ACTIONS = ["frame_field", "frame_blur", "remember_username", "capture_submitted_login"];
+
 const PAGE_ACTIONS = ["page_status", "open_popup", "capture_submitted_login", "remember_username", "inline_query", "inline_fill", "inline_pending", "inline_approve",
-  "inline_dont_suggest", "inline_unlock", "inline_items", "inline_fill_item", "inline_card_code", "capture_details", "inline_fill_frame"];
+  "inline_dont_suggest", "inline_unlock", "inline_items", "inline_fill_item", "inline_card_code", "capture_details", "inline_fill_frame",
+  "inline_all_logins", "inline_fill_any"];
 
 // Capture rate limits: page scripts can submit forms (requestSubmit) during a user gesture, so
 // each tab gets one capture per 5 seconds and each site four per minute.
@@ -937,7 +1090,8 @@ async function handleCapture(page, message) {
   items.push(item);
   await savePending(items);
   const locked = !["account_exists", "needs_save"].includes(review?.status);
-  prompts[page.tabId] = { id: item.id, origin: page.origin, username: username.trim(), title: cleanTitle(message.titleHint).slice(0, 80), createdAt: Date.now(), locked };
+  prompts[page.tabId] = { id: item.id, origin: page.origin, username: username.trim(), title: cleanTitle(message.titleHint).slice(0, 80), createdAt: Date.now(), locked,
+    ...(page.pageOrigin && page.pageOrigin !== page.origin ? { pageOrigin: page.pageOrigin } : {}) };
   await writePrompts(prompts);
   await pageStatus({ id: page.tabId, url: page.url }).catch(() => {});
   return { status: "review", prompt: promptView(prompts[page.tabId], item, features), theme: settings.theme };
@@ -961,7 +1115,7 @@ async function handleApprove(page, message) {
   if (decision === "dismiss" || decision === "never") {
     items.splice(items.indexOf(item), 1);
     await savePending(items);
-    if (decision === "never") await addToList("neverSave", page.origin);
+    if (decision === "never") await addToList("neverSave", item.origin);
     await finish();
     void logEvent(`inline_${decision}`, "ok", page.origin);
     return { status: decision === "never" ? "never" : "dismissed" };
@@ -1036,14 +1190,20 @@ async function handleApprove(page, message) {
   return { status: "queued" };
 }
 
-async function handleFill(page, message) {
+/**
+ * Release one login for `page` (a page or a frame field). `all`: the user picked it from every
+ * saved login ("Search all logins"), so it may be saved for another site.
+ */
+async function handleFill(page, message, { all = false } = {}) {
   const { credentialId } = message;
   if (typeof credentialId !== "string" || !credentialId || credentialId.length > 256) return { status: "error", message: "Choose an account again." };
   const key = `${page.tabId}|${page.origin}`;
-  let listing = await queryOrigin(page.tabId, page.origin);
+  const list = (fresh) => all ? queryAll(page.tabId, page.origin, { fresh }) : queryOrigin(page.tabId, page.origin, { fresh });
+  const cache = all ? allCache : queryCache;
+  let listing = await list(false);
   let choice = listing.credentials.find((entry) => entry.id === credentialId);
   if (!choice) {
-    listing = await queryOrigin(page.tabId, page.origin, { fresh: true });
+    listing = await list(true);
     choice = listing.credentials.find((entry) => entry.id === credentialId);
     if (!choice) return { status: listing.status === "ok" ? "missing" : listing.status, message: "This account is no longer available for this site." };
   }
@@ -1051,27 +1211,24 @@ async function handleFill(page, message) {
   try {
     response = await native("fill_credential", page.origin, { credentialId, selectionToken: choice.selectionToken });
     if (response?.status === "selection_expired") {
-      const refreshed = await queryOrigin(page.tabId, page.origin, { fresh: true });
+      const refreshed = await list(true);
       const replacement = refreshed.credentials.find((entry) => entry.id === credentialId);
       if (!replacement) return { status: refreshed.status === "ok" ? "missing" : refreshed.status, message: "This account is no longer available for this site." };
       response = await native("fill_credential", page.origin, { credentialId, selectionToken: replacement.selectionToken });
     }
   } catch (error) {
-    queryCache.delete(key);
+    cache.delete(key);
     return { status: hostErrorStatus(error) };
   }
   // Tokens are single use; the next listing must ask the host again.
-  queryCache.delete(key);
+  cache.delete(key);
   if (response?.status === "locked") return { status: "locked" };
   if (response?.status === "desktop_unavailable") return { status: "offline" };
   if (response?.status !== "ok" || !response.credential || response.credential.id !== credentialId) {
     return { status: "error", message: "Nuvori could not release this login. Try again." };
   }
-  // Release the secret only if the same tab still shows the same site.
-  const tab = await chrome.tabs.get(page.tabId).catch(() => null);
-  let currentOrigin = "";
-  try { currentOrigin = new URL(tab?.url || "").origin; } catch { /* closed or unknown */ }
-  if (currentOrigin !== page.origin) return { status: "error", message: "The page changed. Try again." };
+  // Release the secret only if the same tab (and frame) still shows the same site.
+  if (!(await stillThere(page))) return { status: "error", message: "The page changed. Try again." };
   await rememberStep(page, response.credential.username);
   return {
     status: "ok",
@@ -1090,14 +1247,16 @@ async function handlePageMessage(page, message) {
       return runInOrder(() => handleCapture(page, message));
     case "inline_query": {
       const settings = await readSettings();
-      if (!settings.inlineSuggestions || settings.noSuggest.includes(page.origin)) return { status: "disabled", theme: settings.theme };
-      const result = await queryOrigin(page.tabId, page.origin);
+      const scope = scopeOf(page, message, "login");
+      if (!scope) return { status: "missing", message: "Click the field again.", theme: settings.theme };
+      if (!settings.inlineSuggestions || settings.noSuggest.includes(page.origin) || settings.noSuggest.includes(scope.origin)) return { status: "disabled", theme: settings.theme };
+      const result = await queryOrigin(page.tabId, scope.origin);
       const text = (value) => typeof value === "string" ? value.slice(0, 256) : "";
       // The login for the account name used on the previous page comes first.
-      const name = await stepName(page);
+      const name = await stepName(scope);
       const used = (choice) => Boolean(name) && typeof choice.username === "string" && sameName(choice.username, name);
       return {
-        status: result.status, theme: settings.theme, host: hostOf(page.origin),
+        status: result.status, theme: settings.theme, host: hostOf(scope.origin),
         accounts: firstBy(result.credentials, used).slice(0, 50).map((choice) => ({
           id: choice.id, title: text(choice.title), username: text(choice.username),
           ...(used(choice) ? { recent: true } : {}),
@@ -1114,8 +1273,30 @@ async function handlePageMessage(page, message) {
       void logEvent("inline_fill", result.status, page.origin);
       return result;
     }
-    case "inline_items":
-      return handleItems(page, message);
+    case "inline_items": {
+      const scope = scopeOf(page, message, message.kind);
+      return scope ? handleItems(scope, message) : { status: "missing", message: "Click the field again." };
+    }
+    case "inline_all_logins": {
+      const settings = await readSettings();
+      const scope = scopeOf(page, message, "login");
+      if (!scope) return { status: "missing", message: "Click the field again.", theme: settings.theme };
+      if (!(await getFeatures()).includes("all_logins") && !(await getFeatures({ refresh: true })).includes("all_logins")) {
+        return { status: featureCache ? "unsupported" : "offline", theme: settings.theme };
+      }
+      const result = await queryAll(page.tabId, scope.origin, { fresh: message.fresh === true });
+      const text = (value, max = 256) => typeof value === "string" ? value.slice(0, max) : "";
+      return {
+        status: result.status, theme: settings.theme, host: hostOf(scope.origin),
+        accounts: result.credentials.slice(0, 1000).map((choice) => ({ id: choice.id, title: text(choice.title), username: text(choice.username), site: text(choice.site, 80) })),
+      };
+    }
+    case "inline_fill_any": {
+      // A login the user chose from every saved login, for this page.
+      const result = await handleFill(page, { credentialId: message.id, want: message.want }, { all: true });
+      void logEvent("inline_fill_any", result.status, page.origin);
+      return result;
+    }
     case "inline_fill_item": {
       const result = await handleFillItem(page, message);
       void logEvent(`fill_${ITEM_FEATURES[message.kind] ? message.kind : "item"}`, result.status, page.origin);
@@ -1161,10 +1342,10 @@ async function handlePageMessage(page, message) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target === "offscreen") return false;
-  if (message?.action === "frame_field") {
+  if (FRAME_ACTIONS.includes(message?.action) && typeof sender?.frameId === "number" && sender.frameId !== 0) {
     const frame = frameSender(sender);
     if (!frame) return false;
-    handleFrameField(frame, message).then(sendResponse, () => sendResponse({ status: "error" }));
+    handleFrameMessage(frame, message).then(sendResponse, (error) => sendResponse({ status: "error", message: error?.message || "Something went wrong." }));
     return true;
   }
   if (PAGE_ACTIONS.includes(message?.action)) {
@@ -1277,7 +1458,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const page = { tabId: -1, origin };
       if (message.action === "popup_codes") {
         const result = await queryItems(-1, origin, "code", false);
-        return { status: result.status, items: result.items.slice(0, 20).map((choice) => ({ id: choice.id, title: clip(choice.title), subtitle: clip(choice.username) })) };
+        return { status: result.status, items: result.items.slice(0, 20).map((choice) => ({ id: choice.id, title: clip(choice.title), subtitle: clip(choice.username), color: cardColor(choice.color) })) };
       }
       const listing = await queryItems(-1, origin, "code", false);
       const choice = listing.items.find((entry) => entry.id === message.id);

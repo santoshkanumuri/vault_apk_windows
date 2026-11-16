@@ -6,9 +6,9 @@ pub const BROWSER_PROTOCOL_VERSION: u16 = 2;
 /// Optional protocol additions this host and app understand. `status` responses list them in
 /// `features`; an extension sends the matching new fields only when the feature is listed,
 /// because requests use `deny_unknown_fields` and older builds reject unknown fields.
-pub const BROWSER_FEATURES: [&str; 11] = [
+pub const BROWSER_FEATURES: [&str; 12] = [
     "status_no_origin", "login_title", "password_only", "multi_update", "unlock_prompt",
-    "cards", "profiles", "codes", "save_details", "login_edit", "related_logins",
+    "cards", "profiles", "codes", "save_details", "login_edit", "related_logins", "all_logins",
 ];
 
 /// Longest login title accepted from the extension, in characters.
@@ -41,7 +41,8 @@ pub struct BrowserRequest {
     /// and `fill_cvv`, and for a `seal_details` capture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<ItemKind>,
-    /// "codes": list every code instead of only those that match the site.
+    /// "codes": list every code instead of only those that match the site. "all_logins": on
+    /// `query_credentials`, list every login, so the user can choose one saved for another site.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub all: Option<bool>,
     /// "save_details": a card captured from a submitted form (`seal_details` only, never a CVV).
@@ -125,6 +126,16 @@ pub struct CredentialChoice {
     /// "related_logins": saved for another page of the same site (same registrable domain).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub related: bool,
+    /// A card's own color (opaque ARGB) for its suggestion row. Cards only; older extensions ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<u64>,
+    /// "all_logins": the site a login is saved for, so the user sees where it comes from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
+    /// Addresses only: the values the profile fills, so each suggestion row can show the value
+    /// for the focused field (as the browser's own Autofill does). Older extensions ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<ProfileDetails>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -517,6 +528,19 @@ pub fn login_url_same_site(login_url: &str, request_origin: &str) -> bool {
     request != stored && registrable_site(&request).is_some_and(|site| registrable_site(&stored).as_deref() == Some(site.as_str()))
 }
 
+/// A short label for a login's saved website: its host without "www.", or the text itself
+/// (an Android app link, say) cut to 80 characters. Empty when nothing is saved.
+pub fn login_site_label(login_url: &str) -> String {
+    let text = login_url.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    let host = stored_login_origin(text)
+        .and_then(|origin| origin.strip_prefix("https://").map(str::to_owned))
+        .unwrap_or_else(|| text.to_owned());
+    host.strip_prefix("www.").unwrap_or(&host).chars().take(80).collect()
+}
+
 pub fn login_url_matches_origin(login_url: &str, request_origin: &str) -> bool {
     let request = canonical_https_origin(request_origin);
     let stored = stored_login_origin(login_url);
@@ -651,8 +675,7 @@ mod tests {
             id: "record-1".to_owned(),
             title: "Work".to_owned(),
             username: "user@example.com".to_owned(),
-            selection_token: "one-time-token".to_owned(), related: false
-        }];
+            selection_token: "one-time-token".to_owned(), related: false, color: None, site: None, preview: None }];
         let json = serde_json::to_value(choices).unwrap();
         assert!(json[0].get("password").is_none());
 
@@ -757,7 +780,7 @@ mod protocol_addition_tests {
         let response = BrowserResponse::unavailable("r".into()).with_features();
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["features"], serde_json::json!(["status_no_origin", "login_title", "password_only", "multi_update", "unlock_prompt",
-            "cards", "profiles", "codes", "save_details", "login_edit", "related_logins"]));
+            "cards", "profiles", "codes", "save_details", "login_edit", "related_logins", "all_logins"]));
         assert!(serde_json::to_value(BrowserResponse::unavailable("r".into())).unwrap().get("features").is_none());
     }
 

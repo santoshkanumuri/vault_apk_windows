@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Save, Wand2 } from "lucide-react";
 import { Button } from "../../components/Button";
 import { Checkbox, PasswordField, SelectField, TextArea, TextField } from "../../components/Field";
+import { CardColorPicker } from "../../components/CardColorPicker";
 import { StatusBanner } from "../../components/Status";
 import { useConfirm } from "../../app/confirm";
 import { useRouter } from "../../app/router";
 import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
 import { api, type EntryDraft } from "../../lib/api";
+import { DEFAULT_CARD_COLOR, defaultCardColor, usedColors } from "../../lib/cardColors";
 import { categories, emptyEntry, foldersFor, profileFields, profileFrom, type Category, type Profile } from "../../lib/entries";
 import { cx } from "../../lib/format";
 import { generatePassword, passwordStrength } from "../../lib/strength";
@@ -30,7 +32,10 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
   const toast = useToast();
   const existing = id ? entries.find((entry) => entry.id === id) : undefined;
   const info = categories[existing ? categoryFromType(existing.type) : category];
-  const initial = useMemo<EntryDraft>(() => existing ? { ...existing, groupIds: [...(existing.groupIds ?? [])] } : emptyEntry(info.type), [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A new card starts in the least-used suggested color, as on the phone, so a wallet stays varied.
+  const otherCardColors = useMemo(() => entries.filter((item) => item.type === "CARD" && item.id !== existing?.id).map((item) => item.color ?? DEFAULT_CARD_COLOR), [entries, existing?.id]);
+  const initial = useMemo<EntryDraft>(() => existing ? { ...existing, groupIds: [...(existing.groupIds ?? [])] }
+    : info.type === "CARD" ? { ...emptyEntry(info.type), color: defaultCardColor(otherCardColors) } : emptyEntry(info.type), [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState<EntryDraft>(initial);
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -115,6 +120,8 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
               <TextField label="Expiry" value={draft.tertiaryValue} onValue={(v) => set("tertiaryValue", formatExpiry(v))} placeholder="MM/YY" inputMode="numeric" autoComplete="off" className="mono" />
               <PasswordField label="Security code" value={draft.fourthValue} onValue={(v) => set("fourthValue", v.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" autoComplete="off" />
             </div>
+            <CardColorPicker value={draft.color ?? DEFAULT_CARD_COLOR} onChange={(color) => set("color", color)}
+              used={usedColors(otherCardColors)} title={draft.title} lastDigits={draft.primaryValue.slice(-4)} />
           </>}
           {type === "AUTHENTICATOR" && <>
             <TextField label="Account" value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} placeholder="name@example.com" autoComplete="off" />

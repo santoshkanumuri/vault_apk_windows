@@ -1359,6 +1359,43 @@ impl UnlockedVault {
         )))
     }
 
+    /// "all_logins": every login as (id, title, username, the host of its saved website or ""),
+    /// by title. For the browser's "Search all logins", where the user picks one for any site.
+    pub fn all_logins(&self) -> Result<Vec<(String, String, String, String)>, VaultError> {
+        let mut logins: Vec<_> = self
+            .list_entries()?
+            .into_iter()
+            .filter_map(|entry| {
+                if entry["type"] != "PASSWORD" {
+                    return None;
+                }
+                let site = entry["tertiaryValue"].as_str().map(browser::login_site_label).unwrap_or_default();
+                Some((
+                    entry["id"].as_str()?.to_owned(),
+                    entry["title"].as_str().unwrap_or("").to_owned(),
+                    entry["primaryValue"].as_str().unwrap_or("").to_owned(),
+                    site,
+                ))
+            })
+            .collect();
+        logins.sort_by_cached_key(|(_, title, username, _)| (title.to_lowercase(), username.to_lowercase()));
+        Ok(logins)
+    }
+
+    /// "all_logins": the username and password of a login the user chose, whatever site it is saved for.
+    pub fn any_login(&self, id: &str) -> Result<Option<(String, String)>, VaultError> {
+        let stored: Option<String> = self
+            .connection
+            .query_row("SELECT data_json FROM local_entries WHERE id = ?1 AND type = 'PASSWORD'", [id], |row| row.get(0))
+            .optional()?;
+        let Some(stored) = stored else { return Ok(None) };
+        let entry: serde_json::Value = serde_json::from_str(&stored)?;
+        Ok(Some((
+            entry["primaryValue"].as_str().unwrap_or("").to_owned(),
+            entry["secondaryValue"].as_str().unwrap_or("").to_owned(),
+        )))
+    }
+
     /// Saves a login captured in the browser. `username` may be empty for a password-only form.
     /// `title` follows Android `newLoginTitle`: the trimmed request, else the origin without `https://`.
     pub fn save_new_browser_login(
@@ -1442,7 +1479,8 @@ impl UnlockedVault {
     }
 
     /// "cards": every card as (id, title, "Visa •••• 1111 · 12/27"). Cards are not tied to a site.
-    pub fn browser_cards(&self) -> Result<Vec<(String, String, String)>, VaultError> {
+    /// (id, title, "Visa · •••• 1111 · 08/29", color). Never more of the number than its last four digits.
+    pub fn browser_cards(&self) -> Result<Vec<(String, String, String, Option<u64>)>, VaultError> {
         Ok(self.entries_of_type("CARD")?.iter().filter_map(|entry| {
             let digits = browser::card_digits(entry["primaryValue"].as_str()?);
             let last4 = digits.get(digits.len().saturating_sub(4)..).unwrap_or("");
@@ -1451,7 +1489,8 @@ impl UnlockedVault {
             let expiry = entry["tertiaryValue"].as_str().unwrap_or("");
             let label = [if network.is_empty() { "Card".to_owned() } else { network }, format!("•••• {last4}"), expiry.to_owned()]
                 .into_iter().filter(|part| !part.trim().is_empty()).collect::<Vec<_>>().join(" · ");
-            Some((entry["id"].as_str()?.to_owned(), entry["title"].as_str().unwrap_or("").to_owned(), label))
+            Some((entry["id"].as_str()?.to_owned(), entry["title"].as_str().unwrap_or("").to_owned(), label,
+                entry["color"].as_u64().filter(|color| *color <= 0xFFFF_FFFF)))
         }).collect())
     }
 
@@ -1469,12 +1508,13 @@ impl UnlockedVault {
     }
 
     /// "profiles": every contact profile as (id, title, "Name · email").
-    pub fn browser_profiles(&self) -> Result<Vec<(String, String, String)>, VaultError> {
+    /// "profiles": (id, title, "name · email · city", the values) for each address.
+    pub fn browser_profiles(&self) -> Result<Vec<(String, String, String, browser::ProfileDetails)>, VaultError> {
         Ok(self.entries_of_type("AUTOFILL")?.iter().filter_map(|entry| {
             let profile = profile_of(entry);
             let label = [&profile.name, &profile.email, &profile.city].into_iter()
                 .filter(|part| !part.trim().is_empty()).cloned().collect::<Vec<_>>().join(" · ");
-            Some((entry["id"].as_str()?.to_owned(), entry["title"].as_str().unwrap_or("").to_owned(), label))
+            Some((entry["id"].as_str()?.to_owned(), entry["title"].as_str().unwrap_or("").to_owned(), label, profile))
         }).collect())
     }
 
@@ -2409,7 +2449,8 @@ mod tests {
         let card = vault.save_entry(serde_json::json!({"type": "CARD", "title": "Travel", "primaryValue": "4111 1111 1111 1111",
             "secondaryValue": "A Person", "tertiaryValue": "7/29", "fourthValue": "123"})).unwrap();
         let card_id = card["id"].as_str().unwrap();
-        assert_eq!(vault.browser_cards().unwrap(), vec![(card_id.to_owned(), "Travel".to_owned(), "Visa · •••• 1111 · 7/29".to_owned())]);
+        // A card saved without a color lists the default green, so the extension draws it as in the app.
+        assert_eq!(vault.browser_cards().unwrap(), vec![(card_id.to_owned(), "Travel".to_owned(), "Visa · •••• 1111 · 7/29".to_owned(), Some(0xFF08704A))]);
         let details = vault.browser_card(card_id).unwrap().unwrap();
         assert_eq!((details.number.as_str(), details.expiry.as_str(), details.cvv.as_str()), ("4111111111111111", "07/29", "123"));
 
@@ -2445,6 +2486,7 @@ mod tests {
         assert!(!vault.save_browser_details(&pending(None, Some(browser::ProfileDetails { city: "pune".into(), ..Default::default() })), None).unwrap());
         let profiles = vault.browser_profiles().unwrap();
         assert_eq!((profiles[0].1.as_str(), profiles[0].2.as_str()), ("Home", "A Person · Pune"));
+        assert_eq!(profiles[0].3.postal_code, "411001");
         assert_eq!(vault.browser_profile(&profiles[0].0).unwrap().unwrap().postal_code, "411001");
         drop(vault);
         std::fs::remove_dir_all(directory).unwrap();

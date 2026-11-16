@@ -21,3 +21,6 @@ artifacts/
 *.p12
 *.pem
 .vscode/
+
+# Promo video project (local only)
+/promo-video/

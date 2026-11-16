@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import { ChevronRight, type LucideIcon } from "lucide-react";
+import { css, inkFor } from "../lib/cardColors";
 import { cx, hashIndex, monogram } from "../lib/format";
 
-export function Avatar({ title, icon: Icon, size = "md" }: { title: string; icon?: LucideIcon; size?: "sm" | "md" | "lg" }) {
+/** A letter avatar. `cardColor` (a card's own ARGB color) paints it in that card's color. */
+export function Avatar({ title, icon: Icon, size = "md", cardColor }: { title: string; icon?: LucideIcon; size?: "sm" | "md" | "lg"; cardColor?: number }) {
   const tint = hashIndex(title.toLocaleLowerCase(), 6);
+  const card = cardColor !== undefined ? { background: css(cardColor), color: inkFor(cardColor) } : undefined;
   return (
-    <span className={cx("avatar", `avatar-${size}`, `tint-${tint}`)} aria-hidden="true">
+    <span className={cx("avatar", `avatar-${size}`, card ? "avatar-card" : `tint-${tint}`)} style={card} aria-hidden="true">
       {Icon ? <Icon /> : monogram(title)}
     </span>
   );

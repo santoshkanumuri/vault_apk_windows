@@ -31,7 +31,9 @@ async function worker(hostReply, { tabUrl = "https://example.com/next", setTimeo
   const chrome = {
     storage: { local: area(data), session: area(session) },
     action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {}, setBadgeTextColor: async () => {}, setTitle: async () => {}, openPopup: async () => {} },
-    scripting: { executeScript: async () => frames },
+    // Like Chrome: a target with frameIds runs only in those frames. `frames` may also be a function of the call.
+    scripting: { executeScript: async (details) => typeof frames === "function" ? frames(details)
+      : details?.target?.frameIds ? frames.filter((entry) => details.target.frameIds.includes(entry.frameId)) : frames },
     tabs: {
       sendMessage: async (tabId, message, options) => { sent.push({ tabId, message: structuredClone(message), options }); return frameReply ? frameReply(message, options) : { status: "ok", filled: 1 }; },
       query: async () => [],
@@ -584,7 +586,7 @@ test("the popup and a trusted page button can ask for the unlock window", async 
 
 // --- Cards, addresses and codes --------------------------------------------------
 
-const ALL_FEATURES = ["status_no_origin", "login_title", "password_only", "multi_update", "unlock_prompt", "cards", "profiles", "codes", "save_details", "login_edit"];
+const ALL_FEATURES = ["status_no_origin", "login_title", "password_only", "multi_update", "unlock_prompt", "cards", "profiles", "codes", "save_details", "login_edit", "all_logins"];
 const immediate = (callback) => { queueMicrotask(callback); return 0; };
 
 test("cards: the page gets titles, then one card without its code; the code waits for approval in Nuvori", async () => {
@@ -627,6 +629,26 @@ test("codes: matches by default, all on request; off switches stay quiet", async
   state.data.fillCodes = false;
   assert.equal((await state.send({ action: "inline_items", kind: "code" }, page())).status, "disabled");
   assert.equal((await state.send({ action: "inline_items", kind: "nope" }, page())).status, "error");
+});
+
+test("addresses: the listing carries each address's values for its row, and only text parts; cards never do", async () => {
+  const home = { name: " Alice Smith ", email: "alice@example.com", postalCode: "78701", city: 42, password: "nope", country: "" };
+  const state = await worker((request) => request.action === "status" ? { status: "ok", features: ALL_FEATURES }
+    : request.action === "query_items" ? { status: "ok", credentials: [{ id: request.kind === "card" ? "c1" : "p1", title: "Home", username: "Alice Smith", selectionToken: "x", preview: home }] }
+    : { status: "error" }, { tabUrl: "https://shop.example/" });
+  const addresses = await state.send({ action: "inline_items", kind: "profile" }, page());
+  assert.equal(JSON.stringify(addresses.items[0].preview), JSON.stringify({ name: "Alice Smith", email: "alice@example.com", postalCode: "78701" }));
+  const cards = await state.send({ action: "inline_items", kind: "card" }, page());
+  assert.equal(cards.items[0].preview, undefined, "values are passed on for addresses only");
+  // A frame's address field names its part; the top page gets it for addresses only.
+  const frame = { tab: { id: 1 }, frameId: 4, url: "https://pay.example/address" };
+  const rect = { left: 1, top: 2, width: 50, height: 20 };
+  await state.send({ action: "frame_field", detail: "profile", role: "postalCode", rect, nonce: "e".repeat(32) }, frame);
+  assert.equal(state.sent.at(-1).message.role, "postalCode");
+  await state.send({ action: "frame_field", detail: "profile", role: "password", rect, nonce: "e".repeat(32) }, frame);
+  assert.equal(state.sent.at(-1).message.role, undefined);
+  await state.send({ action: "frame_field", detail: "card", role: "email", rect, nonce: "e".repeat(32) }, frame);
+  assert.equal(state.sent.at(-1).message.role, undefined);
 });
 
 test("an older host without the feature never gets item requests", async () => {
@@ -747,10 +769,9 @@ test("frames: a focused card field is shown on the top page, and the card goes o
   const top = { tab: { id: 1 }, frameId: 0, url: "https://shop.example/checkout" };
   const rect = { left: 4, top: 8, width: 200, height: 30 };
 
-  assert.equal((await state.send({ action: "frame_field", detail: "card", rect }, top)).status, "rejected", "only frames report");
-  assert.equal((await state.send({ action: "frame_field", detail: "card", rect }, frame(3, "http://pay.example/card"))).status, "rejected");
-  assert.equal((await state.send({ action: "frame_field", detail: "login", rect }, frame(3))).status, "error", "logins are never filled in a frame");
-  assert.equal((await state.send({ action: "frame_field", detail: "card", rect }, frame(3))).status, "ok");
+  assert.equal((await state.send({ action: "frame_field", detail: "card", rect, nonce: "c".repeat(32) }, top)).status, "rejected", "only frames report");
+  assert.equal((await state.send({ action: "frame_field", detail: "card", rect, nonce: "c".repeat(32) }, frame(3, "http://pay.example/card"))).status, "rejected");
+  assert.equal((await state.send({ action: "frame_field", detail: "card", rect, nonce: "c".repeat(32) }, frame(3))).status, "ok");
   const shown = state.sent.at(-1);
   assert.deepEqual([shown.options.frameId, shown.message.target, shown.message.frameId, shown.message.detail], [0, "nuvori-top", 3, "card"]);
 
@@ -767,4 +788,133 @@ test("frames: a focused card field is shown on the top page, and the card goes o
     assert.equal(JSON.stringify(entry.message).includes("v".repeat(64)), false, "no security-code token leaves the worker");
   }
   assert.equal((await state.send({ action: "inline_fill_frame", kind: "card", id: "c1", frameId: 3 }, top)).status, "missing", "one report, one fill");
+});
+
+test("frames: a sign-in frame lists logins for its own site, and the login goes only to that frame", async () => {
+  const state = await worker((request) => {
+    if (request.action === "status") return { status: "ok", features: ALL_FEATURES };
+    if (request.action === "query_credentials") {
+      if (request.all) return { status: "ok", credentials: [{ id: "x", title: "Other", username: "o", selectionToken: "x".repeat(64), site: "other.example" }] };
+      return { status: "ok", credentials: request.origin === "https://login.bank.example" ? [{ id: "b1", title: "Bank", username: "me", selectionToken: "b".repeat(64) }] : [] };
+    }
+    if (request.action === "fill_credential") return { status: "ok", credential: { id: request.credentialId, username: "me", password: "bank-secret" } };
+    return { status: "error" };
+  }, { tabUrl: "https://bank.example/", frames: [{ frameId: 0, result: "https://bank.example" }, { frameId: 4, result: "https://login.bank.example" }] });
+  const frame = { tab: { id: 1 }, frameId: 4, url: "https://login.bank.example/signin" };
+  const top = { tab: { id: 1 }, frameId: 0, url: "https://bank.example/" };
+  const rect = { left: 4, top: 8, width: 200, height: 30 };
+
+  assert.equal((await state.send({ action: "frame_field", detail: "login", want: "both", rect, nonce: "c".repeat(32) }, frame)).status, "ok");
+  const shown = state.sent.at(-1);
+  assert.deepEqual([shown.options.frameId, shown.message.action, shown.message.frameId, shown.message.detail, shown.message.host],
+    [0, "frame_field", 4, "login", "login.bank.example"]);
+  const list = await state.send({ action: "inline_query", frameId: 4 }, top);
+  assert.deepEqual(Array.from(list.accounts, (account) => account.id), ["b1"]);
+  assert.equal(list.host, "login.bank.example");
+  assert.equal(state.requests.filter((request) => request.action === "query_credentials").at(-1).origin, "https://login.bank.example");
+  assert.equal((await state.send({ action: "inline_query", frameId: 9 }, top)).status, "missing", "only the frame that reported");
+  assert.equal((await state.send({ action: "inline_query", frameId: 4 }, frame)).status, "rejected", "a frame cannot ask for the list");
+
+  state.sent.length = 0;
+  const filled = await state.send({ action: "inline_fill_frame", kind: "login", id: "b1", frameId: 4 }, top);
+  assert.equal(filled.status, "ok");
+  assert.equal(JSON.stringify(filled).includes("bank-secret"), false, "the top page never gets the password");
+  assert.deepEqual(state.sent.map((entry) => [entry.options.frameId, entry.message.action, entry.message.username, entry.message.password]),
+    [[4, "fill_login", "me", "bank-secret"]]);
+  assert.equal(state.requests.find((request) => request.action === "fill_credential").origin, "https://login.bank.example");
+  assert.equal((await state.send({ action: "inline_fill_frame", kind: "login", id: "b1", frameId: 4 }, top)).status, "missing", "one report, one fill");
+
+  // Search all logins, for this frame: any login, filled only into this frame.
+  await state.send({ action: "frame_field", detail: "login", rect, nonce: "c".repeat(32) }, frame);
+  const every = await state.send({ action: "inline_all_logins", frameId: 4 }, top);
+  assert.equal(JSON.stringify(every.accounts), JSON.stringify([{ id: "x", title: "Other", username: "o", site: "other.example" }]));
+  const listing = state.requests.filter((request) => request.action === "query_credentials").at(-1);
+  assert.deepEqual([listing.all, listing.origin], [true, "https://login.bank.example"]);
+  state.sent.length = 0;
+  assert.equal((await state.send({ action: "inline_fill_frame", kind: "login", id: "x", frameId: 4, all: true }, top)).status, "ok");
+  assert.deepEqual(state.sent.map((entry) => entry.options.frameId), [4]);
+});
+
+test("frames: the login still fills only while the frame shows the same site", async () => {
+  let frameOrigin = "https://login.bank.example";
+  const state = await worker((request) => {
+    if (request.action === "status") return { status: "ok", features: ALL_FEATURES };
+    if (request.action === "query_credentials") return { status: "ok", credentials: [{ id: "b1", title: "Bank", username: "me", selectionToken: "b".repeat(64) }] };
+    if (request.action === "fill_credential") return { status: "ok", credential: { id: "b1", username: "me", password: "bank-secret" } };
+    return { status: "error" };
+  }, { tabUrl: "https://bank.example/", frames: (details) => [{ frameId: 4, result: frameOrigin }]
+    .filter((entry) => !details.target.frameIds || details.target.frameIds.includes(entry.frameId)) });
+  const frame = { tab: { id: 1 }, frameId: 4, url: "https://login.bank.example/signin" };
+  const top = { tab: { id: 1 }, frameId: 0, url: "https://bank.example/" };
+  await state.send({ action: "frame_field", detail: "login", rect: { left: 0, top: 0, width: 10, height: 10 }, nonce: "c".repeat(32) }, frame);
+  frameOrigin = "https://evil.example";
+  state.sent.length = 0;
+  const result = await state.send({ action: "inline_fill_frame", kind: "login", id: "b1", frameId: 4 }, top);
+  assert.equal(result.status, "error");
+  assert.equal(state.sent.length, 0, "no password is sent anywhere");
+});
+
+test("frames: the top page gets the frame's one-time code to find the frame element; a report without one is refused", async () => {
+  const state = await worker((request) => request.action === "status" ? { status: "ok", features: ALL_FEATURES } : { status: "ok", credentials: [] }, { tabUrl: "https://shop.example/" });
+  const inner = { tab: { id: 1 }, frameId: 6, url: "https://pay.example/login" };
+  const rect = { left: 1, top: 2, width: 50, height: 20 };
+  assert.equal((await state.send({ action: "frame_field", detail: "login", rect }, inner)).status, "error");
+  assert.equal((await state.send({ action: "frame_field", detail: "login", rect, nonce: "not-a-code" }, inner)).status, "error");
+  assert.equal((await state.send({ action: "frame_field", detail: "login", rect, nonce: "d".repeat(32) }, inner)).status, "ok");
+  const last = state.sent.at(-1);
+  assert.deepEqual([last.options.frameId, last.message.frameId, last.message.nonce], [0, 6, "d".repeat(32)]);
+  const list = await state.send({ action: "inline_query", frameId: 6 }, { tab: { id: 1 }, frameId: 0, url: "https://shop.example/" });
+  assert.deepEqual([list.status, list.host], ["ok", "pay.example"]);
+});
+
+test("frames: a frame the page built without an address counts as the page's site; other frames without one never do", async () => {
+  const state = await worker(() => ({ status: "ok", features: ALL_FEATURES }), { tabUrl: "https://shop.example/" });
+  const rect = { left: 0, top: 0, width: 10, height: 10 };
+  const blank = (origin) => ({ tab: { id: 1 }, frameId: 3, url: "about:blank", origin });
+  assert.equal((await state.send({ action: "frame_field", detail: "login", rect, nonce: "c".repeat(32) }, blank("https://shop.example"))).status, "ok");
+  assert.equal((await state.send({ action: "frame_field", detail: "login", rect, nonce: "c".repeat(32) }, blank("null"))).status, "rejected");
+  assert.equal((await state.send({ action: "frame_field", detail: "login", rect, nonce: "c".repeat(32) }, blank("http://shop.example"))).status, "rejected");
+  assert.equal((await state.send({ action: "frame_field", detail: "login", rect, nonce: "c".repeat(32) }, { tab: { id: 1 }, frameId: 3, url: "data:text/html,x", origin: "null" })).status, "rejected");
+});
+
+test("frames: a login submitted in a frame is saved for the frame's site, and its card shows on the top page", async () => {
+  const state = await worker((request) => {
+    if (request.action === "status") return { status: "ok", features: ALL_FEATURES };
+    if (request.action === "seal_login") return { status: "sealed", sealedLogin: "protected-login" };
+    if (request.action === "review_login") return { status: "needs_save" };
+    return { status: "ok" };
+  }, { tabUrl: "https://www.seedr.cc/" });
+  const frame = { tab: { id: 1 }, frameId: 2, url: "https://www.seedr.cc/api/v0.1/auth/pages/login" };
+  const top = { tab: { id: 1 }, frameId: 0, url: "https://www.seedr.cc/" };
+  const captured = await state.send({ action: "capture_submitted_login", username: "me@example.com", password: "synthetic-secret" }, frame);
+  assert.equal(captured.status, "shown");
+  const card = state.sent.at(-1);
+  assert.deepEqual([card.options.frameId, card.message.action, card.message.prompt.kind, card.message.prompt.host], [0, "show_prompt", "save", "www.seedr.cc"]);
+  assert.equal(state.requests.find((request) => request.action === "seal_login").origin, "https://www.seedr.cc");
+  // The top page (also after it moves to another page of the site) can answer it.
+  const pending = await state.send({ action: "inline_pending" }, top);
+  assert.equal(pending.status, "ok");
+});
+
+test("search all logins: needs a desktop app that lists every login, and fills the chosen one on this page", async () => {
+  const older = await worker((request) => request.action === "status"
+    ? { status: "ok", features: ALL_FEATURES.filter((name) => name !== "all_logins") } : { status: "ok", credentials: [] });
+  const page = { tab: { id: 1 }, frameId: 0, url: "https://example.com/login" };
+  assert.equal((await older.send({ action: "inline_all_logins" }, page)).status, "unsupported");
+
+  const state = await worker((request) => {
+    if (request.action === "status") return { status: "ok", features: ALL_FEATURES };
+    if (request.action === "query_credentials") return request.all
+      ? { status: "ok", credentials: [{ id: "s", title: "Seedr", username: "me@example.com", selectionToken: "s".repeat(64), site: "seedr.cc" }] }
+      : { status: "ok", credentials: [] };
+    if (request.action === "fill_credential") return { status: "ok", credential: { id: "s", username: "me@example.com", password: "seedr-secret" } };
+    return { status: "error" };
+  }, { tabUrl: "https://example.com/login" });
+  const every = await state.send({ action: "inline_all_logins" }, page);
+  assert.equal(JSON.stringify(every.accounts), JSON.stringify([{ id: "s", title: "Seedr", username: "me@example.com", site: "seedr.cc" }]));
+  const filled = await state.send({ action: "inline_fill_any", id: "s", want: "both" }, page);
+  assert.deepEqual([filled.status, filled.username, filled.password], ["ok", "me@example.com", "seedr-secret"]);
+  const fill = state.requests.find((request) => request.action === "fill_credential");
+  assert.deepEqual([fill.origin, fill.selectionToken], ["https://example.com", "s".repeat(64)]);
+  assert.equal((await state.send({ action: "inline_fill_any", id: "unknown", want: "both" }, page)).status, "missing");
 });

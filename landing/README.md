@@ -48,7 +48,9 @@ After the first deploy, open the page URL in a private window. Then you can use 
 ## Update the content
 
 - **Store links** sit in `index.html`, in the `#download` section, in each card's `href` and `data-copy`.
-- **The "Under review", "Closed testing" and "Pending review" tags** are the `.tag` elements in the same cards. When the Chrome Web Store listing goes live, replace the disabled `.store--disabled` button with a link like the other cards.
+- **Privacy policy and terms of service** are `privacy/index.html` and `terms/index.html` (shared at `/privacy/` and `/terms/`), styled by `legal.css`. When an app changes what data it handles, update the policy and its effective date in the same release.
+- **The tester sign-up form** (Google Form) is the **Join testing** button in the closing call to action (`#join-testing`) and the footer link of the same name. When the apps leave closed testing, remove both and the `.cta__note` line.
+- **The "Under review", "Closed testing" and "Available" tags** are the `.tag` elements in the same cards (`.tag--amber`, `.tag--violet`, `.tag--green`). The extension card links to the Chrome Web Store item `lpohaakdindhljdhpofnfmggbfllgdil`, with `assets/qr-chrome-web-store.svg`.
 - **QR codes** (`assets/qr-*.svg`) are made from the store URLs. If a URL changes, make the QR code again, and scan it before you publish.
 - **`palette.js`** is generated. Run `python scripts/appearance/generate.py <path to card_app_windows>` in the Android repository, and it rewrites this file together with the app palettes.
 - **Screenshots** in `assets/` are WebP copies of `card_app/docs/assets/screenshots` and `store-assets/`, with synthetic sample data only.

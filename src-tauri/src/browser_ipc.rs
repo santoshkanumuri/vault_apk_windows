@@ -50,7 +50,7 @@ use sha2::{Digest, Sha256};
 
 use crate::browser::{
     BROWSER_PROTOCOL_VERSION, BrowserAction, BrowserRequest, BrowserResponse, CardDetails,
-    CredentialChoice, FilledItem, ItemKind, PendingDetails, PendingLogin, SelectedCredential,
+    CredentialChoice, FilledItem, ItemKind, PendingDetails, PendingLogin, ProfileDetails, SelectedCredential,
     canonical_https_origin, valid_capture_username, valid_card_capture, valid_login_title,
     valid_profile_capture,
 };
@@ -62,6 +62,8 @@ use crate::{
 const PIPE_NAME: &str = r"\\.\pipe\nuvori-browser-v2";
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 const MAX_CANDIDATES: usize = 200;
+/// "all_logins": the most logins one listing of every login returns.
+const MAX_ALL_CANDIDATES: usize = 1_000;
 const SELECTION_TTL: Duration = Duration::from_secs(30);
 /// How long the user has to approve a card security code in Nuvori.
 const CVV_TTL: Duration = Duration::from_secs(120);
@@ -108,6 +110,12 @@ pub struct LoginCandidate {
     pub username: String,
     /// Saved for another page of the same site (listing and filling only).
     pub related: bool,
+    /// A card's own color (opaque ARGB), so the suggestion can show the card as it looks in Nuvori.
+    pub color: Option<u64>,
+    /// "all_logins": the host of the login's saved website ("" when none).
+    pub site: Option<String>,
+    /// An address's values for its suggestion row. Listed for addresses only.
+    pub preview: Option<ProfileDetails>,
 }
 
 pub trait BrowserCredentialProvider: Send + Sync + 'static {
@@ -123,6 +131,15 @@ pub trait BrowserCredentialProvider: Send + Sync + 'static {
     fn save_new_login(&self, origin: &str, username: &str, password: &str, title: Option<&str>) -> Result<bool, BrowserIpcError>;
     fn update_login(&self, origin: &str, id: &str, username: &str, password: &str, expected_hash: &[u8; 32]) -> Result<(), BrowserIpcError>;
     fn review_login(&self, origin: &str, username: &str, password: &str) -> Result<bool, BrowserIpcError>;
+
+    /// "all_logins": every saved login, for the user to choose from on any site.
+    fn query_all_credentials(&self) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
+        Ok(Vec::new())
+    }
+    /// "all_logins": one login the user chose from that list, whatever site it is saved for.
+    fn load_any_credential(&self, _id: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> {
+        Ok(None)
+    }
 
     /// "cards" / "profiles" / "codes": (id, title, subtitle) for `kind`. `all` lists every code.
     fn query_items(&self, _kind: ItemKind, _origin: &str, _all: bool) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
@@ -168,6 +185,9 @@ pub enum BrowserIpcError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GrantKind {
     Login,
+    /// "all_logins": a login the user picked from every saved login, for a site it is not saved for.
+    /// It fills only; it never updates the login.
+    AnyLogin,
     Item(ItemKind),
     Cvv,
 }
@@ -213,7 +233,7 @@ impl SelectionGrants {
     fn issue_kind(&mut self, record_id: String, origin: &str, kind: GrantKind) -> Result<String, BrowserIpcError> {
         self.grants
             .retain(|_, grant| grant.expires > Instant::now());
-        if self.grants.len() >= 2_000 {
+        if self.grants.len() >= 6_000 {
             return Err(BrowserIpcError::InvalidRequest);
         }
         let mut token_bytes = [0_u8; 32];
@@ -306,12 +326,12 @@ impl SelectionGrants {
         true
     }
 
-    fn consume(&mut self, token: &str, record_id: &str, origin: &str) -> bool {
-        let Some(grant) = self.grants.remove(token) else {
-            return false;
-        };
-        grant.expires > Instant::now() && grant.record_id == record_id && grant.origin == origin && grant.password_hash.is_none()
-            && grant.kind == GrantKind::Login
+    /// The grant's kind (`Login` or `AnyLogin`) when the token may release this login here.
+    fn consume(&mut self, token: &str, record_id: &str, origin: &str) -> Option<GrantKind> {
+        let grant = self.grants.remove(token)?;
+        (grant.expires > Instant::now() && grant.record_id == record_id && grant.origin == origin && grant.password_hash.is_none()
+            && matches!(grant.kind, GrantKind::Login | GrantKind::AnyLogin))
+            .then_some(grant.kind)
     }
 
     fn consume_update(&mut self, token: &str, id: &str, origin: &str) -> Option<[u8; 32]> {
@@ -869,7 +889,8 @@ fn handle_request(
     // Only the native host takes captured fields ("seal_details"); the app never does.
     if request.card.is_some() || request.profile.is_some()
         || (!item_action && request.kind.is_some())
-        || (request.all.is_some() && !(matches!(request.action, BrowserAction::QueryItems) && request.kind == Some(ItemKind::Code)))
+        || (request.all.is_some() && !(matches!(request.action, BrowserAction::QueryCredentials)
+            || (matches!(request.action, BrowserAction::QueryItems) && request.kind == Some(ItemKind::Code))))
         || (item_action && request.kind.is_none())
     {
         return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
@@ -916,7 +937,9 @@ fn handle_request(
                     "Account lookup cannot include a selected credential.",
                 ));
             }
-            let candidates = match provider.query_credentials(&origin) {
+            let every = request.all == Some(true);
+            let listed = if every { provider.query_all_credentials() } else { provider.query_credentials(&origin) };
+            let candidates = match listed {
                 Ok(candidates) => candidates,
                 Err(BrowserIpcError::VaultLocked) => {
                     return Ok(locked_response(request.request_id));
@@ -925,17 +948,22 @@ fn handle_request(
             };
             let mut credentials = Vec::new();
             let mut token_store = grants.lock().expect("browser grant lock poisoned");
-            for candidate in candidates.into_iter().take(MAX_CANDIDATES) {
+            let limit = if every { MAX_ALL_CANDIDATES } else { MAX_CANDIDATES };
+            for candidate in candidates.into_iter().take(limit) {
                 if candidate.id.is_empty() || candidate.id.len() > 256 {
                     continue;
                 }
-                let selection_token = token_store.issue(candidate.id.clone(), &origin)?;
+                let kind = if every { GrantKind::AnyLogin } else { GrantKind::Login };
+                let selection_token = token_store.issue_kind(candidate.id.clone(), &origin, kind)?;
                 credentials.push(CredentialChoice {
                     id: candidate.id,
                     title: candidate.title,
                     username: candidate.username,
                     selection_token,
                     related: candidate.related,
+                    color: None,
+                    site: candidate.site,
+                    preview: None,
                 });
             }
             Ok(ok_response(request.request_id, Some(credentials), None))
@@ -960,7 +988,7 @@ fn handle_request(
                 &record_id,
                 &origin,
             );
-            if !authorized {
+            let Some(granted) = authorized else {
                 return Ok(BrowserResponse {
                     version: BROWSER_PROTOCOL_VERSION,
                     request_id: request.request_id,
@@ -970,8 +998,13 @@ fn handle_request(
                     credential: None,
                     sealed_login: None, features: None, appearance: None, item: None,
                 });
-            }
-            let selected = match provider.load_selected_credential(&record_id, &origin) {
+            };
+            let loaded = if granted == GrantKind::AnyLogin {
+                provider.load_any_credential(&record_id)
+            } else {
+                provider.load_selected_credential(&record_id, &origin)
+            };
+            let selected = match loaded {
                 Ok(selected) => selected,
                 Err(BrowserIpcError::VaultLocked) => {
                     return Ok(locked_response(request.request_id));
@@ -1021,7 +1054,8 @@ fn handle_request(
                     continue;
                 }
                 let selection_token = token_store.issue_kind(candidate.id.clone(), &origin, GrantKind::Item(kind))?;
-                choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token, related: false });
+                choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token, related: false, color: candidate.color, site: None,
+                    preview: if kind == ItemKind::Profile { candidate.preview } else { None } });
             }
             Ok(ok_response(request.request_id, Some(choices), None))
         }
@@ -1222,7 +1256,7 @@ fn handle_request(
                     let mut grants = grants.lock().expect("browser grant lock poisoned");
                     let token = grants.issue(candidate.id.clone(), &origin)?;
                     grants.grants.get_mut(&token).expect("issued update grant").password_hash = Some(hash);
-                    choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token: token, related: false });
+                    choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token: token, related: false, color: None, site: None, preview: None });
                 }
                 (!choices.is_empty()).then_some(choices)
             } else { None };
@@ -1405,7 +1439,7 @@ mod tests {
                 vec![LoginCandidate {
                     id: "login-1".to_owned(),
                     title: "Example".to_owned(),
-                    username: "alice".to_owned(), related: false
+                    username: "alice".to_owned(), related: false, color: None, site: None, preview: None
                 }]
             } else {
                 Vec::new()
@@ -1543,20 +1577,20 @@ mod tests {
         let token = grants
             .issue("login-1".to_owned(), "https://example.com")
             .unwrap();
-        assert!(!grants.consume(&token, "login-1", "https://sub.example.com"));
-        assert!(!grants.consume(&token, "login-1", "https://example.com"));
+        assert!(grants.consume(&token, "login-1", "https://sub.example.com").is_none());
+        assert!(grants.consume(&token, "login-1", "https://example.com").is_none());
 
         let token = grants
             .issue("login-1".to_owned(), "https://example.com")
             .unwrap();
-        assert!(!grants.consume(&token, "login-2", "https://example.com"));
-        assert!(!grants.consume(&token, "login-1", "https://example.com"));
+        assert!(grants.consume(&token, "login-2", "https://example.com").is_none());
+        assert!(grants.consume(&token, "login-1", "https://example.com").is_none());
 
         let token = grants
             .issue("login-1".to_owned(), "https://example.com")
             .unwrap();
-        assert!(grants.consume(&token, "login-1", "https://example.com"));
-        assert!(!grants.consume(&token, "login-1", "https://example.com"));
+        assert_eq!(grants.consume(&token, "login-1", "https://example.com"), Some(GrantKind::Login));
+        assert!(grants.consume(&token, "login-1", "https://example.com").is_none());
     }
 
     #[test]
@@ -1581,7 +1615,7 @@ mod tests {
         assert!(grants.consume_update(&fill, "login-1", "https://example.com").is_none());
         let update = grants.issue("login-1".into(), "https://example.com").unwrap();
         grants.grants.get_mut(&update).unwrap().password_hash = Some([7; 32]);
-        assert!(!grants.consume(&update, "login-1", "https://example.com"));
+        assert!(grants.consume(&update, "login-1", "https://example.com").is_none());
         assert!(grants.consume_update(&update, "login-1", "https://example.com").is_none());
         let update = grants.issue("login-1".into(), "https://example.com").unwrap();
         grants.grants.get_mut(&update).unwrap().password_hash = Some([7; 32]);
@@ -1624,9 +1658,9 @@ mod tests {
     impl BrowserCredentialProvider for SharedUsernameProvider {
         fn query_credentials(&self, _: &str) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
             Ok(vec![
-                LoginCandidate { id: "a".into(), title: "Personal".into(), username: "".into(), related: false },
-                LoginCandidate { id: "b".into(), title: "Work".into(), username: "".into(), related: false },
-                LoginCandidate { id: "c".into(), title: "Other".into(), username: "carol".into(), related: false },
+                LoginCandidate { id: "a".into(), title: "Personal".into(), username: "".into(), related: false, color: None, site: None, preview: None },
+                LoginCandidate { id: "b".into(), title: "Work".into(), username: "".into(), related: false, color: None, site: None, preview: None },
+                LoginCandidate { id: "c".into(), title: "Other".into(), username: "carol".into(), related: false, color: None, site: None, preview: None },
             ])
         }
         fn load_selected_credential(&self, id: &str, _: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> {
@@ -1650,6 +1684,79 @@ mod tests {
             created_at: time::OffsetDateTime::now_utc().unix_timestamp(), title: title.map(str::to_owned),
         };
         URL_SAFE_NO_PAD.encode(dpapi::protect(&serde_json::to_vec(&pending).unwrap(), "test pending login").unwrap())
+    }
+
+    /// Saved for seedr.cc only; "Search all logins" may still offer it on any site.
+    struct EveryLoginProvider;
+
+    impl BrowserCredentialProvider for EveryLoginProvider {
+        fn query_credentials(&self, origin: &str) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
+            Ok(if origin == "https://www.seedr.cc" {
+                vec![LoginCandidate { id: "seedr".into(), title: "Seedr".into(), username: "me@example.com".into(), related: false, color: None, site: None, preview: None }]
+            } else {
+                Vec::new()
+            })
+        }
+        fn load_selected_credential(&self, id: &str, origin: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> {
+            Ok((id == "seedr" && origin == "https://www.seedr.cc").then(|| SelectedCredential {
+                id: id.into(), username: "me@example.com".into(), password: "seedr-pass".into() }))
+        }
+        fn query_all_credentials(&self) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
+            Ok(vec![
+                LoginCandidate { id: "seedr".into(), title: "Seedr".into(), username: "me@example.com".into(), related: false, color: None, site: Some("seedr.cc".into()), preview: None },
+                LoginCandidate { id: "bank".into(), title: "Bank".into(), username: "me".into(), related: false, color: None, site: Some("bank.example".into()), preview: None },
+            ])
+        }
+        fn load_any_credential(&self, id: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> {
+            Ok((id == "seedr").then(|| SelectedCredential { id: id.into(), username: "me@example.com".into(), password: "seedr-pass".into() }))
+        }
+        fn save_new_login(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> Result<bool, BrowserIpcError> { Ok(true) }
+        fn update_login(&self, _: &str, _: &str, _: &str, _: &str, _: &[u8; 32]) -> Result<(), BrowserIpcError> { Ok(()) }
+        fn review_login(&self, _: &str, _: &str, _: &str) -> Result<bool, BrowserIpcError> { Ok(true) }
+    }
+
+    #[test]
+    fn all_logins_lists_every_login_and_fills_the_chosen_one_on_that_page_only() {
+        let provider: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> = RwLock::new(Some(Arc::new(EveryLoginProvider)));
+        let grants = Mutex::new(SelectionGrants::default());
+        let on = |action, origin: &str, id: Option<&str>, token: Option<&str>, all: Option<bool>| {
+            let mut request = request(action, id, token);
+            request.origin = origin.to_owned();
+            request.all = all;
+            request
+        };
+        // The page's own listing has nothing for this site; the full listing has every login and its site.
+        let matched = handle_request(on(BrowserAction::QueryCredentials, "https://other.example", None, None, None), &provider, &grants).unwrap();
+        assert!(matched.credentials.unwrap().is_empty());
+        let every = handle_request(on(BrowserAction::QueryCredentials, "https://other.example", None, None, Some(true)), &provider, &grants).unwrap();
+        let choices = every.credentials.unwrap();
+        assert_eq!(choices.iter().map(|choice| choice.site.as_deref().unwrap()).collect::<Vec<_>>(), ["seedr.cc", "bank.example"]);
+        let token = choices[0].selection_token.clone();
+        assert!(serde_json::to_string(&choices[0]).unwrap().contains("\"site\":\"seedr.cc\""));
+
+        // The token works for that login on the page it was listed for, and not on another page.
+        let elsewhere = handle_request(on(BrowserAction::FillCredential, "https://evil.example", Some("seedr"), Some(&token), None), &provider, &grants).unwrap();
+        assert_eq!(elsewhere.status, "selection_expired");
+        let every = handle_request(on(BrowserAction::QueryCredentials, "https://other.example", None, None, Some(true)), &provider, &grants).unwrap();
+        let token = every.credentials.unwrap()[0].selection_token.clone();
+        let filled = handle_request(on(BrowserAction::FillCredential, "https://other.example", Some("seedr"), Some(&token), None), &provider, &grants).unwrap();
+        assert_eq!(filled.status, "ok");
+        assert_eq!(filled.credential.as_ref().unwrap().password, "seedr-pass");
+        // Single use.
+        let replay = handle_request(on(BrowserAction::FillCredential, "https://other.example", Some("seedr"), Some(&token), None), &provider, &grants).unwrap();
+        assert_eq!(replay.status, "selection_expired");
+        // A token from the full listing never updates a login.
+        let every = handle_request(on(BrowserAction::QueryCredentials, "https://other.example", None, None, Some(true)), &provider, &grants).unwrap();
+        let token = every.credentials.unwrap()[0].selection_token.clone();
+        assert!(grants.lock().unwrap().consume_update(&token, "seedr", "https://other.example").is_none());
+        // "all" belongs to listings only.
+        let misplaced = handle_request(on(BrowserAction::FillCredential, "https://other.example", Some("seedr"), Some(&"0".repeat(64)), Some(true)), &provider, &grants).unwrap();
+        assert_eq!(misplaced.status, "invalid_request");
+        // Matched listings keep releasing only matching logins.
+        let own = handle_request(on(BrowserAction::QueryCredentials, "https://www.seedr.cc", None, None, None), &provider, &grants).unwrap();
+        let token = own.credentials.unwrap()[0].selection_token.clone();
+        let filled = handle_request(on(BrowserAction::FillCredential, "https://www.seedr.cc", Some("seedr"), Some(&token), None), &provider, &grants).unwrap();
+        assert_eq!(filled.credential.unwrap().username, "me@example.com");
     }
 
     #[test]
@@ -1683,9 +1790,13 @@ mod tests {
         fn update_login(&self, _: &str, _: &str, _: &str, _: &str, _: &[u8; 32]) -> Result<(), BrowserIpcError> { Ok(()) }
         fn review_login(&self, _: &str, _: &str, _: &str) -> Result<bool, BrowserIpcError> { Ok(true) }
         fn query_items(&self, kind: ItemKind, _: &str, _: bool) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
-            Ok(if kind == ItemKind::Card {
-                vec![LoginCandidate { id: "card-1".into(), title: "Travel".into(), username: "Visa · •••• 1111".into(), related: false }]
-            } else { Vec::new() })
+            let home = ProfileDetails { name: "Alice Smith".into(), email: "alice@example.com".into(), postal_code: "78701".into(), ..Default::default() };
+            Ok(match kind {
+                // A provider that sends values with a card must not get them through.
+                ItemKind::Card => vec![LoginCandidate { id: "card-1".into(), title: "Travel".into(), username: "Visa · •••• 1111".into(), related: false, color: Some(0xFF31_5B8C), site: None, preview: Some(home) }],
+                ItemKind::Profile => vec![LoginCandidate { id: "home".into(), title: "Home".into(), username: "Alice Smith".into(), related: false, color: None, site: None, preview: Some(home) }],
+                ItemKind::Code => Vec::new(),
+            })
         }
         fn load_item(&self, kind: ItemKind, id: &str, _: &str) -> Result<Option<FilledItem>, BrowserIpcError> {
             Ok(Some(FilledItem { id: id.into(), kind, card: Some(CardDetails::with("4111111111111111", "12/29", "123")),
@@ -1707,6 +1818,19 @@ mod tests {
             query.kind = Some(ItemKind::Card);
             handle_request(query, &provider, &grants).unwrap().credentials.unwrap().remove(0).selection_token
         };
+        // The listing carries the card's color for its row, and only for cards.
+        let mut listing = request(BrowserAction::QueryItems, None, None);
+        listing.kind = Some(ItemKind::Card);
+        let listed = handle_request(listing, &provider, &grants).unwrap();
+        assert_eq!(listed.credentials.as_ref().unwrap()[0].color, Some(0xFF31_5B8C));
+        assert!(serde_json::to_string(&listed).unwrap().contains("\"color\":4281424780"));
+        assert!(listed.credentials.as_ref().unwrap()[0].preview.is_none(), "values are listed for addresses only");
+        // An address listing carries its values, so the row can show the focused field's value.
+        let mut addresses = request(BrowserAction::QueryItems, None, None);
+        addresses.kind = Some(ItemKind::Profile);
+        let addresses = serde_json::to_value(handle_request(addresses, &provider, &grants).unwrap()).unwrap();
+        assert_eq!(addresses["credentials"][0]["preview"]["email"], "alice@example.com");
+        assert_eq!(addresses["credentials"][0]["preview"]["postalCode"], "78701");
         // A card token never releases a login, and a login request can't list items.
         let token = card_token();
         assert_eq!(handle_request(request(BrowserAction::FillCredential, Some("card-1"), Some(&token)), &provider, &grants).unwrap().status, "selection_expired");

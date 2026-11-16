@@ -80,8 +80,8 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
         // Logins for this exact site first, then those saved for another page of the same site.
         Ok(exact
             .into_iter()
-            .map(|(id, title, username)| LoginCandidate { id, title, username, related: false })
-            .chain(related.into_iter().map(|(id, title, username)| LoginCandidate { id, title, username, related: true }))
+            .map(|(id, title, username)| LoginCandidate { id, title, username, related: false, color: None, site: None, preview: None })
+            .chain(related.into_iter().map(|(id, title, username)| LoginCandidate { id, title, username, related: true, color: None, site: None, preview: None }))
             .collect())
     }
 
@@ -103,6 +103,26 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
                 username,
                 password,
             }))
+    }
+
+    fn query_all_credentials(&self) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
+        let app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let vault = app.unlocked.as_ref().ok_or(BrowserIpcError::VaultLocked)?;
+        Ok(vault
+            .all_logins()
+            .map_err(|_| BrowserIpcError::InvalidRequest)?
+            .into_iter()
+            .map(|(id, title, username, site)| LoginCandidate { id, title, username, related: false, color: None, site: Some(site), preview: None })
+            .collect())
+    }
+
+    fn load_any_credential(&self, id: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> {
+        let app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let vault = app.unlocked.as_ref().ok_or(BrowserIpcError::VaultLocked)?;
+        Ok(vault
+            .any_login(id)
+            .map_err(|_| BrowserIpcError::InvalidRequest)?
+            .map(|(username, password)| SelectedCredential { id: id.to_owned(), username, password }))
     }
 
     fn save_new_login(&self, origin: &str, username: &str, password: &str, title: Option<&str>) -> Result<bool, BrowserIpcError> {
@@ -133,13 +153,16 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
     fn query_items(&self, kind: ItemKind, origin: &str, all: bool) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
         let app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
         let vault = app.unlocked.as_ref().ok_or(BrowserIpcError::VaultLocked)?;
+        let plain = |items: Vec<(String, String, String)>| items.into_iter()
+            .map(|(id, title, username)| LoginCandidate { id, title, username, related: false, color: None, site: None, preview: None }).collect::<Vec<_>>();
         let items = match kind {
-            ItemKind::Card => vault.browser_cards(),
-            ItemKind::Profile => vault.browser_profiles(),
-            ItemKind::Code => vault.browser_codes(origin, all),
-        }
-        .map_err(|_| BrowserIpcError::InvalidRequest)?;
-        Ok(items.into_iter().map(|(id, title, username)| LoginCandidate { id, title, username, related: false }).collect())
+            ItemKind::Card => vault.browser_cards().map(|cards| cards.into_iter()
+                .map(|(id, title, username, color)| LoginCandidate { id, title, username, related: false, color, site: None, preview: None }).collect()),
+            ItemKind::Profile => vault.browser_profiles().map(|profiles| profiles.into_iter()
+                .map(|(id, title, username, profile)| LoginCandidate { id, title, username, related: false, color: None, site: None, preview: Some(profile) }).collect()),
+            ItemKind::Code => vault.browser_codes(origin, all).map(plain),
+        };
+        items.map_err(|_| BrowserIpcError::InvalidRequest)
     }
 
     fn load_item(&self, kind: ItemKind, id: &str, _origin: &str) -> Result<Option<FilledItem>, BrowserIpcError> {
@@ -186,7 +209,13 @@ struct SyncController {
     tracker: lan_sync::SyncTracker,
     discovery: Mutex<Option<discovery::LanDiscovery>>,
     cloud: CloudController,
+    /// Nuvori was opened: the loop runs one pass over every way as soon as the vault is unlocked.
+    open_requested: std::sync::atomic::AtomicBool,
+    last_open: Mutex<Option<Instant>>,
 }
+
+/// Opening Nuvori again within this time does not start another pass.
+const OPEN_PASS_MIN_GAP: Duration = Duration::from_secs(60);
 
 /// The Google Drive side of sync. `drive` keeps the access token between passes.
 #[derive(Default)]
@@ -251,6 +280,16 @@ impl CloudController {
 }
 
 impl SyncController {
+    /// Nuvori came to the front. Asks for one pass, at most once per [`OPEN_PASS_MIN_GAP`].
+    fn request_open_pass(&self) { self.request_open_pass_at(Instant::now()); }
+
+    fn request_open_pass_at(&self, now: Instant) {
+        let Ok(mut last) = self.last_open.lock() else { return };
+        if last.is_some_and(|at| now.saturating_duration_since(at) < OPEN_PASS_MIN_GAP) { return; }
+        *last = Some(now);
+        self.open_requested.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn endpoints(&self) -> Vec<std::net::SocketAddr> {
         let Ok(mut network) = self.discovery.lock() else { return Vec::new(); };
         if network.is_none() { *network = discovery::LanDiscovery::new().ok(); }
@@ -259,7 +298,9 @@ impl SyncController {
 
     /// Runs one pass over `ways`. `manual` passes always log; automatic passes log only when
     /// something moved or failed so the activity log is not flooded by idle checks.
-    fn exchange(&self, state: &ManagedState, helper: &std::path::Path, address: &str, manual: bool, ways: Ways) -> PassOutcome {
+    /// `opened`: the pass on opening Nuvori. Like Sync now it waits briefly for devices to show up
+    /// on Wi-Fi, but finding none is normal and changes no status message or log.
+    fn exchange(&self, state: &ManagedState, helper: &std::path::Path, address: &str, manual: bool, ways: Ways, opened: bool) -> PassOutcome {
         let Ok(_guard) = self.gate.try_lock() else {
             return PassOutcome::not_run(Err("A sync pass is already running".into()));
         };
@@ -272,14 +313,14 @@ impl SyncController {
             activity::log(Level::Progress, Category::Sync, "Sync started");
         }
         let mut endpoints = if ways.wifi { self.endpoints() } else { Vec::new() };
-        if manual && ways.wifi && endpoints.is_empty() {
+        if (manual || opened) && ways.wifi && endpoints.is_empty() {
             for _ in 0..6 {
                 thread::sleep(Duration::from_millis(500));
                 endpoints = self.endpoints();
                 if !endpoints.is_empty() { break; }
             }
         }
-        let mut outcome = self.pass(state, helper, address, &endpoints, manual, ways);
+        let mut outcome = self.pass(state, helper, address, &endpoints, manual, ways, opened);
         // Continuous editing: edits saved on this PC while the pass ran get a prompt follow-up
         // pass (after a short debounce) instead of waiting for the next interval.
         for _ in 0..MAX_FOLLOW_UP_PASSES {
@@ -290,7 +331,7 @@ impl SyncController {
             let previous = report.clone();
             thread::sleep(FOLLOW_UP_DEBOUNCE);
             let endpoints = if ways.wifi { self.endpoints() } else { Vec::new() };
-            let follow_up = self.pass(state, helper, address, &endpoints, false, ways);
+            let follow_up = self.pass(state, helper, address, &endpoints, false, ways, opened);
             outcome = PassOutcome {
                 result: follow_up.result.map(|next| lan_sync::SyncReport {
                     sent: previous.sent + next.sent,
@@ -314,8 +355,8 @@ impl SyncController {
     /// One pass over `ways`: devices on this Wi-Fi first, then Google Drive when it is connected.
     /// The pass succeeds when either way worked, so a PC away from its phone still syncs.
     fn pass(&self, state: &ManagedState, helper: &std::path::Path, address: &str,
-        endpoints: &[std::net::SocketAddr], manual: bool, ways: Ways) -> PassOutcome {
-        let lan = ways.wifi.then(|| lan_sync::run(state, helper, address, &self.tracker, endpoints));
+        endpoints: &[std::net::SocketAddr], manual: bool, ways: Ways, opened: bool) -> PassOutcome {
+        let lan = ways.wifi.then(|| lan_sync::run(state, helper, address, &self.tracker, endpoints, opened && !manual));
         let cloud = if ways.drive { self.cloud.pass(state, &self.tracker, manual) } else { None };
         let way = |result: &Option<Result<lan_sync::SyncReport, String>>| {
             result.as_ref().map(|result| result.as_ref().map(|_| ()).map_err(Clone::clone))
@@ -332,6 +373,9 @@ impl SyncController {
                 // a PC away from its phone. It is not shown or logged as a sync failure.
                 if !manual && lan.as_ref().is_err_and(|error| error == lan_sync::UNREACHABLE) && CloudController::connected(state) {
                     self.tracker.succeed();
+                    quiet = true;
+                } else if opened && !manual && lan.as_ref().is_err_and(|error| error == lan_sync::UNREACHABLE) {
+                    // Opened away from the other devices: nothing to report.
                     quiet = true;
                 }
                 lan
@@ -491,6 +535,16 @@ fn configure_sync(address: String, automatic: bool, state: State<'_, ManagedStat
 
 /// Saves how often automatic sync checks Wi-Fi devices and Google Drive (Sync page). A value
 /// left out keeps its saved choice.
+/// Turns "Sync when Nuvori opens" on or off on this PC (Sync page).
+#[tauri::command]
+fn set_sync_on_open(enabled: bool, state: State<'_, ManagedState>) -> Result<(), String> {
+    let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
+    lan_sync::set_sync_on_open(app.unlocked.as_mut().ok_or("Unlock the vault first")?.connection(), enabled)?;
+    activity::log(Level::Info, Category::Sync,
+        if enabled { "Sync when Nuvori opens is on" } else { "Sync when Nuvori opens is off" });
+    Ok(())
+}
+
 #[tauri::command]
 fn set_sync_schedule(wifi_seconds: Option<u64>, drive_seconds: Option<u64>, state: State<'_, ManagedState>) -> Result<(), String> {
     let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
@@ -509,7 +563,7 @@ async fn sync_now(address: String, state: State<'_, ManagedState>, pairing: Stat
     let helper = pairing.helper_path.clone();
     let sync = sync.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        sync.exchange(&state, &helper, &address, true, Ways::ALL).result
+        sync.exchange(&state, &helper, &address, true, Ways::ALL, false).result
     }).await.map_err(|_| "Sync stopped unexpectedly. Retry to continue.".to_owned())?
 }
 
@@ -793,7 +847,7 @@ async fn cloud_connect(state: State<'_, ManagedState>, pairing: State<'_, Arc<Pa
             activity::log(Level::Success, Category::Sync, "Google Drive connected. Changes now also sync through your Drive");
             // First upload right away, so the other devices find this PC's changes.
             let (state, sync) = (state.clone(), sync.clone());
-            thread::spawn(move || { let _ = sync.exchange(&state, &helper, "", false, Ways::DRIVE); });
+            thread::spawn(move || { let _ = sync.exchange(&state, &helper, "", false, Ways::DRIVE, false); });
         }
         read_cloud_status(&state, &sync)
     })
@@ -882,6 +936,19 @@ impl WayClock {
 }
 
 #[test]
+fn opening_nuvori_asks_for_one_pass_per_minute() {
+    use std::sync::atomic::Ordering;
+    let sync = SyncController::default();
+    let start = Instant::now();
+    sync.request_open_pass_at(start);
+    assert!(sync.open_requested.swap(false, Ordering::SeqCst), "the first open asks for a pass");
+    sync.request_open_pass_at(start + Duration::from_secs(20));
+    assert!(!sync.open_requested.load(Ordering::SeqCst), "switching back within a minute does not");
+    sync.request_open_pass_at(start + OPEN_PASS_MIN_GAP);
+    assert!(sync.open_requested.load(Ordering::SeqCst), "a minute later it does again");
+}
+
+#[test]
 fn each_way_keeps_its_own_interval_and_retry_delay() {
     let start = Instant::now();
     let seen = (String::new(), 7);
@@ -964,6 +1031,7 @@ struct LoopPlan {
     automatic: bool,
     drive: bool,
     schedule: lan_sync::Schedule,
+    on_open: bool,
 }
 
 fn start_background_sync(state: ManagedState, pairing: Arc<PairingController>, sync: Arc<SyncController>) {
@@ -986,7 +1054,8 @@ fn start_background_sync(state: ManagedState, pairing: Arc<PairingController>, s
                 let (address, automatic) = lan_sync::configuration(vault).ok()?;
                 let schedule = lan_sync::schedule(vault.connection());
                 let drive = google_drive::client().is_some() && lan_sync::cloud::account(vault.connection()).is_some();
-                Some(LoopPlan { seen: (address, revision), automatic, drive, schedule })
+                let on_open = lan_sync::sync_on_open(vault.connection());
+                Some(LoopPlan { seen: (address, revision), automatic, drive, schedule, on_open })
             })();
             let Some(plan) = plan else {
                 if wifi.retry_at.is_some() { sync.tracker.schedule_retry(None); }
@@ -1005,16 +1074,22 @@ fn start_background_sync(state: ManagedState, pairing: Arc<PairingController>, s
                 wifi.failures = 0;
             }
             let now = Instant::now();
-            let ways = Ways {
+            // Nuvori was opened (and the vault is unlocked now): every way runs once, Wi-Fi too
+            // when automatic Wi-Fi sync is off. A request waits here while the vault is locked.
+            let open_requested = sync.open_requested.load(std::sync::atomic::Ordering::SeqCst);
+            if open_requested && !plan.on_open { sync.open_requested.store(false, std::sync::atomic::Ordering::SeqCst); }
+            let opened = open_requested && plan.on_open;
+            let ways = if opened { Ways { wifi: true, drive: plan.drive } } else { Ways {
                 wifi: plan.automatic && wifi.due(&plan.seen, Some(Duration::from_secs(plan.schedule.wifi_seconds)), now),
                 drive: plan.drive && drive.due(&plan.seen, (plan.schedule.drive_seconds > 0)
                     .then(|| Duration::from_secs(plan.schedule.drive_seconds)), now),
-            };
+            } };
             if !ways.wifi && !ways.drive { continue; }
             if sync.gate.try_lock().is_err() { continue; }
+            if opened { sync.open_requested.store(false, std::sync::atomic::Ordering::SeqCst); }
             if ways.wifi { wifi.start(&plan.seen, now); }
             if ways.drive { drive.start(&plan.seen, now); }
-            let outcome = sync.exchange(&state, &pairing.helper_path, &plan.seen.0, false, ways);
+            let outcome = sync.exchange(&state, &pairing.helper_path, &plan.seen.0, false, ways, opened);
             let finished = Instant::now();
             if let Some(result) = &outcome.drive {
                 drive.finish(result, finished);
@@ -2318,6 +2393,7 @@ pub fn run() {
             sync_status,
             configure_sync,
             set_sync_schedule,
+            set_sync_on_open,
             pairing_status,
             start_pairing,
             start_reverse_pairing,
@@ -2377,6 +2453,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to run Nuvori");
     app.run(|app, event| {
+        // Opening Nuvori syncs on its own: the main window coming to the front asks for one pass.
+        if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Focused(true), .. } = &event
+            && label == desktop::MAIN_WINDOW
+        {
+            app.state::<Arc<SyncController>>().request_open_pass();
+        }
         // Closing the last window keeps Nuvori in the tray, so browser filling keeps working.
         // "Quit Nuvori" in the tray exits with a code and is not stopped here.
         if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event

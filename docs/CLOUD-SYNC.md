@@ -136,6 +136,8 @@ Nuvori does not delete its files from Google Drive. To delete them all:
 
 Do this only when no device uses Google Drive sync anymore. Otherwise the next sync pass uploads the files again. The exact Google menu names can change. Follow the Google Drive settings as they are today.
 
+This also deletes the Android app's Google Drive backups (files named `nvbak1.<backup ID>.<time>`), which are in the same hidden folder. Windows sync ignores those files: their names do not start with `nv1.<group>.`.
+
 ## What Google can and cannot see
 
 Nuvori asks Google for one permission: `https://www.googleapis.com/auth/drive.appdata`. This gives Nuvori a hidden app folder in your Google Drive. Nuvori cannot see or change your other Google Drive files. The sign-in token stays in the encrypted vault database on the PC. It is readable only while the vault is unlocked.

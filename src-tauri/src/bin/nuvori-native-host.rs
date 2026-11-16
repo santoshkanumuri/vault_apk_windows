@@ -188,7 +188,8 @@ fn validate(request: &BrowserRequest) -> Result<(), &'static str> {
     let sealing_details = matches!(request.action, Action::SealDetails);
     if (request.kind.is_some() && !item_action && !sealing_details)
         || ((item_action || sealing_details) && request.kind.is_none())
-        || (request.all.is_some() && !(matches!(request.action, Action::QueryItems) && request.kind == Some(ItemKind::Code)))
+        || (request.all.is_some() && !(matches!(request.action, Action::QueryCredentials)
+            || (matches!(request.action, Action::QueryItems) && request.kind == Some(ItemKind::Code))))
         || ((request.card.is_some() || request.profile.is_some()) && !sealing_details)
     {
         return Err("The browser request is incomplete.");
@@ -465,6 +466,10 @@ mod tests {
         assert!(ok(r#"{"version":2,"requestId":"r","action":"commit_login","origin":"https://a.example","sealedLogin":"x","username":"fixed"}"#));
         assert!(!ok(r#"{"version":2,"requestId":"r","action":"review_login","origin":"https://a.example","sealedLogin":"x","username":"fixed"}"#));
         assert!(ok(r#"{"version":2,"requestId":"r","action":"commit_details","origin":"https://a.example","sealedLogin":"x","title":"Home"}"#));
+        // "all_logins": every login, on a login listing only.
+        assert!(ok(r#"{"version":2,"requestId":"r","action":"query_credentials","origin":"https://a.example","all":true}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"fill_credential","origin":"https://a.example","credentialId":"i","selectionToken":"t","all":true}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_items","origin":"https://a.example","kind":"profile","all":true}"#));
     }
 
     #[test]

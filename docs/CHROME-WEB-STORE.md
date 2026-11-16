@@ -48,7 +48,8 @@ Requires Nuvori for Windows on the same PC. The extension has no vault of its ow
 What it does
 - Fills logins on HTTPS websites. Choose an account from the list under the sign-in field.
 - Saves new logins and updates changed passwords after you sign in.
-- Fills cards, addresses and authenticator codes, also inside payment frames.
+- Fills logins, cards, addresses and authenticator codes, also inside sign-in and payment frames.
+- Search all logins: fill any saved login on any page, after confirming when it was saved for another site.
 - Can turn off the browser's own password manager, so only one tool offers to save.
 
 Private by design
@@ -114,7 +115,7 @@ Check all three certifications. They are true for this extension: it doesn't sel
 
 ```text
 This extension works only with the desktop app Nuvori for Windows, which holds the vault.
-1. Download and install Nuvori for Windows from https://github.com/santoshkanumuri/vault_apk_windows/releases/latest (file Nuvori_2.2.4_x64-setup.exe).
+1. Download and install Nuvori for Windows from https://github.com/santoshkanumuri/vault_apk_windows/releases/latest (file Nuvori_2.2.7_x64-setup.exe).
 2. Open Nuvori and create a vault with any master password. On the Home page, select Add, choose a login, and save one for an HTTPS sign-in page you can open.
 3. Install the extension and restart the browser. Nuvori connects it automatically. Settings > Browser extension then shows a "Last contact" time.
 4. Open a sign-in page on an HTTPS site. Select the username field and choose the account from the Nuvori list.

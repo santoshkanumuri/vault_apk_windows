@@ -118,6 +118,8 @@ pub struct SyncStatus {
     pub wifi_check_seconds: u64,
     /// How often it checks Google Drive (one of [`DRIVE_CHECKS`]); 0 = only on Sync now.
     pub drive_check_seconds: u64,
+    /// One pass over Wi-Fi and Google Drive each time Nuvori opens, also with automatic sync off.
+    pub sync_on_open: bool,
 }
 
 /// Wi-Fi check intervals offered on the Sync page; the same choices as the phone.
@@ -153,6 +155,26 @@ pub(crate) fn schedule(db: &Connection) -> Schedule {
         wifi_seconds: pick(stored.map(|value| value.0), &WIFI_CHECKS, DEFAULT_WIFI_CHECK),
         drive_seconds: pick(stored.map(|value| value.1), &DRIVE_CHECKS, DEFAULT_DRIVE_CHECK),
     }
+}
+
+fn preferences_table(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch("CREATE TABLE IF NOT EXISTS local_sync_preferences (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        sync_on_open INTEGER NOT NULL)")
+}
+
+/// "Sync when Nuvori opens", a setting of this PC. On unless it was turned off.
+pub(crate) fn sync_on_open(db: &Connection) -> bool {
+    preferences_table(db).ok().and_then(|()| db.query_row(
+        "SELECT sync_on_open FROM local_sync_preferences WHERE id = 1", [], |row| row.get::<_, bool>(0))
+        .optional().ok().flatten()).unwrap_or(true)
+}
+
+pub(crate) fn set_sync_on_open(db: &Connection, enabled: bool) -> Result<()> {
+    preferences_table(db).map_err(storage_error)?;
+    db.execute("INSERT INTO local_sync_preferences (id, sync_on_open) VALUES (1, ?1)
+        ON CONFLICT(id) DO UPDATE SET sync_on_open = excluded.sync_on_open", params![enabled]).map_err(storage_error)?;
+    Ok(())
 }
 
 pub(crate) fn set_schedule(db: &Connection, schedule: Schedule) -> Result<()> {
@@ -432,6 +454,7 @@ pub(crate) fn status(vault: &mut UnlockedVault) -> Result<SyncStatus> {
         next_retry_seconds: 0,
         wifi_check_seconds: schedule(db).wifi_seconds,
         drive_check_seconds: schedule(db).drive_seconds,
+        sync_on_open: sync_on_open(db),
     })
 }
 
@@ -457,8 +480,10 @@ pub(crate) fn configure(vault: &mut UnlockedVault, address: &str, automatic: boo
 }
 
 /// Checks every discovered or last-authenticated endpoint, so one offline peer cannot block others.
+/// `quiet_miss`: the pass on opening Nuvori. No device on this Wi-Fi is then normal, so it is not
+/// counted as a failure and the status goes back to idle.
 pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
-    tracker: &SyncTracker, discovered: &[SocketAddr]) -> Result<SyncReport> {
+    tracker: &SyncTracker, discovered: &[SocketAddr], quiet_miss: bool) -> Result<SyncReport> {
     let (id, local, peers, saved, revision) = {
         let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
         let local = app.store.identity_store().get_or_create().map_err(storage_error)?.device_id;
@@ -506,7 +531,9 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
         if checked.len() == peers.len() { break; }
     }
     if checked.is_empty() {
-        if last_error == BUSY { tracker.defer_busy(); } else { tracker.fail(&last_error); }
+        if last_error == BUSY { tracker.defer_busy(); }
+        else if quiet_miss && last_error == UNREACHABLE { tracker.set_phase(Phase::Idle); }
+        else { tracker.fail(&last_error); }
         return Err(last_error);
     }
     total.peers_checked = checked.len();
@@ -1816,6 +1843,18 @@ mod tests {
         db.execute("UPDATE local_sync_schedule SET drive_seconds = 2", []).unwrap();
         assert_eq!(schedule(&db).drive_seconds, 15);
     }
+
+    #[test]
+    fn sync_on_open_is_on_until_turned_off_and_kept_per_pc() {
+        let db = Connection::open_in_memory().unwrap();
+        assert!(sync_on_open(&db), "on by default, before anything is saved");
+        set_sync_on_open(&db, false).unwrap();
+        assert!(!sync_on_open(&db));
+        set_sync_on_open(&db, true).unwrap();
+        assert!(sync_on_open(&db));
+        // Saving it leaves the check schedule alone.
+        assert_eq!(schedule(&db), Schedule { wifi_seconds: 60, drive_seconds: 15 });
+    }
     use crate::{
         AppState, change_store::ChangeStore, identity::DeviceIdentity,
         membership::MembershipAction, protocol::RecordVersion, sync::ChangeKind, vault::VaultStore,
@@ -2432,6 +2471,7 @@ mod tests {
             message: String::new(), phase: "idle", progress_done: 0, progress_total: 0,
             last_error: String::new(), last_attempt: String::new(),
             consecutive_failures: 0, next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15,
+            sync_on_open: true,
         };
         tracker.fill(&mut status);
         assert_eq!(status.phase, "error");
@@ -3077,9 +3117,15 @@ mod tests {
         let offline_address = offline.local_addr().unwrap();
         drop(offline);
         let failed = SyncTracker::default();
-        assert_eq!(run(&a.state, &helper, "", &failed, &[offline_address]).unwrap_err(), UNREACHABLE);
+        assert_eq!(run(&a.state, &helper, "", &failed, &[offline_address], false).unwrap_err(), UNREACHABLE);
         assert_eq!(failed.consecutive_failures(), 1, "one failed group check counts once, not once per candidate plus once per group");
         assert!(!failed.state.lock().unwrap().last_attempt.is_empty());
+        // Opening Nuvori away from the other devices is not a failure: no count, no error.
+        let opened = SyncTracker::default();
+        assert_eq!(run(&a.state, &helper, "", &opened, &[offline_address], true).unwrap_err(), UNREACHABLE);
+        assert_eq!(opened.consecutive_failures(), 0);
+        assert!(opened.state.lock().unwrap().last_error.is_empty());
+        assert_eq!(opened.state.lock().unwrap().phase, Phase::Idle);
         let busy_listener = std::net::TcpListener::bind((ip, 0)).unwrap();
         let busy_address = busy_listener.local_addr().unwrap();
         let busy_server = std::thread::spawn(move || {
@@ -3087,7 +3133,7 @@ mod tests {
             reply_busy(stream);
         });
         let busy = SyncTracker::default();
-        assert_eq!(run(&a.state, &helper, "", &busy, &[busy_address, offline_address]).unwrap_err(), BUSY);
+        assert_eq!(run(&a.state, &helper, "", &busy, &[busy_address, offline_address], false).unwrap_err(), BUSY);
         busy_server.join().unwrap();
         assert_eq!(busy.consecutive_failures(), 0, "busy peers are reachable and do not extend failure backoff");
         let listener = std::net::TcpListener::bind((ip, 0)).unwrap();
@@ -3097,7 +3143,7 @@ mod tests {
         let server = std::thread::spawn(move || serve(&server_state, &server_helper,
             listener.accept().unwrap().0, &SyncTracker::default()));
         let tracker = SyncTracker::default();
-        let report = run(&a.state, &helper, "", &tracker, &[offline_address, address]).unwrap();
+        let report = run(&a.state, &helper, "", &tracker, &[offline_address, address], false).unwrap();
         server.join().unwrap().unwrap();
         assert_eq!((report.sent, report.peers_checked, report.peers_waiting), (1, 1, 1));
         assert_eq!(tracker.consecutive_failures(), 0);

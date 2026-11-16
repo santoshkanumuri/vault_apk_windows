@@ -43,7 +43,7 @@ function makeDom() {
     contains(node) { for (; node; node = node.parent) if (node === this) return true; return false; }
     querySelectorAll(selector) {
       const tags = selector.split(",").map((part) => part.trim().toUpperCase());
-      return [...this.descendants()].filter((node) => tags.includes(node._tag));
+      return [...this.descendants()].filter((node) => tags.includes("*") ? node._tag !== undefined : tags.includes(node._tag));
     }
     *descendants() { for (const child of this.children) { yield child; yield* child.descendants(); } }
   }
@@ -172,10 +172,10 @@ async function page({ protocol = "https:", reply = () => ({ status: "none" }), b
   const visibility = { visible: true };
   const observers = [];
   const userActivation = { isActive: true };
-  const window = { innerWidth: 1200, innerHeight: 800, addEventListener() {} };
+  const window = { innerWidth: 1200, innerHeight: 800, listeners: {}, addEventListener(type, callback) { (this.listeners[type] ||= []).push(callback); } };
   window.top = window;
   const context = vm.createContext({
-    window, document: doc, location: { protocol, host: "example.com" },
+    window, document: doc, location: { protocol, host: "example.com" }, crypto: globalThis.crypto,
     navigator: { userActivation },
     Document: dom.Document, ShadowRoot: dom.ShadowRoot, DocumentFragment: dom.DocumentFragment, Element: dom.Element,
     Node: dom.Node, EventTarget: dom.EventTarget,
@@ -200,7 +200,7 @@ async function page({ protocol = "https:", reply = () => ({ status: "none" }), b
   const hosts = () => doc._root.children.filter((child) => child.closedRoot);
   const inside = (host) => [...host.closedRoot.descendants()];
   return {
-    ...dom, doc, form, username, password, requests, timers, clock, created, hosts, inside, visibility, userActivation,
+    ...dom, doc, window, form, username, password, requests, timers, clock, created, hosts, inside, visibility, userActivation,
     // A real submit follows a key press or click: that is the user activation a capture consumes.
     submit: async (isTrusted, { activate = true } = {}) => {
       if (activate) doc.fire("keydown", { key: "Enter", target: password });
@@ -402,7 +402,7 @@ test("a site with no saved login gets no popup on focus; the Down key asks for t
   await settle();
   const [dropdown] = state.hosts();
   assert.equal(dropdown.popoverOpen, true);
-  assert.match(textOf(dropdown.closedRoot), /No saved login for this site/);
+  assert.match(textOf(dropdown.closedRoot), /No login saved for this site yet/);
 });
 
 test("the account used on the previous page is marked, and an identifier-first submit is remembered", async () => {
@@ -738,18 +738,22 @@ const detailPage = (fields, options = {}) => page({
 test("frames: a card frame reports its field and draws nothing; the top page lists cards next to the frame", async () => {
   // Inside a payment frame.
   const listeners = [];
+  const posted = [];
   let number; let expiry;
   const inFrame = await detailPage((Input) => [
     number = new Input("tel", { autocomplete: "cc-number" }),
     expiry = new Input("text", { autocomplete: "cc-exp", placeholder: "MM / YY" }),
   ], { before: (dom, { context }) => {
     context.window.top = {};
+    context.window.parent = { postMessage: (data) => posted.push(data) };
     context.chrome.runtime.id = "nuvori";
     context.chrome.runtime.onMessage = { addListener: (callback) => listeners.push(callback) };
   } });
   await inFrame.focus(number);
   const report = inFrame.requests.find((message) => message.action === "frame_field");
   assert.deepEqual([report.detail, report.rect.top, report.rect.width], ["card", 100, 300]);
+  assert.match(report.nonce, /^[0-9a-f]{32}$/);
+  assert.equal(posted.at(-1).nuvoriFrame, report.nonce, "the frame tells its parent window which frame it is");
   assert.equal(inFrame.hosts().length, 0, "no Nuvori UI inside a frame");
   assert.equal(inFrame.requests.some((message) => message.action === "inline_items" || message.action === "inline_pending"), false);
   const reply = (message, sender) => new Promise((resolve) => { for (const listener of listeners) listener(message, sender, resolve); });
@@ -771,13 +775,18 @@ test("frames: a card frame reports its field and draws nothing; the top page lis
       frameElement = new dom.Element("iframe");
       frameElement.rect = { left: 50, top: 300, right: 450, bottom: 400, width: 400, height: 100 };
       frameElement.getClientRects = () => [frameElement.rect];
+      frameElement.contentWindow = { frame: 3 };
       dom.doc.body.append(frameElement);
       context.chrome.runtime.id = "nuvori";
-      context.chrome.runtime.getFrameId = (element) => element === frameElement ? 3 : -1;
       context.chrome.runtime.onMessage = { addListener: (callback) => topListeners.push(callback) };
     },
   });
-  const shown = await new Promise((resolve) => topListeners[0]({ target: "nuvori-top", action: "frame_field", frameId: 3, detail: "card", rect: { left: 10, top: 20, width: 200, height: 30 } }, { id: "nuvori" }, resolve));
+  // The browser marks the frame's message with its window; a message from another window is ignored.
+  for (const listener of topPage.window.listeners.message) {
+    listener({ data: { nuvoriFrame: report.nonce, dx: 0, dy: 0 }, source: { someone: "else" } });
+    listener({ data: { nuvoriFrame: report.nonce, dx: 0, dy: 0 }, source: frameElement.contentWindow });
+  }
+  const shown = await new Promise((resolve) => topListeners[0]({ target: "nuvori-top", action: "frame_field", frameId: 3, nonce: report.nonce, detail: "card", rect: { left: 10, top: 20, width: 200, height: 30 } }, { id: "nuvori" }, resolve));
   assert.equal(shown.status, "ok");
   await settle();
   const [dropdown] = topPage.hosts();
@@ -798,7 +807,7 @@ test("card form: the card list fills number and expiry, then the security code o
     number = new Input("tel", { autocomplete: "cc-number" }),
     expiry = new Input("text", { autocomplete: "cc-exp", placeholder: "MM / YY" }),
     code = new Input("text", { autocomplete: "cc-csc" }),
-  ], { reply: (message) => message.action === "inline_items" ? { status: "ok", items: [{ id: "c1", title: "Travel", subtitle: "Visa · •••• 1111" }] }
+  ], { reply: (message) => message.action === "inline_items" ? { status: "ok", items: [{ id: "c1", title: "Travel", subtitle: "Visa · •••• 1111", color: 0xff315b8c }] }
     : message.action === "inline_fill_item" ? { status: "ok", card: { number: "4111111111111111", name: "", expiry: "07/29", hasCode: true } }
     : message.action === "inline_card_code" ? { status: "ok", code: "123" } : { status: "none" } });
   await state.focus(number);
@@ -807,6 +816,12 @@ test("card form: the card list fills number and expiry, then the security code o
   const [dropdown] = state.hosts();
   assert.match(textOf(dropdown.closedRoot), /Cards.*Travel.*Visa · •••• 1111/);
   const option = state.find(dropdown, (node) => node.attrs.role === "option");
+  // The row shows the card in its own color, with its last four digits, instead of a generic icon.
+  const swatch = state.find(dropdown, (node) => String(node.className || "").includes("card-swatch"));
+  assert.ok(swatch, "card swatch drawn");
+  assert.equal(swatch.style.background, "#315b8c");
+  assert.equal(swatch.style.color, "#fff");
+  assert.match(textOf(swatch), /^1111$/);
   await state.click(option);
   assert.equal(state.requests.some((request) => request.action === "inline_fill_item"), false, "waits for the activation delay");
   state.clock.now += 450;
@@ -832,6 +847,34 @@ test("a declined security code leaves the field empty", async () => {
   await settle();
   assert.equal(code.value, "");
   assert.ok(state.hosts().some((host) => /Security code not filled/.test(textOf(host.closedRoot))));
+});
+
+test("address form: each row shows the value the focused field receives, like the browser's own Autofill", async () => {
+  let email; let zip;
+  const preview = { name: "Alice Smith", email: "alice@example.com", address1: "12 Main St", postalCode: "78701" };
+  let withValues = true;
+  const state = await detailPage((Input) => [
+    new Input("text", { autocomplete: "name" }),
+    email = new Input("email", { autocomplete: "email" }),
+    zip = new Input("text", { autocomplete: "postal-code" }),
+  ], { reply: (message) => message.action === "inline_items"
+    ? { status: "ok", items: [{ id: "p1", title: "Home", subtitle: "Alice Smith · alice@example.com", ...(withValues ? { preview } : {}) }] }
+    : message.action === "inline_fill_item" ? { status: "ok", profile: preview } : { status: "none" } });
+  const row = () => {
+    const nodes = state.inside(state.hosts()[0]);
+    const part = (name) => textOf(nodes.find((node) => node.className === name && node.parent?.className === "text"));
+    return [part("title"), part("sub")];
+  };
+  await state.focus(email);
+  // The email box could be a sign-in step; with no login saved here, the addresses show.
+  assert.deepEqual(state.requests.filter((request) => request.action !== "inline_pending").map((request) => request.action), ["inline_query", "inline_items"]);
+  assert.deepEqual(row(), ["alice@example.com", "Home · Alice Smith · 12 Main St"]);
+  await state.focus(zip);
+  assert.deepEqual(row(), ["78701", "Home · Alice Smith · alice@example.com"]);
+  // An older desktop app sends no values: the row shows the address's name and summary as before.
+  withValues = false;
+  await state.focus(email);
+  assert.deepEqual(row(), ["Home", "Alice Smith · alice@example.com"]);
 });
 
 test("authenticator code: Show all codes on demand, and the picked code fills the field", async () => {
@@ -903,4 +946,91 @@ test("login_edit: the save card's username can be corrected before saving", asyn
   state.clock.now += 450;
   await state.click(state.find(card, (node) => node.attrs["data-decision"] === "save"));
   assert.equal(state.requests.find((request) => request.action === "inline_approve").username, "fixed-user");
+});
+
+test("frames: a sign-in frame reports its login field with a one-time code and fills only what the extension sends", async () => {
+  const listeners = [];
+  const posted = [];
+  const inFrame = await page({ before: (dom, { context }) => {
+    context.window.top = {};
+    context.window.parent = { postMessage: (data) => posted.push(data) };
+    context.chrome.runtime.id = "nuvori";
+    context.chrome.runtime.onMessage = { addListener: (callback) => listeners.push(callback) };
+  } });
+  await inFrame.focus(inFrame.password);
+  const report = inFrame.requests.find((message) => message.action === "frame_field");
+  assert.deepEqual([report.detail, report.want], ["login", "both"]);
+  assert.match(report.nonce, /^[0-9a-f]{32}$/);
+  assert.equal(posted.at(-1).nuvoriFrame, report.nonce);
+  assert.equal(inFrame.hosts().length, 0, "no Nuvori UI inside a frame");
+  assert.equal(inFrame.requests.some((message) => message.action === "inline_query"), false, "a frame never asks for logins itself");
+  const reply = (message, sender) => new Promise((resolve) => { for (const listener of listeners) listener(message, sender, resolve); });
+  const ignored = await Promise.race([reply({ target: "nuvori-frame", action: "fill_login", username: "x", password: "y" }, { id: "someone-else" }), settle().then(() => "none")]);
+  assert.equal(ignored, "none", "only the extension itself can fill");
+  const result = await reply({ target: "nuvori-frame", action: "fill_login", username: "alice@example.com", password: "synthetic-secret" }, { id: "nuvori" });
+  assert.deepEqual([result.status, result.filled], ["ok", 2]);
+  assert.equal(inFrame.username.value, "alice@example.com");
+  assert.equal(inFrame.password.value, "synthetic-secret");
+});
+
+test("frames: a frame passes a child frame's code up to its parent with the child's offset", async () => {
+  const posted = [];
+  let child;
+  const middle = await page({ before: (dom, { context }) => {
+    child = new dom.Element("iframe");
+    child.rect = { left: 30, top: 40, right: 330, bottom: 240, width: 300, height: 200 };
+    child.getClientRects = () => [child.rect];
+    child.contentWindow = { child: true };
+    dom.doc.body.append(child);
+    context.window.top = {};
+    context.window.parent = { postMessage: (data) => posted.push(data) };
+  } });
+  const send = (event) => { for (const listener of middle.window.listeners.message) listener(event); };
+  send({ data: { nuvoriFrame: "a".repeat(32), dx: 5, dy: 6 }, source: child.contentWindow });
+  assert.equal(JSON.stringify(posted), JSON.stringify([{ nuvoriFrame: "a".repeat(32), dx: 35, dy: 46 }]));
+  send({ data: { nuvoriFrame: "b".repeat(32) }, source: { stranger: true } });
+  send({ data: { nuvoriFrame: "short" }, source: child.contentWindow });
+  send({ data: "nuvori", source: child.contentWindow });
+  assert.equal(posted.length, 1, "only codes from this page's own frames are passed on");
+});
+
+test("search all logins: any saved login fills here, and one saved for another site asks first", async () => {
+  const state = await page({ reply: (message) => {
+    if (message.action === "inline_query") return { status: "ok", accounts: [] };
+    if (message.action === "inline_all_logins") return { status: "ok", host: "example.com", accounts: [
+      { id: "s", title: "Seedr", username: "me@example.com", site: "seedr.cc" },
+      { id: "e", title: "Example", username: "alice", site: "example.com" }] };
+    if (message.action === "inline_fill_any") return { status: "ok", username: message.id === "s" ? "me@example.com" : "alice", password: "synthetic-secret" };
+    return { status: "none" };
+  } });
+  await state.focus(state.password);
+  assert.ok(state.hosts().every((host) => !host.popoverOpen), "no saved login for this site: no popup on focus");
+  state.doc.fire("keydown", { key: "ArrowDown", target: state.password });
+  await settle();
+  const [dropdown] = state.hosts();
+  assert.equal(dropdown.popoverOpen, true);
+  assert.match(textOf(dropdown.closedRoot), /No login saved for this site yet/);
+  const search = state.find(dropdown, (node) => node._tag === "BUTTON" && node.textContent === "Search all logins" && !node.attrs.hidden && node.className === "btn");
+  state.clock.now += 450;
+  await state.click(search);
+  await settle();
+  assert.ok(state.requests.some((message) => message.action === "inline_all_logins"));
+  const box = state.find(dropdown, (node) => node.attrs["aria-label"] === "Search all logins");
+  box.value = "seed";
+  box.dispatchEvent({ type: "input" });
+  const rows = state.inside(dropdown).filter((node) => node.attrs.role === "option");
+  assert.equal(rows.length, 1, "the search narrows the list");
+  assert.match(textOf(rows[0]), /me@example\.com · seedr\.cc/);
+  state.clock.now += 450;
+  await state.click(rows[0]);
+  assert.match(textOf(dropdown.closedRoot), /Nuvori saved this login for seedr\.cc\. Fill it on example\.com\?/);
+  assert.equal(state.requests.some((message) => message.action === "inline_fill_any"), false, "nothing fills before the user confirms");
+  const fill = state.find(dropdown, (node) => node._tag === "BUTTON" && node.textContent === "Fill here");
+  state.clock.now += 450;
+  await state.click(fill);
+  await settle();
+  const sent = state.requests.find((message) => message.action === "inline_fill_any");
+  assert.deepEqual([sent.id, sent.want], ["s", "both"]);
+  assert.equal(state.username.value, "me@example.com");
+  assert.equal(state.password.value, "synthetic-secret");
 });
