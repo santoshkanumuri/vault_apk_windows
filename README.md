@@ -49,7 +49,7 @@ React Native for Windows was considered. It makes more sense when the mobile app
 
 ## Install or distribute
 
-Download `Nuvori_2.2.7_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
+Download `Nuvori_2.2.8_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
 
 The browser extension **Nuvori Password Fill** comes from the Chrome Web Store. See [extension/README.md](extension/README.md).
 

@@ -1,6 +1,6 @@
-# Nuvori 2.2.7
+# Nuvori 2.2.8
 
-Windows version 2.2.7. Browser extension version 0.7.6. Pairs with Android 2.2.7 (version code 65). Windows 2.2.5 and 2.2.6 were not published (2.2.6 was a preview build): this release takes the phone's version number so both match.
+Windows version 2.2.8. Browser extension version 0.7.6. Pairs with Android 2.2.8 (version code 66). Windows 2.2.5, 2.2.6 and 2.2.7 were not published (2.2.6 and 2.2.7 were preview builds): this release takes the phone's version number so both match.
 
 ## Browser extension 0.7.6: fills where the browser's own password manager fills
 
@@ -14,7 +14,7 @@ Windows version 2.2.7. Browser extension version 0.7.6. Pairs with Android 2.2.7
 - **Email boxes in address forms.** An email box can also be the first step of a sign-in. When no login is saved for the site, it now offers your addresses instead of nothing.
 - **Fixed:** "Show all codes" no longer shows on login lists.
 - Card suggestions show each card in its own color, with a chip and its last four digits (from 0.7.4 and 0.7.5, which were not released).
-- Needs Nuvori for Windows 2.2.7 for **Search all logins**. With an older desktop app, the search says to update; everything else works.
+- Needs Nuvori for Windows 2.2.8 for **Search all logins**. With an older desktop app, the search says to update; everything else works.
 
 ## Desktop app: every login for the browser
 
@@ -71,8 +71,8 @@ Windows version 2.2.7. Browser extension version 0.7.6. Pairs with Android 2.2.7
   - the live USCIS sign-in page.
 - `named_pipe_releases_only_one_selected_password_and_locks` fails now and then, as in 2.2.3 and 2.2.4. It is a timing race in the test (`os error 995` after the vault locks). It passes when run again, and it does not touch the changed code.
 - **Versions and signatures:**
-  - `nuvori.exe`, the MSI and the setup EXE report version 2.2.7.
-  - Both MSIX packages carry version 2.2.7.0: the test package `Nuvori.Desktop.Test`, signed by `CN=Nuvori Test` (the same certificate as `Nuvori-Test.cer`), and the unsigned Store package `SantoshKanumuri.Nuvori`.
+  - `nuvori.exe`, the MSI and the setup EXE report version 2.2.8.
+  - Both MSIX packages carry version 2.2.8.0: the test package `Nuvori.Desktop.Test`, signed by `CN=Nuvori Test` (the same certificate as `Nuvori-Test.cer`), and the unsigned Store package `SantoshKanumuri.Nuvori`.
   - Both extension zips carry version 0.7.6 and contain no test files. Only the local zip has the `key` field.
 - **Not run:**
   - The extension with the real desktop app: the bench used a fake one.
@@ -82,10 +82,10 @@ Windows version 2.2.7. Browser extension version 0.7.6. Pairs with Android 2.2.7
 
 ## Files
 
-In `artifacts/release-2.2.7/`, with `SHA256SUMS.txt`:
+In `artifacts/release-2.2.8/`, with `SHA256SUMS.txt`:
 
-- `Nuvori_2.2.7_x64-setup.exe` and `Nuvori_2.2.7_x64_en-US.msi` for direct installs.
-- `Nuvori_2.2.7.0_x64_store.msix` for Partner Center upload.
-- `Nuvori_2.2.7.0_x64.msix` and `Nuvori-Test.cer` for a local MSIX test (`scripts\install-test-msix.ps1`).
+- `Nuvori_2.2.8_x64-setup.exe` and `Nuvori_2.2.8_x64_en-US.msi` for direct installs.
+- `Nuvori_2.2.8.0_x64_store.msix` for Partner Center upload.
+- `Nuvori_2.2.8.0_x64.msix` and `Nuvori-Test.cer` for a local MSIX test (`scripts\install-test-msix.ps1`).
 - `Nuvori_extension_0.7.6_chrome_web_store.zip` for the Chrome Web Store, and `Nuvori_extension_0.7.6.zip` to load unpacked.
-- The Android phone 2.2.7 and watch 2.1.2 APK, AAB and R8 mapping files.
+- The Android phone 2.2.8 and watch 2.1.2 APK, AAB and R8 mapping files.
