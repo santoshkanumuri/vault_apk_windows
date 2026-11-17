@@ -19,6 +19,8 @@ type VaultValue = {
   entries: VaultEntry[];
   notes: LocalNote[];
   groups: VaultGroup[];
+  /** Logins with a passkey for the same account, for the passkey mark. */
+  passkeyIds: ReadonlySet<string>;
   loaded: boolean;
   loadError: string;
   setSnapshot: (snapshot: AppSnapshot) => void;
@@ -39,6 +41,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [notes, setNotes] = useState<LocalNote[]>([]);
   const [groups, setGroups] = useState<VaultGroup[]>([]);
+  const [passkeyIds, setPasskeyIds] = useState<ReadonlySet<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
   const unlocked = snapshot.vaultState === "unlocked";
@@ -60,11 +63,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const loadLists = useCallback(async () => {
     const token = ++loadToken.current;
     try {
-      const [nextEntries, nextNotes, nextGroups] = await Promise.all([api.listEntries(), api.listNotes(), api.listGroups()]);
+      const [nextEntries, nextNotes, nextGroups, nextPasskeyIds] = await Promise.all([api.listEntries(), api.listNotes(), api.listGroups(),
+        // The mark is only a hint: if it fails, the lists still load without it.
+        api.passkeyLoginIds().catch(() => [] as string[])]);
       if (token !== loadToken.current) return;
       setEntries(nextEntries);
       setNotes(nextNotes);
       setGroups(nextGroups);
+      setPasskeyIds(new Set(nextPasskeyIds));
       setLoadError("");
     } catch (error) {
       if (token === loadToken.current) setLoadError(String(error));
@@ -77,7 +83,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!unlocked) {
       loadToken.current++;
-      setEntries([]); setNotes([]); setGroups([]); setLoaded(false);
+      setEntries([]); setNotes([]); setGroups([]); setPasskeyIds(new Set()); setLoaded(false);
       return;
     }
     void loadLists();
@@ -104,8 +110,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const removeNote = useCallback((id: string) => setNotes((current) => current.filter((item) => item.id !== id)), []);
 
   const value = useMemo<VaultValue>(() => ({
-    ready, snapshot, unlocked, entries, notes, groups, loaded, loadError, setSnapshot, refresh, upsertEntry, removeEntry, upsertNote, removeNote
-  }), [ready, snapshot, unlocked, entries, notes, groups, loaded, loadError, setSnapshot, refresh, upsertEntry, removeEntry, upsertNote, removeNote]);
+    ready, snapshot, unlocked, entries, notes, groups, passkeyIds, loaded, loadError, setSnapshot, refresh, upsertEntry, removeEntry, upsertNote, removeNote
+  }), [ready, snapshot, unlocked, entries, notes, groups, passkeyIds, loaded, loadError, setSnapshot, refresh, upsertEntry, removeEntry, upsertNote, removeNote]);
 
   return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;
 }

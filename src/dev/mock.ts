@@ -157,6 +157,15 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     }
     case "delete_group": state.groups = state.groups.filter((g) => g.id !== args.id); state.revision++; return null;
     case "list_passkeys": return state.passkeys;
+    case "passkey_login_ids": {
+      // A simple copy of `browser::passkey_matches_login` for previews: same username, RP ID covers the host.
+      const host = (url: string) => { try { return new URL(url.includes("://") ? url : `https://${url}`).hostname; } catch { return ""; } };
+      return state.entries.filter((entry) => entry.type === "PASSWORD" && state.passkeys.some((passkey) => {
+        const at = host(entry.tertiaryValue);
+        return entry.primaryValue.trim() !== "" && entry.primaryValue.trim().toLowerCase() === passkey.username.trim().toLowerCase()
+          && (at === passkey.rpId || at.endsWith(`.${passkey.rpId}`));
+      })).map((entry) => entry.id);
+    }
     case "delete_passkey": state.passkeys = state.passkeys.filter((p) => p.id !== args.id); return null;
     case "sync_status": requireUnlocked(); return { ...state.sync };
     case "configure_sync": state.sync.phoneAddress = String(args.address); state.sync.automatic = Boolean(args.automatic); return null;

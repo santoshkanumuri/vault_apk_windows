@@ -77,11 +77,20 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
         let vault = app.unlocked.as_ref().ok_or(BrowserIpcError::VaultLocked)?;
         let exact = vault.matching_logins(origin).map_err(|_| BrowserIpcError::InvalidRequest)?;
         let related = vault.related_logins(origin).map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let with_passkey = if exact.is_empty() && related.is_empty() {
+            Default::default()
+        } else {
+            vault.logins_with_passkeys().map_err(|_| BrowserIpcError::InvalidRequest)?
+        };
         // Logins for this exact site first, then those saved for another page of the same site.
         Ok(exact
             .into_iter()
-            .map(|(id, title, username)| LoginCandidate { id, title, username, related: false, color: None, site: None, preview: None })
-            .chain(related.into_iter().map(|(id, title, username)| LoginCandidate { id, title, username, related: true, color: None, site: None, preview: None }))
+            .map(|login| (login, false))
+            .chain(related.into_iter().map(|login| (login, true)))
+            .map(|((id, title, username), related)| {
+                let passkey = with_passkey.contains(&id);
+                LoginCandidate { id, title, username, related, passkey, color: None, site: None, preview: None }
+            })
             .collect())
     }
 
@@ -108,11 +117,15 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
     fn query_all_credentials(&self) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
         let app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
         let vault = app.unlocked.as_ref().ok_or(BrowserIpcError::VaultLocked)?;
+        let with_passkey = vault.logins_with_passkeys().map_err(|_| BrowserIpcError::InvalidRequest)?;
         Ok(vault
             .all_logins()
             .map_err(|_| BrowserIpcError::InvalidRequest)?
             .into_iter()
-            .map(|(id, title, username, site)| LoginCandidate { id, title, username, related: false, color: None, site: Some(site), preview: None })
+            .map(|(id, title, username, site)| {
+                let passkey = with_passkey.contains(&id);
+                LoginCandidate { id, title, username, related: false, passkey, color: None, site: Some(site), preview: None }
+            })
             .collect())
     }
 
@@ -154,12 +167,12 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
         let app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
         let vault = app.unlocked.as_ref().ok_or(BrowserIpcError::VaultLocked)?;
         let plain = |items: Vec<(String, String, String)>| items.into_iter()
-            .map(|(id, title, username)| LoginCandidate { id, title, username, related: false, color: None, site: None, preview: None }).collect::<Vec<_>>();
+            .map(|(id, title, username)| LoginCandidate { id, title, username, related: false, passkey: false, color: None, site: None, preview: None }).collect::<Vec<_>>();
         let items = match kind {
             ItemKind::Card => vault.browser_cards().map(|cards| cards.into_iter()
-                .map(|(id, title, username, color)| LoginCandidate { id, title, username, related: false, color, site: None, preview: None }).collect()),
+                .map(|(id, title, username, color)| LoginCandidate { id, title, username, related: false, passkey: false, color, site: None, preview: None }).collect()),
             ItemKind::Profile => vault.browser_profiles().map(|profiles| profiles.into_iter()
-                .map(|(id, title, username, profile)| LoginCandidate { id, title, username, related: false, color: None, site: None, preview: Some(profile) }).collect()),
+                .map(|(id, title, username, profile)| LoginCandidate { id, title, username, related: false, passkey: false, color: None, site: None, preview: Some(profile) }).collect()),
             ItemKind::Code => vault.browser_codes(origin, all).map(plain),
         };
         items.map_err(|_| BrowserIpcError::InvalidRequest)
@@ -2178,6 +2191,22 @@ fn list_passkeys(state: State<'_, ManagedState>) -> Result<Vec<PasskeySummary>, 
         .map_err(public_vault_error)
 }
 
+/// "passkey_mark": ids of the logins with a passkey for the same account, for the mark in the list.
+#[tauri::command]
+fn passkey_login_ids(state: State<'_, ManagedState>) -> Result<Vec<String>, String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let mut ids: Vec<String> = app
+        .unlocked
+        .as_ref()
+        .ok_or("Unlock the vault first".to_owned())?
+        .logins_with_passkeys()
+        .map_err(public_vault_error)?
+        .into_iter()
+        .collect();
+    ids.sort();
+    Ok(ids)
+}
+
 #[tauri::command]
 fn delete_passkey(id: String, state: State<'_, ManagedState>) -> Result<(), String> {
     let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
@@ -2421,6 +2450,7 @@ pub fn run() {
             save_group,
             delete_group,
             list_passkeys,
+            passkey_login_ids,
             delete_passkey,
             activity_log,
             clear_activity_log,

@@ -358,6 +358,8 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .list-row-title { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
 .list-row-subtitle { color: var(--muted); font-size: 13px; }
 .fav-star { width: 13px; height: 13px; color: var(--warning-accent); fill: currentColor; }
+.passkey-mark { display: inline-flex; flex: none; color: var(--primary); }
+.passkey-mark svg { width: 13px; height: 13px; }
 .list-row-actions { display: flex; gap: 2px; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
 .list-row:hover .list-row-actions, .list-row:focus-within .list-row-actions, .list-row-actions.always { opacity: 1; }
 .list-row-chevron { width: 16px; height: 16px; color: var(--subtle); }

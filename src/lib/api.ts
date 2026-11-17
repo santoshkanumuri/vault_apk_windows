@@ -263,6 +263,8 @@ export const api = {
   deleteGroup: (id: string) => call<void>("delete_group", { id }),
 
   listPasskeys: () => call<PasskeySummary[]>("list_passkeys"),
+  /** Ids of the logins with a passkey for the same site and username ("passkey_mark"). */
+  passkeyLoginIds: () => call<string[]>("passkey_login_ids"),
   deletePasskey: (id: string) => call<void>("delete_passkey", { id }),
 
   syncStatus: () => call<SyncStatus>("sync_status"),

@@ -110,6 +110,8 @@ pub struct LoginCandidate {
     pub username: String,
     /// Saved for another page of the same site (listing and filling only).
     pub related: bool,
+    /// "passkey_mark": a passkey for the same account is saved too (logins only).
+    pub passkey: bool,
     /// A card's own color (opaque ARGB), so the suggestion can show the card as it looks in Nuvori.
     pub color: Option<u64>,
     /// "all_logins": the host of the login's saved website ("" when none).
@@ -961,6 +963,7 @@ fn handle_request(
                     username: candidate.username,
                     selection_token,
                     related: candidate.related,
+                    passkey: candidate.passkey,
                     color: None,
                     site: candidate.site,
                     preview: None,
@@ -1054,7 +1057,7 @@ fn handle_request(
                     continue;
                 }
                 let selection_token = token_store.issue_kind(candidate.id.clone(), &origin, GrantKind::Item(kind))?;
-                choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token, related: false, color: candidate.color, site: None,
+                choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token, related: false, passkey: false, color: candidate.color, site: None,
                     preview: if kind == ItemKind::Profile { candidate.preview } else { None } });
             }
             Ok(ok_response(request.request_id, Some(choices), None))
@@ -1256,7 +1259,7 @@ fn handle_request(
                     let mut grants = grants.lock().expect("browser grant lock poisoned");
                     let token = grants.issue(candidate.id.clone(), &origin)?;
                     grants.grants.get_mut(&token).expect("issued update grant").password_hash = Some(hash);
-                    choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token: token, related: false, color: None, site: None, preview: None });
+                    choices.push(CredentialChoice { id: candidate.id, title: candidate.title, username: candidate.username, selection_token: token, related: false, passkey: false, color: None, site: None, preview: None });
                 }
                 (!choices.is_empty()).then_some(choices)
             } else { None };
@@ -1439,7 +1442,7 @@ mod tests {
                 vec![LoginCandidate {
                     id: "login-1".to_owned(),
                     title: "Example".to_owned(),
-                    username: "alice".to_owned(), related: false, color: None, site: None, preview: None
+                    username: "alice".to_owned(), related: false, passkey: false, color: None, site: None, preview: None
                 }]
             } else {
                 Vec::new()
@@ -1658,9 +1661,9 @@ mod tests {
     impl BrowserCredentialProvider for SharedUsernameProvider {
         fn query_credentials(&self, _: &str) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
             Ok(vec![
-                LoginCandidate { id: "a".into(), title: "Personal".into(), username: "".into(), related: false, color: None, site: None, preview: None },
-                LoginCandidate { id: "b".into(), title: "Work".into(), username: "".into(), related: false, color: None, site: None, preview: None },
-                LoginCandidate { id: "c".into(), title: "Other".into(), username: "carol".into(), related: false, color: None, site: None, preview: None },
+                LoginCandidate { id: "a".into(), title: "Personal".into(), username: "".into(), related: false, passkey: false, color: None, site: None, preview: None },
+                LoginCandidate { id: "b".into(), title: "Work".into(), username: "".into(), related: false, passkey: false, color: None, site: None, preview: None },
+                LoginCandidate { id: "c".into(), title: "Other".into(), username: "carol".into(), related: false, passkey: false, color: None, site: None, preview: None },
             ])
         }
         fn load_selected_credential(&self, id: &str, _: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> {
@@ -1692,7 +1695,7 @@ mod tests {
     impl BrowserCredentialProvider for EveryLoginProvider {
         fn query_credentials(&self, origin: &str) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
             Ok(if origin == "https://www.seedr.cc" {
-                vec![LoginCandidate { id: "seedr".into(), title: "Seedr".into(), username: "me@example.com".into(), related: false, color: None, site: None, preview: None }]
+                vec![LoginCandidate { id: "seedr".into(), title: "Seedr".into(), username: "me@example.com".into(), related: false, passkey: false, color: None, site: None, preview: None }]
             } else {
                 Vec::new()
             })
@@ -1703,8 +1706,8 @@ mod tests {
         }
         fn query_all_credentials(&self) -> Result<Vec<LoginCandidate>, BrowserIpcError> {
             Ok(vec![
-                LoginCandidate { id: "seedr".into(), title: "Seedr".into(), username: "me@example.com".into(), related: false, color: None, site: Some("seedr.cc".into()), preview: None },
-                LoginCandidate { id: "bank".into(), title: "Bank".into(), username: "me".into(), related: false, color: None, site: Some("bank.example".into()), preview: None },
+                LoginCandidate { id: "seedr".into(), title: "Seedr".into(), username: "me@example.com".into(), related: false, passkey: true, color: None, site: Some("seedr.cc".into()), preview: None },
+                LoginCandidate { id: "bank".into(), title: "Bank".into(), username: "me".into(), related: false, passkey: false, color: None, site: Some("bank.example".into()), preview: None },
             ])
         }
         fn load_any_credential(&self, id: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> {
@@ -1733,6 +1736,9 @@ mod tests {
         assert_eq!(choices.iter().map(|choice| choice.site.as_deref().unwrap()).collect::<Vec<_>>(), ["seedr.cc", "bank.example"]);
         let token = choices[0].selection_token.clone();
         assert!(serde_json::to_string(&choices[0]).unwrap().contains("\"site\":\"seedr.cc\""));
+        // "passkey_mark" goes to the extension when set, and is left out (not false) otherwise.
+        assert!(serde_json::to_string(&choices[0]).unwrap().contains("\"passkey\":true"));
+        assert!(!serde_json::to_string(&choices[1]).unwrap().contains("passkey"));
 
         // The token works for that login on the page it was listed for, and not on another page.
         let elsewhere = handle_request(on(BrowserAction::FillCredential, "https://evil.example", Some("seedr"), Some(&token), None), &provider, &grants).unwrap();
@@ -1793,8 +1799,8 @@ mod tests {
             let home = ProfileDetails { name: "Alice Smith".into(), email: "alice@example.com".into(), postal_code: "78701".into(), ..Default::default() };
             Ok(match kind {
                 // A provider that sends values with a card must not get them through.
-                ItemKind::Card => vec![LoginCandidate { id: "card-1".into(), title: "Travel".into(), username: "Visa · •••• 1111".into(), related: false, color: Some(0xFF31_5B8C), site: None, preview: Some(home) }],
-                ItemKind::Profile => vec![LoginCandidate { id: "home".into(), title: "Home".into(), username: "Alice Smith".into(), related: false, color: None, site: None, preview: Some(home) }],
+                ItemKind::Card => vec![LoginCandidate { id: "card-1".into(), title: "Travel".into(), username: "Visa · •••• 1111".into(), related: false, passkey: false, color: Some(0xFF31_5B8C), site: None, preview: Some(home) }],
+                ItemKind::Profile => vec![LoginCandidate { id: "home".into(), title: "Home".into(), username: "Alice Smith".into(), related: false, passkey: false, color: None, site: None, preview: Some(home) }],
                 ItemKind::Code => Vec::new(),
             })
         }

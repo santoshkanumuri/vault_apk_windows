@@ -1359,6 +1359,34 @@ impl UnlockedVault {
         )))
     }
 
+    /// "passkey_mark": the ids of the logins that have a passkey for the same account
+    /// (`browser::passkey_matches_login`). The app and the browser show a passkey mark on them.
+    pub fn logins_with_passkeys(&self) -> Result<std::collections::HashSet<String>, VaultError> {
+        let passkeys = self.list_passkeys()?;
+        if passkeys.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+        Ok(self
+            .list_entries()?
+            .into_iter()
+            .filter_map(|entry| {
+                if entry["type"] != "PASSWORD" {
+                    return None;
+                }
+                let username = entry["primaryValue"].as_str().unwrap_or("");
+                // The saved website and the origins linked on Android, one per line (as `savedLoginOrigins`).
+                let websites: Vec<&str> = std::iter::once(entry["tertiaryValue"].as_str().unwrap_or(""))
+                    .chain(entry["autofillOrigins"].as_str().unwrap_or("").lines())
+                    .collect();
+                passkeys
+                    .iter()
+                    .any(|passkey| websites.iter().any(|url| browser::passkey_matches_login(&passkey.rp_id, &passkey.username, url, username)))
+                    .then(|| entry["id"].as_str().map(str::to_owned))
+                    .flatten()
+            })
+            .collect())
+    }
+
     /// "all_logins": every login as (id, title, username, the host of its saved website or ""),
     /// by title. For the browser's "Search all logins", where the user picks one for any site.
     pub fn all_logins(&self) -> Result<Vec<(String, String, String, String)>, VaultError> {
@@ -3243,6 +3271,57 @@ mod tests {
         );
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn logins_with_passkeys_marks_only_the_same_account_on_a_matching_site() {
+        use p256::{
+            SecretKey,
+            pkcs8::{EncodePrivateKey, EncodePublicKey},
+        };
+        let directory = std::env::temp_dir().join(format!("nuvori-passkey-mark-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("twelve-character-password").unwrap();
+        let mut login = |title: &str, username: &str, url: &str| {
+            vault.save_entry(serde_json::json!({
+                "type": "PASSWORD", "title": title, "primaryValue": username,
+                "secondaryValue": "secret", "tertiaryValue": url
+            })).unwrap()["id"].as_str().unwrap().to_owned()
+        };
+        let same_account = login("GitHub", "Dev@Example.com ", "https://github.com/login");
+        let subdomain = login("GitHub gist", "dev@example.com", "https://gist.github.com");
+        let bare_host = login("GitHub bare", "dev@example.com", "github.com");
+        let other_account = login("GitHub work", "work@example.com", "https://github.com");
+        let other_site = login("GitLab", "dev@example.com", "https://gitlab.com");
+        let lookalike = login("Fake", "dev@example.com", "https://notgithub.com");
+        let plain_http = login("Old", "dev@example.com", "http://github.com");
+        let linked = vault.save_entry(serde_json::json!({
+            "type": "PASSWORD", "title": "Linked on the phone", "primaryValue": "dev@example.com",
+            "secondaryValue": "secret", "tertiaryValue": "", "autofillOrigins": "https://other.example\nhttps://github.com"
+        })).unwrap()["id"].as_str().unwrap().to_owned();
+        assert!(vault.logins_with_passkeys().unwrap().is_empty(), "no passkeys, no marks");
+
+        let secret = SecretKey::from_slice(&[9; 32]).unwrap();
+        vault.save_passkey(VaultPasskey {
+            id: URL_SAFE_NO_PAD.encode([7; 32]),
+            rp_id: "github.com".to_owned(),
+            user_handle: URL_SAFE_NO_PAD.encode([3; 16]),
+            username: "dev@example.com".to_owned(),
+            display_name: "Dev".to_owned(),
+            private_key: URL_SAFE_NO_PAD.encode(secret.to_pkcs8_der().unwrap().as_bytes()),
+            public_key: URL_SAFE_NO_PAD.encode(secret.public_key().to_public_key_der().unwrap().as_bytes()),
+            created_at: 100,
+        }).unwrap();
+
+        let marked = vault.logins_with_passkeys().unwrap();
+        assert!(marked.contains(&same_account), "username case and outer spaces do not matter");
+        assert!(marked.contains(&subdomain), "an RP ID covers its subdomains");
+        assert!(marked.contains(&bare_host), "a website saved without https:// still counts");
+        assert!(marked.contains(&linked), "an origin linked on Android counts like the saved website");
+        for id in [&other_account, &other_site, &lookalike, &plain_http] {
+            assert!(!marked.contains(id));
+        }
+        assert_eq!(marked.len(), 4);
     }
 
     #[test]

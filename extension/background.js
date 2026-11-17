@@ -1262,6 +1262,8 @@ async function handlePageMessage(page, message) {
           ...(used(choice) ? { recent: true } : {}),
           // Saved for another page of this site (hosts with "related_logins").
           ...(choice.related === true ? { related: true } : {}),
+          // A passkey for the same account is saved too (hosts with "passkey_mark").
+          ...(choice.passkey === true ? { passkey: true } : {}),
         })),
       };
     }
@@ -1288,7 +1290,8 @@ async function handlePageMessage(page, message) {
       const text = (value, max = 256) => typeof value === "string" ? value.slice(0, max) : "";
       return {
         status: result.status, theme: settings.theme, host: hostOf(scope.origin),
-        accounts: result.credentials.slice(0, 1000).map((choice) => ({ id: choice.id, title: text(choice.title), username: text(choice.username), site: text(choice.site, 80) })),
+        accounts: result.credentials.slice(0, 1000).map((choice) => ({ id: choice.id, title: text(choice.title), username: text(choice.username), site: text(choice.site, 80),
+          ...(choice.passkey === true ? { passkey: true } : {}) })),
       };
     }
     case "inline_fill_any": {

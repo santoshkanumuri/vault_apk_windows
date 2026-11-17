@@ -637,7 +637,16 @@ function accountRow(choice) {
     iconButton("copy", "Copy password", () => copyPassword(choice)),
     textButton("Fill", "btn primary small", () => fillSelected(choice)),
   );
-  item.append(iconNode("key", "avatar"), text, actions);
+  item.append(iconNode("key", "avatar"), text);
+  if (choice.passkey === true) {
+    // "passkey_mark": a passkey for this account is saved too.
+    const passkey = document.createElement("span");
+    passkey.className = "passkey-tag";
+    passkey.textContent = "Passkey";
+    passkey.title = "A passkey for this account is saved in Nuvori. Sign in with it from the site's passkey option.";
+    item.append(passkey);
+  }
+  item.append(actions);
   return item;
 }
 

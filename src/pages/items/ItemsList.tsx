@@ -18,7 +18,7 @@ import { FilterInput, FolderPicker, SortPicker } from "./Toolbar";
 
 export function ItemsListPage({ category }: { category: Exclude<Category, "codes"> }) {
   const info = categories[category];
-  const { entries, groups, loaded } = useVault();
+  const { entries, groups, passkeyIds, loaded } = useVault();
   const router = useRouter();
   const [filter, setFilter] = useRouteState("filter", "");
   const [folderId, setFolderId] = useRouteState("folder", "");
@@ -80,6 +80,7 @@ export function ItemsListPage({ category }: { category: Exclude<Category, "codes
                 const subtitle = subtitles.get(entry.id);
                 return (
                   <ListRow key={entry.id} id={entry.id} title={entry.title || "Untitled"} subtitle={subtitle} favorite={entry.favorite}
+                    passkey={entry.type === "PASSWORD" && passkeyIds.has(entry.id)}
                     leading={<Avatar title={entry.title || info.label} cardColor={entry.type === "CARD" ? entry.color : undefined} />}
                     highlighted={router.highlight === entry.id}
                     entering={fresh.has(entry.id)}

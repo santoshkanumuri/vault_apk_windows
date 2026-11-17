@@ -159,7 +159,8 @@
 .option:hover,.option[aria-selected="true"]{background:var(--hover)}
 .option:focus-visible{box-shadow:inset 0 0 0 2px var(--primary)}
 .text{display:grid;gap:2px;min-width:0}
-.tag{margin-inline-start:auto;flex:none}
+.tag{margin-inline-start:auto;flex:none}.tag+.tag{margin-inline-start:-6px}
+.kind.passkey{background:var(--pc);color:var(--opc)}
 .title,.sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .title{font-size:13px;font-weight:600}.sub{font-size:12px;color:var(--muted)}
 .state{display:flex;gap:10px;align-items:flex-start;margin:8px;padding:10px 12px;border-radius:8px;background:var(--c);color:var(--t);font-size:13px;line-height:1.4}
@@ -579,6 +580,7 @@
       if (account.recent) option.append(el("span", { class: "kind tag", text: "Continue" }));
       // Saved for another page of this site, such as login.example.com on www.example.com.
       else if (account.related) option.append(el("span", { class: "kind tag", text: "Same site" }));
+      if (account.passkey) option.append(passkeyTag());
       option.addEventListener("click", (event) => {
         if (!dropdown.surface.canActivate(event, option)) return;
         void choose(account);
@@ -589,6 +591,11 @@
     });
     dropdown.active = -1;
     dropdown.body.replaceChildren(list);
+  }
+
+  /** "passkey_mark": Nuvori also has a passkey for this account. The browser's own passkey prompt uses it. */
+  function passkeyTag() {
+    return el("span", { class: "kind tag passkey", text: "Passkey", title: "A passkey for this account is saved in Nuvori. Sign in with it from the site's passkey option." });
   }
 
   /** The card as it looks in Nuvori: its own color, a chip, and its last four digits from the label. */
@@ -727,6 +734,7 @@
           el("span", { class: "text" },
             el("span", { class: "title", text: account.title || account.username || "Saved login" }),
             el("span", { class: "sub", text: [account.username, account.site].filter(Boolean).join(" · ") || "No username" })));
+        if (account.passkey) option.append(passkeyTag());
         option.addEventListener("click", (event) => {
           if (!dropdown.surface.canActivate(event, option)) return;
           pickFromSearch(account, host);

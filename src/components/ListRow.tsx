@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { ChevronRight, Star } from "lucide-react";
+import { ChevronRight, Fingerprint, Star } from "lucide-react";
 import { cx } from "../lib/format";
 
 type ListRowProps = {
@@ -8,6 +8,8 @@ type ListRowProps = {
   subtitle?: ReactNode;
   leading?: ReactNode;
   favorite?: boolean;
+  /** A passkey for the same account is saved too ("passkey_mark"). */
+  passkey?: boolean;
   onOpen: () => void;
   /** Quick actions, shown on hover or keyboard focus. */
   actions?: ReactNode;
@@ -19,7 +21,7 @@ type ListRowProps = {
   chevron?: boolean;
 };
 
-export function ListRow({ id, title, subtitle, leading, favorite, onOpen, actions, trailing, highlighted, entering, openLabel, chevron = true }: ListRowProps) {
+export function ListRow({ id, title, subtitle, leading, favorite, passkey, onOpen, actions, trailing, highlighted, entering, openLabel, chevron = true }: ListRowProps) {
   return (
     <li className={cx("list-row", highlighted && "is-highlighted", entering && "is-entering")} data-row-id={id}>
       <button type="button" className="list-row-main" onClick={onOpen} aria-label={openLabel}>
@@ -28,6 +30,7 @@ export function ListRow({ id, title, subtitle, leading, favorite, onOpen, action
           <span className="list-row-title">
             <span className="truncate">{title}</span>
             {favorite && <Star className="fav-star" aria-label="Favorite" />}
+            {passkey && <span className="passkey-mark" title="A passkey for this account is saved too"><Fingerprint aria-label="Passkey saved" /></span>}
           </span>
           {subtitle && <span className="list-row-subtitle truncate">{subtitle}</span>}
         </span>

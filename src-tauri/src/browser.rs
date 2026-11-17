@@ -126,6 +126,9 @@ pub struct CredentialChoice {
     /// "related_logins": saved for another page of the same site (same registrable domain).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub related: bool,
+    /// "passkey_mark": a passkey for the same account is saved too. Older extensions ignore it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub passkey: bool,
     /// A card's own color (opaque ARGB) for its suggestion row. Cards only; older extensions ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<u64>,
@@ -477,6 +480,22 @@ pub fn rp_id_matches_origin(rp_id: &str, origin: &str) -> bool {
     host == rp_id || host.ends_with(&format!(".{rp_id}"))
 }
 
+/// "passkey_mark": a passkey for the same account as a saved login. Its RP ID must be valid for the
+/// login's saved website (the WebAuthn rule above), and the usernames must be the same, ignoring
+/// case and outer spaces. A website saved without a scheme ("netflix.com") counts as HTTPS.
+/// The result is only a hint for the user. No fill or signing decision depends on it.
+pub fn passkey_matches_login(rp_id: &str, passkey_username: &str, login_url: &str, login_username: &str) -> bool {
+    let username = login_username.trim();
+    if username.is_empty() || username.to_lowercase() != passkey_username.trim().to_lowercase() {
+        return false;
+    }
+    let url = login_url.trim();
+    let origin = stored_login_origin(url).or_else(|| {
+        (!url.is_empty() && !url.contains("://")).then(|| stored_login_origin(&format!("https://{url}"))).flatten()
+    });
+    origin.is_some_and(|origin| rp_id_matches_origin(rp_id, &origin))
+}
+
 pub fn stored_login_origin(login_url: &str) -> Option<String> {
     let parsed = url::Url::parse(login_url).ok()?;
     if parsed.scheme() != "https" || !parsed.username().is_empty() || parsed.password().is_some() {
@@ -582,6 +601,20 @@ mod tests {
     }
 
     #[test]
+    fn passkey_matches_login_needs_the_same_account_and_a_valid_rp_id() {
+        assert!(passkey_matches_login("example.com", "alice", "https://login.example.com/x", "Alice"));
+        assert!(passkey_matches_login("example.com", "alice", "example.com/login", "alice"));
+        // An RP ID may not be a child of the login's host, and a public suffix is never valid.
+        assert!(!passkey_matches_login("login.example.com", "alice", "https://example.com", "alice"));
+        assert!(!passkey_matches_login("com", "alice", "https://example.com", "alice"));
+        // No username on either side, or no usable website, gives no mark.
+        assert!(!passkey_matches_login("example.com", "alice", "https://example.com", " "));
+        assert!(!passkey_matches_login("example.com", "", "https://example.com", ""));
+        assert!(!passkey_matches_login("example.com", "alice", "", "alice"));
+        assert!(!passkey_matches_login("example.com", "alice", "android://hash@com.example/", "alice"));
+    }
+
+    #[test]
     fn stored_login_matching_uses_the_exact_canonical_origin() {
         assert!(login_url_matches_origin(
             "https://example.com/login?next=%2Faccount",
@@ -675,7 +708,7 @@ mod tests {
             id: "record-1".to_owned(),
             title: "Work".to_owned(),
             username: "user@example.com".to_owned(),
-            selection_token: "one-time-token".to_owned(), related: false, color: None, site: None, preview: None }];
+            selection_token: "one-time-token".to_owned(), related: false, passkey: false, color: None, site: None, preview: None }];
         let json = serde_json::to_value(choices).unwrap();
         assert!(json[0].get("password").is_none());
 

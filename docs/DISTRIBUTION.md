@@ -2,9 +2,9 @@
 
 ## Use the ready-made installer
 
-Share `Nuvori_2.2.8_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) with people using 64-bit Windows PCs. They double-click the file, complete setup, and open Nuvori from the Start menu. The setup installs for the current Windows user. Node.js, npm, Rust, and the .NET SDK are not required on their PCs.
+Share `Nuvori_2.2.9_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) with people using 64-bit Windows PCs. They double-click the file, complete setup, and open Nuvori from the Start menu. The setup installs for the current Windows user. Node.js, npm, Rust, and the .NET SDK are not required on their PCs.
 
-The MSI `Nuvori_2.2.8_x64_en-US.msi` on the same Releases page is an alternative for managed installation. Choose one package. These are x64 Windows packages. Android phones need the phone APK, and other platforms need separate builds.
+The MSI `Nuvori_2.2.9_x64_en-US.msi` on the same Releases page is an alternative for managed installation. Choose one package. These are x64 Windows packages. Android phones need the phone APK, and other platforms need separate builds.
 
 Setup includes the pairing helper and browser Native Messaging host. Install the browser extension **Nuvori Password Fill** from the Chrome Web Store (see [Chrome Web Store](CHROME-WEB-STORE.md)). For development, `Nuvori_extension_<version>.zip` can also be extracted to a folder that stays in place and loaded with **Load unpacked**. Nuvori connects the extension to Chrome, Edge and Brave by itself when it starts; **Settings > Browser extension > Connect** does it again on demand. Restart the browser afterward. Nuvori trusts the store extension ID and the fixed unpacked ID, so a new folder or a later update needs no new registration.
 
@@ -35,7 +35,7 @@ These Windows packages are unsigned. Public distribution should use Windows code
 To compare a download with the supplied checksum:
 
 ```powershell
-Get-FileHash .\Nuvori_2.2.8_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\Nuvori_2.2.9_x64-setup.exe -Algorithm SHA256
 ```
 
 The checksum detects a changed file. It does not replace a trusted publisher signature.

@@ -717,6 +717,16 @@ test("a login saved for another page of the same site is listed after exact ones
     { id: "b", title: "Example login", username: "bob", related: true }]));
 });
 
+test("passkey_mark: a login with a passkey for the same account keeps the mark, and only a true value counts", async () => {
+  const state = await worker((request) => request.action === "query_credentials" ? { status: "ok", credentials: [
+    { id: "a", title: "Example", username: "alice", selectionToken: "t1", passkey: true },
+    { id: "b", title: "Example login", username: "bob", selectionToken: "t2", related: true, passkey: "yes" }] } : { status: "ok" });
+  const result = await state.send({ action: "inline_query" }, page());
+  assert.equal(JSON.stringify(result.accounts), JSON.stringify([
+    { id: "a", title: "Example", username: "alice", passkey: true },
+    { id: "b", title: "Example login", username: "bob", related: true }]));
+});
+
 test("two-step sign-in: the account from the first page leads the list and names a password-only save", async () => {
   const state = await worker((request) => request.action === "status" ? { status: "ok", features: ALL_FEATURES }
     : request.action === "query_credentials" ? { status: "ok", credentials: [
@@ -905,13 +915,13 @@ test("search all logins: needs a desktop app that lists every login, and fills t
   const state = await worker((request) => {
     if (request.action === "status") return { status: "ok", features: ALL_FEATURES };
     if (request.action === "query_credentials") return request.all
-      ? { status: "ok", credentials: [{ id: "s", title: "Seedr", username: "me@example.com", selectionToken: "s".repeat(64), site: "seedr.cc" }] }
+      ? { status: "ok", credentials: [{ id: "s", title: "Seedr", username: "me@example.com", selectionToken: "s".repeat(64), site: "seedr.cc", passkey: true }] }
       : { status: "ok", credentials: [] };
     if (request.action === "fill_credential") return { status: "ok", credential: { id: "s", username: "me@example.com", password: "seedr-secret" } };
     return { status: "error" };
   }, { tabUrl: "https://example.com/login" });
   const every = await state.send({ action: "inline_all_logins" }, page);
-  assert.equal(JSON.stringify(every.accounts), JSON.stringify([{ id: "s", title: "Seedr", username: "me@example.com", site: "seedr.cc" }]));
+  assert.equal(JSON.stringify(every.accounts), JSON.stringify([{ id: "s", title: "Seedr", username: "me@example.com", site: "seedr.cc", passkey: true }]));
   const filled = await state.send({ action: "inline_fill_any", id: "s", want: "both" }, page);
   assert.deepEqual([filled.status, filled.username, filled.password], ["ok", "me@example.com", "seedr-secret"]);
   const fill = state.requests.find((request) => request.action === "fill_credential");

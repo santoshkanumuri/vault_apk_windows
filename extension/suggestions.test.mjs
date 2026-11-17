@@ -419,6 +419,15 @@ test("the account used on the previous page is marked, and an identifier-first s
   await related.focus(related.password);
   const [relatedList] = related.hosts();
   assert.match(textOf(relatedList.closedRoot), /Same site/);
+  assert.doesNotMatch(textOf(relatedList.closedRoot), /Passkey/);
+  // "passkey_mark": the row says a passkey for that account is saved too, next to any other tag.
+  const withPasskey = await page({ reply: (message) => message.action === "inline_query"
+    ? { status: "ok", accounts: [{ id: "d", title: "Login", username: "dana", related: true, passkey: true }] } : { status: "none" } });
+  await withPasskey.focus(withPasskey.password);
+  const [passkeyList] = withPasskey.hosts();
+  const [passkeyRow] = withPasskey.inside(passkeyList).filter((node) => node.attrs.role === "option");
+  assert.match(textOf(passkeyRow), /Same site/);
+  assert.match(textOf(passkeyRow), /Passkey/);
 
   // An identifier-first page: only the account field is there.
   const first = await page({ before: (dom, { password }) => password.remove() });
