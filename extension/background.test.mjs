@@ -16,7 +16,7 @@ function area(data) {
   };
 }
 
-async function worker(hostReply, { tabUrl = "https://example.com/next", setTimeout = () => 0, frames = [], frameReply } = {}) {
+async function worker(hostReply, { tabUrl = "https://example.com/next", setTimeout = () => 0, frames = [], frameReply, extensionUrl } = {}) {
   const data = {};
   const session = {};
   const requests = [];
@@ -43,6 +43,7 @@ async function worker(hostReply, { tabUrl = "https://example.com/next", setTimeo
     alarms: { create: async (name, info) => { alarms.push({ name, info }); }, onAlarm: { addListener: (callback) => { alarm = callback; } } },
     runtime: {
       onMessage: { addListener: (callback) => { listener = callback; } },
+      ...(extensionUrl ? { getURL: (path) => extensionUrl + path } : {}),
       onStartup: { addListener: (callback) => { startup = callback; } },
       sendNativeMessage: async (_host, request) => {
         requests.push(request);
@@ -117,7 +118,18 @@ test("an already saved submitted login does not prompt again", async () => {
   const result = await state.send({ action: "capture_submitted_login", username: "user", password: "synthetic-password" }, page("https://example.com/"));
   assert.equal(result.status, "already_saved");
   assert.equal(state.data.pendingLogins, undefined);
+  // The next page of the same site shows "Already saved" once (sign-ins usually navigate away).
+  const next = await state.send({ action: "inline_pending" }, page("https://example.com/home"));
+  assert.equal(next.status, "notice");
+  assert.equal(next.text, "Already saved in Nuvori.");
   assert.equal((await state.send({ action: "inline_pending" }, page())).status, "none");
+});
+
+test("the 'Already saved' note goes only to the same site in the same tab", async () => {
+  const state = await worker(request => request.action === "seal_login" ? { status: "sealed", sealedLogin: "protected-login" } : { status: "already_saved" });
+  await state.send({ action: "capture_submitted_login", username: "user", password: "synthetic-password" }, page("https://example.com/"));
+  assert.equal((await state.send({ action: "inline_pending" }, page("https://other.example/"))).status, "none");
+  assert.equal((await state.send({ action: "inline_pending" }, page("https://example.com/"))).status, "none", "a note is used up by the first page that asks");
 });
 
 test("replacement needs its review token and never retries an expired update", async () => {
@@ -927,4 +939,46 @@ test("search all logins: needs a desktop app that lists every login, and fills t
   const fill = state.requests.find((request) => request.action === "fill_credential");
   assert.deepEqual([fill.origin, fill.selectionToken], ["https://example.com", "s".repeat(64)]);
   assert.equal((await state.send({ action: "inline_fill_any", id: "unknown", want: "both" }, page)).status, "missing");
+});
+
+// ---------------------------------------------------------------------------
+// Firefox (moz-extension): no IntersectionObserver v2, so data not tied to the page's site is
+// refused to the page and offered in the popup instead.
+
+const FIREFOX_URL = "moz-extension://4b6c3a1e-0000-4000-8000-000000000001/";
+const cardHost = (request) => request.action === "status" ? { status: "ok", features: ["cards", "profiles", "codes", "all_logins", "status_no_origin"] }
+  : request.action === "query_items" ? { status: "ok", credentials: [{ id: "visa", title: "Everyday", username: "Visa · •••• 1111", selectionToken: "t1" }] }
+  : request.action === "fill_item" ? { status: "ok", item: { id: "visa", kind: "card", card: { number: "4111111111111111", name: "Alex", expiry: "12/29", network: "Visa" } } }
+  : { status: "ok", credentials: [] };
+
+test("Firefox: the page can't list cards, addresses, every code or every login", async () => {
+  const state = await worker(cardHost, { extensionUrl: FIREFOX_URL, tabUrl: "https://shop.example/pay" });
+  for (const message of [{ action: "inline_items", kind: "card" }, { action: "inline_items", kind: "profile" }, { action: "inline_items", kind: "code", all: true },
+    { action: "inline_all_logins" }, { action: "inline_fill_any", id: "x", want: "both" }, { action: "inline_fill_frame", kind: "card", id: "visa", frameId: 3 }]) {
+    assert.equal((await state.send(message, page("https://shop.example/pay"))).status, "disabled", JSON.stringify(message));
+  }
+  assert.equal(state.requests.some((request) => ["query_items", "fill_item"].includes(request.action) || request.all === true), false, "nothing reached the vault");
+});
+
+test("Chrome keeps every in-page list", async () => {
+  const state = await worker(cardHost, { extensionUrl: "chrome-extension://kapellkbongejlglcengbmjnpblemmjm/", tabUrl: "https://shop.example/pay" });
+  assert.notEqual((await state.send({ action: "inline_items", kind: "card" }, page("https://shop.example/pay"))).status, "disabled");
+});
+
+test("popup cards: listed for the tab, filled into the page's form, and only for the extension's own page", async () => {
+  const state = await worker(cardHost, { extensionUrl: FIREFOX_URL, tabUrl: "https://shop.example/pay",
+    frameReply: (message) => message.action === "popup_forms" ? { card: true, profile: false } : { status: "ok", filled: 3, codeAsked: false } });
+  const popup = { url: FIREFOX_URL + "popup.html" };
+  assert.equal((await state.send({ action: "popup_items", tabId: 7, kind: "card" }, page("https://shop.example/pay"))).status, "rejected", "a page can't use the popup's actions");
+  const forms = await state.send({ action: "popup_forms", tabId: 7 }, popup);
+  assert.equal(JSON.stringify(forms), JSON.stringify({ card: true, profile: false }));
+  const listed = await state.send({ action: "popup_items", tabId: 7, kind: "card" }, popup);
+  assert.equal(listed.status, "ok");
+  assert.equal(JSON.stringify(listed.items.map((item) => [item.id, item.title])), JSON.stringify([["visa", "Everyday"]]));
+  assert.equal(JSON.stringify(listed).includes("t1"), false, "tokens stay in the background");
+  const filled = await state.send({ action: "popup_fill_item", tabId: 7, kind: "card", id: "visa" }, popup);
+  assert.equal(filled.status, "ok");
+  const delivered = state.sent.find((entry) => entry.message.action === "popup_fill");
+  assert.equal(delivered.options.frameId, 0, "the card goes to the top page only");
+  assert.equal(delivered.message.card.number, "4111111111111111");
 });

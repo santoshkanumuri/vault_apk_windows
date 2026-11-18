@@ -79,7 +79,7 @@
           <li><svg class="i i--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8.5v8.5H3zm9.5 0H21v8.5h-8.5zM3 12.5h8.5V21H3zm9.5 0H21V21h-8.5z"/></svg>Windows</li>
           <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>Android</li>
           <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 10v2l1 1m3.13-5.34-.81-4.05a2 2 0 0 0-2-1.61h-2.68a2 2 0 0 0-2 1.61l-.78 4.05m.02 8.7.8 4a2 2 0 0 0 2 1.61h2.72a2 2 0 0 0 2-1.61l.81-4.05"/></svg>Wear OS</li>
-          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></svg>Chrome · Edge · Brave</li>
+          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></svg>Chrome · Edge · Brave · Firefox</li>
         </ul>
       </div>
 
@@ -485,11 +485,15 @@
                 <span class="tag tag--green"><span class="tag__dot"></span>Available</span>
               </div>
               <h3>Browser extension</h3>
-              <p>For Chrome, Edge and Brave, with Nuvori for Windows. In Edge, allow extensions from other stores first.</p>
+              <p>For Chrome, Edge, Brave and Firefox, with Nuvori for Windows. In Edge, allow extensions from other stores first.</p>
               <div class="dl__actions">
                 <a class="store store--chrome" href="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil" target="_blank" rel="noopener">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#EA4335" d="M12 12 3.34 7A10 10 0 0 1 20.66 7Z"/><path fill="#FBBC04" d="M12 12 20.66 7A10 10 0 0 1 12 22Z"/><path fill="#34A853" d="M12 12 12 22A10 10 0 0 1 3.34 7Z"/><circle cx="12" cy="12" r="4.6" fill="#fff"/><circle cx="12" cy="12" r="3.6" fill="#4285F4"/></svg>
                   <span><small>Available in the</small>Chrome Web Store</span>
+                </a>
+                <a class="store store--firefox" href="https://addons.mozilla.org/en-US/firefox/addon/nuvori-password-fill/" target="_blank" rel="noopener">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ff-flame" x1="18" y1="3" x2="5" y2="21" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFE226"/><stop offset=".45" stop-color="#FF7139"/><stop offset="1" stop-color="#E31587"/></linearGradient><linearGradient id="ff-globe" x1="16" y1="8" x2="8" y2="19" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#9059FF"/><stop offset="1" stop-color="#592ACB"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#ff-flame)"/><circle cx="12.6" cy="13.2" r="6" fill="url(#ff-globe)"/><path fill="url(#ff-flame)" d="M6.4 10.2c1.3-3 4.3-4.6 7.4-3.9-1.9.4-3.1 1.6-3.4 3 .9-.6 2.2-.7 3.2-.2-1.8.2-3 1.4-3 2.9 0 1 .5 1.9 1.4 2.5-2.9.2-5.6-1.6-5.6-4.3Z"/></svg>
+                  <span><small>Under review on</small>Firefox Add-ons</span>
                 </a>
                 <div class="dl__tools">
                   <button class="chip" type="button" data-copy="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>Copy link</span></button>
@@ -529,7 +533,11 @@
           </details>
           <details class="reveal">
             <summary>Which devices does it run on?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>Android 10 or newer, Wear OS 3 or newer with the phone app, and Windows 10 (version 2004) or newer, 64-bit. The browser extension works with Chrome, Edge and Brave through the Windows app. Passkeys need Android 14 or newer, or Windows 11.</p></div>
+            <div class="faq__body"><p>Android 10 or newer, Wear OS 3 or newer with the phone app, and Windows 10 (version 2004) or newer, 64-bit. The browser extension works with Chrome, Edge, Brave and Firefox through the Windows app. Passkeys need Android 14 or newer, or Windows 11.</p></div>
+          </details>
+          <details class="reveal">
+            <summary>I found a problem. Where do I report it?<span class="faq__plus" aria-hidden="true"></span></summary>
+            <div class="faq__body"><p><a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Open an issue on GitHub</a>. Say which app and version you use, what you did, and what happened. Issues are public, so never include passwords, codes, card numbers or vault files.</p></div>
           </details>
           <details class="reveal">
             <summary>How many devices can share one vault?<span class="faq__plus" aria-hidden="true"></span></summary>
@@ -570,8 +578,9 @@
         <a href="https://github.com/santoshkanumuri/vault_apk">Android on GitHub</a>
         <a href="#download">Download</a>
         <a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a>
+        <a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a>
       </nav>
-      <p class="footer__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS, Chrome, Edge and Brave are trademarks of their owners.</p>
+      <p class="footer__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS, Chrome, Edge, Brave and Firefox are trademarks of their owners.</p>
     </div>
   </footer>
 

@@ -387,9 +387,9 @@ legend { margin-bottom: 12px; padding: 0; font-size: .78rem; font-weight: 800; l
 /* ---------- Downloads ---------- */
 .downloads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .dl { position: relative; perspective: 1200px; min-height: 380px; }
-.dl__inner { position: relative; height: 100%; transform-style: preserve-3d; transition: transform .8s var(--ease); }
+.dl__inner { position: relative; display: grid; height: 100%; transform-style: preserve-3d; transition: transform .8s var(--ease); }
 .dl.is-flipped .dl__inner { transform: rotateY(180deg); }
-.dl__face { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 26px; border-radius: var(--radius); background: linear-gradient(180deg, var(--surface-2), var(--surface)); box-shadow: inset 0 0 0 1px var(--line); -webkit-backface-visibility: hidden; backface-visibility: hidden; overflow: hidden; }
+.dl__face { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; padding: 26px; border-radius: var(--radius); background: linear-gradient(180deg, var(--surface-2), var(--surface)); box-shadow: inset 0 0 0 1px var(--line); -webkit-backface-visibility: hidden; backface-visibility: hidden; overflow: hidden; }
 .dl:hover .dl__front { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, var(--line)), 0 30px 60px -40px var(--glow); }
 .dl__back { transform: rotateY(180deg); align-items: center; justify-content: center; gap: 16px; text-align: center; }
 .dl__back p { color: var(--muted); font-size: .9rem; }
@@ -441,6 +441,7 @@ details[open] .faq__plus::before, details[open] .faq__plus::after { background: 
 details[open] .faq__plus::after { rotate: 0deg; }
 .faq__body { overflow: hidden; }
 .faq__body p { padding: 0 22px 22px; color: var(--muted); }
+.faq__body a { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 
 /* ---------- CTA + footer ---------- */
 .cta { position: relative; display: grid; justify-items: center; gap: 14px; margin-top: 120px; padding: 72px 24px; overflow: hidden; border-radius: 32px; text-align: center;

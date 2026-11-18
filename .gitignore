@@ -24,3 +24,6 @@ artifacts/
 
 # Promo video project (local only)
 /promo-video/
+
+# Extension end-to-end runs: browser profiles, test vault, certificates, screenshots.
+e2e/extension/.state/

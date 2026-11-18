@@ -122,12 +122,41 @@ test("registration, change and ambiguous password shapes", () => {
   assert.deepEqual({ ...F.pairFields(ambiguous[1], ambiguous) }, { username: null, password: null });
 });
 
-test("one-time-code screens and mixed factors are not login forms", () => {
+test("one-time-code screens stand alone; a sign-in with a code field is still a sign-in", () => {
   const code = input("text", { autocomplete: "one-time-code" });
   assert.equal(F.classifyForm([code]).kind, "otp");
   assert.equal(F.suggestionKind(code, [code]), null);
-  const mixed = [input("email"), input("password"), input("text", { name: "totp" })];
-  assert.equal(F.classifyForm(mixed), null);
+  // Username + password + code on one form (autofill.me login-totp): the login fills, the code never does.
+  const [user, pass, totp] = [input("email"), input("password"), input("text", { name: "totp" })];
+  const mixed = [user, pass, totp];
+  const form = F.classifyForm(mixed);
+  assert.equal(form.kind, "login");
+  assert.equal(form.otp, totp);
+  assert.equal(F.suggestionKind(user, mixed), "username");
+  assert.equal(F.suggestionKind(totp, mixed), null, "the code field gets no login list");
+  assert.deepEqual({ ...F.pairFields(pass, mixed) }, { username: user, password: pass });
+  // Two code fields stay ambiguous.
+  assert.equal(F.classifyForm([user, pass, totp, input("text", { name: "otp" })]), null);
+});
+
+test("'2fa' inside 'fax' is not a code word; fax is not the contact phone", () => {
+  const fax = input("text", { name: "22faxphone" });
+  assert.equal(F.isCodeField(fax), false);
+  assert.equal(F.profileRoleOf(fax), null);
+  assert.equal(F.isCodeField(input("text", { name: "2fa_code" })), true);
+  assert.equal(F.profileRoleOf(input("text", { name: "20homephon" })), "phone");
+  assert.equal(F.cardRoleOf(input("text", { name: "44cc_uname" })), "name");
+});
+
+test("address capture ignores a drop-down left on its placeholder", () => {
+  const select = (options, selectedIndex, autocomplete) => ({ type: "select-one", tagName: "SELECT", autocomplete,
+    getAttribute: (name) => (name === "autocomplete" ? autocomplete : null), options, selectedIndex, get value() { return options[selectedIndex].value; } });
+  const fields = [input("text", { autocomplete: "address-line1" }, "1 Main St"), input("text", { autocomplete: "address-level2" }, "Springfield"),
+    select([{ value: "", text: "Choose..." }, { value: "CA", text: "California" }], 0, "address-level1"),
+    select([{ value: "", text: "Choose..." }, { value: "US", text: "United States" }], 1, "country")];
+  const profile = F.pickProfileCapture(fields);
+  assert.equal(profile.state, "");
+  assert.equal(profile.country, "United States");
 });
 
 test("an identifier-first step is recognized only with exactly one account field", () => {

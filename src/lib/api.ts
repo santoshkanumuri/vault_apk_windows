@@ -93,7 +93,7 @@ export type ActivityCategory = "vault" | "items" | "sync" | "pairing" | "browser
 export type ActivityEvent = { id: number; at: number; level: ActivityLevel; category: ActivityCategory; message: string };
 
 export type BrowserStatus = {
-  hosts: { chrome: boolean; brave: boolean; edge: boolean };
+  hosts: { chrome: boolean; brave: boolean; edge: boolean; firefox: boolean };
   listening: boolean;
   lastRequestAt: number;
   lastAction: string;

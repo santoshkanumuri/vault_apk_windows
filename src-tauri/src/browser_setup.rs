@@ -10,6 +10,9 @@
 //! Nuvori writes the manifest and the registry keys itself: at start in installed builds, and
 //! from Settings > Browser extension > Connect browsers.
 //!
+//! Firefox reads `HKCU\Software\Mozilla\NativeMessagingHosts` and a manifest that lists add-on
+//! IDs ("allowed_extensions"): [`FIREFOX_EXTENSION_ID`], in its own file beside the Chrome one.
+//!
 //! Allowed: the two fixed IDs, plus IDs a manifest already allowed (registered earlier by hand).
 //! An extension is never trusted because of its name; any unpacked extension can copy a name.
 
@@ -27,6 +30,8 @@ pub const EXTENSION_ID: &str = "kapellkbongejlglcengbmjnpblemmjm";
 /// Item ID of "Nuvori Password Fill" in the Chrome Web Store. The store signs the item with its
 /// own key, so this differs from [`EXTENSION_ID`].
 pub const STORE_EXTENSION_ID: &str = "lpohaakdindhljdhpofnfmggbfllgdil";
+/// The Firefox add-on's ID (`browser_specific_settings.gecko.id`). Fixed forever by addons.mozilla.org.
+pub const FIREFOX_EXTENSION_ID: &str = "password-fill@nuvori.santoshkanumuri.com";
 const HOST_NAME: &str = "com.nuvori.desktop";
 
 /// Browser name, its native host key, and its user data folder under %LOCALAPPDATA%.
@@ -59,6 +64,77 @@ pub fn host_executable() -> Option<PathBuf> {
 /// Where the host manifest lives. The registration script uses the same file.
 fn manifest_path() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(r"Nuvori\BrowserHost\com.nuvori.desktop.json"))
+}
+
+/// Firefox's host manifest: same host, but it names add-on IDs instead of extension origins.
+pub fn firefox_manifest_path() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(r"Nuvori\BrowserHost\com.nuvori.desktop.firefox.json"))
+}
+
+/// A Firefox add-on ID: "name@domain" or a "{GUID}", as addons.mozilla.org accepts them.
+pub fn valid_firefox_id(id: &str) -> bool {
+    let guid = id.len() == 38 && id.starts_with('{') && id.ends_with('}')
+        && id[1..37].bytes().enumerate().all(|(index, byte)| if [8, 13, 18, 23].contains(&index) { byte == b'-' } else { byte.is_ascii_hexdigit() });
+    let email = id.len() <= 80 && id.split_once('@').is_some_and(|(name, domain)| {
+        let part = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._-+".contains(&byte));
+        part(name) && part(domain) && domain.contains('.')
+    });
+    guid || email
+}
+
+/// Add-on IDs a Firefox host manifest allows.
+pub fn manifest_extensions(text: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|json| json["allowed_extensions"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|id| id.as_str().filter(|id| valid_firefox_id(id)).map(str::to_owned))
+        .collect()
+}
+
+pub fn firefox_manifest_json(host: &Path, extensions: &BTreeSet<String>) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "name": HOST_NAME,
+        "description": "Nuvori browser bridge",
+        "path": host,
+        "type": "stdio",
+        "allowed_extensions": extensions,
+    }))
+    .expect("manifest serializes")
+}
+
+/// Firefox keeps its profiles under %APPDATA%\Mozilla\Firefox.
+fn firefox_installed() -> bool {
+    std::env::var_os("APPDATA").is_some_and(|roaming| PathBuf::from(roaming).join(r"Mozilla\Firefox").is_dir())
+}
+
+/// Writes the Firefox manifest and its registry key when Firefox is installed or was registered.
+fn connect_firefox(host: &Path) -> std::io::Result<Option<bool>> {
+    use crate::browser_ipc::FIREFOX_HOST_KEY;
+    let registered = crate::browser_ipc::native_host_manifest(FIREFOX_HOST_KEY);
+    if registered.is_none() && !firefox_installed() {
+        return Ok(None);
+    }
+    let manifest = firefox_manifest_path().ok_or_else(|| std::io::Error::other("LOCALAPPDATA is not set"))?;
+    let mut extensions: BTreeSet<String> = [FIREFOX_EXTENSION_ID.to_owned()].into();
+    if let Some(text) = registered.as_ref().and_then(|path| std::fs::read_to_string(path).ok()) {
+        extensions.extend(manifest_extensions(&text));
+    }
+    let body = firefox_manifest_json(host, &extensions);
+    let mut changed = false;
+    if std::fs::read_to_string(&manifest).ok().as_deref() != Some(body.as_str()) {
+        if let Some(directory) = manifest.parent() {
+            std::fs::create_dir_all(directory)?;
+        }
+        std::fs::write(&manifest, &body)?;
+        changed = true;
+    }
+    if !registered.is_some_and(|path| same_file(&path, &manifest)) {
+        crate::browser_ipc::set_native_host_manifest(FIREFOX_HOST_KEY, &manifest)?;
+        changed = true;
+    }
+    Ok(Some(changed))
 }
 
 fn valid_origin(origin: &str) -> bool {
@@ -133,6 +209,10 @@ pub fn connect() -> std::io::Result<ConnectReport> {
         }
         browsers.push(browser.to_owned());
     }
+    if let Some(firefox_changed) = connect_firefox(&host)? {
+        changed |= firefox_changed;
+        browsers.push("firefox".to_owned());
+    }
     Ok(ConnectReport { browsers, changed })
 }
 
@@ -172,6 +252,28 @@ mod tests {
             "chrome-extension://kapellkbongejlglcengbmjnpblemmjm/",
             "chrome-extension://lpohaakdindhljdhpofnfmggbfllgdil/",
         ]));
+    }
+
+    #[test]
+    fn firefox_manifests_list_add_on_ids_and_drop_anything_else() {
+        assert!(valid_firefox_id(FIREFOX_EXTENSION_ID));
+        assert!(valid_firefox_id("{3f1c2a4b-1111-4a2b-9c3d-0123456789ab}"));
+        for bad in ["", "no-at-sign", "a@b", "@example.com", "x@exa mple.com", "{not-a-guid}", "chrome-extension://kapellkbongejlglcengbmjnpblemmjm/"] {
+            assert!(!valid_firefox_id(bad), "{bad}");
+        }
+        let text = r#"{"allowed_extensions":["password-fill@nuvori.santoshkanumuri.com","https://evil.example/","x@b"]}"#;
+        assert_eq!(manifest_extensions(text), ["password-fill@nuvori.santoshkanumuri.com"]);
+        let ids: BTreeSet<String> = [FIREFOX_EXTENSION_ID.to_owned()].into();
+        let json: serde_json::Value = serde_json::from_str(&firefox_manifest_json(Path::new(r"C:\Program Files\Nuvori\nuvori-native-host.exe"), &ids)).unwrap();
+        assert_eq!(json["name"], "com.nuvori.desktop");
+        assert_eq!(json["allowed_extensions"], serde_json::json!(["password-fill@nuvori.santoshkanumuri.com"]));
+        assert!(json.get("allowed_origins").is_none(), "Firefox manifests name add-on IDs only");
+    }
+
+    #[test]
+    fn the_firefox_id_matches_the_firefox_package() {
+        let script = include_str!("../../scripts/package-extension.ps1");
+        assert!(script.contains(FIREFOX_EXTENSION_ID), "scripts/package-extension.ps1 must build the Firefox package with this ID");
     }
 
     #[test]

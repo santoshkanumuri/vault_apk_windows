@@ -244,7 +244,7 @@ if (window.location.search.includes("removed")) {
     case "cloud_connect": state.cloud = { ...state.cloud, connected: true, account: "you@gmail.com", lastSync: new Date().toISOString() }; return { ...state.cloud };
     case "cloud_cancel_connect": return undefined;
     case "cloud_disconnect": state.cloud = { ...state.cloud, connected: false, account: "", lastSync: "" }; return { ...state.cloud };
-    case "browser_status": return { hosts: { chrome: true, brave: false, edge: true }, listening: true, lastRequestAt: minutes(4), lastAction: "Filled a login on github.com", requestsSinceUnlock: 3 } satisfies BrowserStatus;
+    case "browser_status": return { hosts: { chrome: true, brave: false, edge: true, firefox: false }, listening: true, lastRequestAt: minutes(4), lastAction: "Filled a login on github.com", requestsSinceUnlock: 3 } satisfies BrowserStatus;
     default: throw `Command ${command} not found`;
   }
 }

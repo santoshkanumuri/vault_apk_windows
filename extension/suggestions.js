@@ -46,6 +46,8 @@
         tagName: getter(Element.prototype, "tagName"),
         shadowRoot: getter(Element.prototype, "shadowRoot"),
         parentElement: getter(Node.prototype, "parentElement"),
+        previousElementSibling: getter(Element.prototype, "previousElementSibling"),
+        matches: method(Element.prototype, "matches"),
         getRootNode: method(Node.prototype, "getRootNode"),
         addEventListener: method(EventTarget.prototype, "addEventListener"),
       };
@@ -68,6 +70,11 @@
   const tagOf = (node) => (node instanceof Element ? DOM.tagName.call(node) : "");
 
   const F = NuvoriFields;
+  // Without IntersectionObserver v2 (Firefox), the page can't prove the list is really visible
+  // before a click. The list then offers only what belongs to this site (its logins and matching
+  // codes); cards, addresses, every code and every login fill from the toolbar popup instead.
+  // (An engine with no IntersectionObserver at all stays fail-closed: nothing activates.)
+  const LIMITED_PAGE_UI = typeof IntersectionObserverEntry === "function" && !("isVisible" in IntersectionObserverEntry.prototype);
   const ACTIVATION_DELAY_MS = 400;
   const BLUR_CLOSE_MS = 150;
   const LOADING_DELAY_MS = 250;
@@ -248,6 +255,15 @@
     });
   } catch { /* The default colors stay. */ }
 
+  /** The top-most open modal dialog of the page, or null. */
+  function modalDialog() {
+    const open = queryIn(doc, "dialog[open]");
+    for (let index = open.length - 1; index >= 0; index--) {
+      try { if (DOM.matches.call(open[index], ":modal")) return open[index]; } catch { /* :modal unsupported */ }
+    }
+    return null;
+  }
+
   function createSurface(label) {
     const host = DOM.createElement.call(doc, "div");
     const root = host.attachShadow({ mode: "closed" });
@@ -274,7 +290,7 @@
     // Any attempt to restyle the host restarts the activation delay.
     const guard = new MutationObserver(() => { if (repair()) shownAt = now(); });
     let io = null;
-    try {
+    if (!LIMITED_PAGE_UI) try {
       io = new IntersectionObserver((entries) => {
         if (!shown) return;
         const visible = entries[entries.length - 1].isVisible === true;
@@ -306,11 +322,20 @@
       invalidate() {
         if (!shown) return;
         shownAt = now();
-        unobscured = false;
-        if (io) { io.unobserve(host); io.observe(host); }
+        if (!LIMITED_PAGE_UI) { unobscured = false; if (io) { io.unobserve(host); io.observe(host); } return; }
+        // Something else may have entered the top layer above us: move back on top.
+        try { host.hidePopover(); host.showPopover(); } catch { /* still z-index on top */ }
       },
       show() {
-        if (!host.isConnected) docRoot().append(host);
+        // A modal <dialog> makes everything outside it inert, so a list or card drawn there could
+        // be seen but never clicked. Inside the open modal dialog it stays usable (still in the top layer).
+        const container = modalDialog() || docRoot();
+        if (host.isConnected && DOM.parentElement.call(host) !== container) {
+          try { host.hidePopover(); } catch { /* not open */ }
+          host.remove();
+          shown = false;
+        }
+        if (!host.isConnected) container.append(host);
         repair();
         painters.add(paint);
         paint();
@@ -319,7 +344,9 @@
           shownAt = now();
           focusEnteredAt = Infinity;
           focusInside = false;
-          unobscured = false;
+          // No v2 report to wait for: the delay, the trusted event and the hit test still apply,
+          // and any other overlay re-raises this surface (invalidate) and restarts the delay.
+          unobscured = LIMITED_PAGE_UI;
           io?.observe(host);
           guard.observe(host, { attributes: true });
           // The top layer keeps page stacking contexts, transforms and filters from covering us.
@@ -387,8 +414,32 @@
     if (!input || input.disabled || String(input.type).toLowerCase() === "hidden") return false;
     if (!input.getClientRects().length) return false;
     const style = getComputedStyle(input);
-    return style.visibility !== "hidden" && style.display !== "none";
+    return style.visibility !== "hidden" && style.display !== "none" && !hiddenTrap(input);
   }
+
+  /**
+   * A field a person can't see although it has a box: a honeypot or a parked template. Near-zero
+   * opacity on it or an ancestor, placed entirely above or left of the page, or clipped by an
+   * ancestor that has collapsed to nothing. Such fields must not decide which form is the login.
+   */
+  function hiddenTrap(input) {
+    const rect = input.getBoundingClientRect();
+    if (rect.right + window.scrollX <= 0 || rect.bottom + window.scrollY <= 0) return true;
+    for (let node = input, depth = 0; node && depth < 24; node = DOM.parentElement.call(node), depth++) {
+      const style = getComputedStyle(node);
+      const opacity = Number.parseFloat(style.opacity);
+      if (Number.isFinite(opacity) && opacity < 0.1) return true;
+      // A clipping ancestor that collapsed below the field's own size (never <html> or <body>,
+      // which often measure 0 high when every child is positioned).
+      if (node !== input && style.overflow !== "visible" && node !== docRoot() && node !== DOM.body.call(doc)) {
+        const box = node.getBoundingClientRect();
+        if ((box.width < 2 && rect.width > box.width + 1) || (box.height < 2 && rect.height > box.height + 1)) return true;
+      }
+    }
+    return false;
+  }
+  /** Live for capture: has a box and is not a hidden trap. */
+  const seenField = (input) => input.getClientRects().length > 0 && !hiddenTrap(input);
 
   const onScreen = (rect, view) => {
     const x = rect.left + rect.width / 2;
@@ -449,8 +500,38 @@
     try {
       const parts = [];
       for (const label of input.labels || []) parts.push(String(label.textContent || ""));
+      if (!parts.length) {
+        const root = rootOf(input);
+        for (const id of String(DOM.getAttribute.call(input, "aria-labelledby") || "").split(/\s+/).filter(Boolean).slice(0, 4)) {
+          const node = typeof root.getElementById === "function" ? root.getElementById(id) : null;
+          if (node) parts.push(String(node.textContent || ""));
+        }
+      }
+      if (!parts.length) parts.push(captionBefore(input));
       return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 120);
     } catch { return ""; }
+  }
+
+  /**
+   * Short text written just before a field that has no <label>, as in "<div>First Name</div>
+   * <div><input></div>" or a table row: the field's (or its wrapper's) previous sibling, when that
+   * sibling holds no form controls. Wrappers count only while the field is their one control.
+   */
+  function captionBefore(input) {
+    let node = input;
+    for (let depth = 0; node && depth < 3; depth++) {
+      const before = DOM.previousElementSibling.call(node);
+      if (before) {
+        // Another control (a month drop-down before the year, say) is never a caption.
+        if (DOM.matches.call(before, "input, select, textarea, button") || queryIn(before, "input, select, textarea, button").length) return "";
+        const text = String(before.textContent || "").replace(/\s+/g, " ").trim();
+        return text.length && text.length <= 60 ? text : "";
+      }
+      const parent = DOM.parentElement.call(node);
+      if (!parent || queryIn(parent, "input, select, textarea").length > 1) return "";
+      node = parent;
+    }
+    return "";
   }
   const DETAILS = { labelOf, live: (input) => usable(input) };
 
@@ -667,7 +748,10 @@
     if (kind !== "login" && status === "ok" && response.items?.length) return renderItems(kind, response.items);
     if (kind !== "login" && status === "ok") return renderState("info", KINDS[kind].empty);
     if (status === "ok" && response.accounts?.length) return renderAccounts(response.accounts);
-    if (status === "ok") return renderState("info", "No login saved for this site yet. Sign in and Nuvori will offer to save it, or search all your logins.", searchButton());
+    if (status === "ok") {
+      if (LIMITED_PAGE_UI) return renderState("info", "No login saved for this site yet. Sign in and Nuvori will offer to save it.");
+      return renderState("info", "No login saved for this site yet. Sign in and Nuvori will offer to save it, or search all your logins.", searchButton());
+    }
     if (status === "locked") return renderState("warning", "Nuvori is locked. Unlock it to fill this site.", unlockButton("Unlock Nuvori"));
     if (status === "missing") return renderState("neutral", response.message || "This login is no longer available for this site.");
     if (status === "offline") return renderState("error", "Nuvori for Windows isn't running.", unlockButton("Start Nuvori"));
@@ -700,6 +784,7 @@
 
   /** Every saved login, with a search box: the user may fill any of them on this page. */
   async function openSearch() {
+    if (LIMITED_PAGE_UI) return;
     const field = dropdown.field;
     if (!field?.isConnected) return;
     const frame = dropdown.frameTarget;
@@ -832,9 +917,9 @@
     dropdown.surface.setTheme(theme);
     dropdown.hostLabel.textContent = dropdown.frameTarget?.host || location.host;
     dropdown.kindLabel.textContent = dropdown.kind === "login" ? "" : KINDS[dropdown.kind].label;
-    if (dropdown.kind === "code" && !dropdown.allCodes) dropdown.showAll.removeAttribute("hidden");
+    if (dropdown.kind === "code" && !dropdown.allCodes && !LIMITED_PAGE_UI) dropdown.showAll.removeAttribute("hidden");
     else dropdown.showAll.setAttribute("hidden", "");
-    if (dropdown.kind === "login") dropdown.searchAll.removeAttribute("hidden");
+    if (dropdown.kind === "login" && !LIMITED_PAGE_UI) dropdown.searchAll.removeAttribute("hidden");
     else dropdown.searchAll.setAttribute("hidden", "");
     render();
     dropdown.surface.show();
@@ -942,6 +1027,7 @@
     dropdown.kind = kind;
     dropdown.allCodes = all;
     if (kind === "code" && response?.status === "ok" && !hasItems && !all) {
+      if (LIMITED_PAGE_UI) { closeDropdown(); return; }
       showDropdown(field, () => renderState("info", "No code matches this site. Choose Show all codes to pick one."));
       return;
     }
@@ -1392,7 +1478,7 @@
 
   /** A card or address the user just submitted ("save_details"). Never a security code. */
   async function captureDetails(controls) {
-    const options = { labelOf, live: (input) => input.getClientRects().length > 0 };
+    const options = { labelOf, live: seenField };
     const cardFields = F.pickCardCapture(controls, options);
     const profile = cardFields ? null : F.pickProfileCapture(controls, options);
     if (!cardFields && !profile) return;
@@ -1413,7 +1499,7 @@
 
   async function capture(inputs, controls) {
     if (capturing) return;
-    const login = F.pickCaptureFields(inputs, (input) => input.getClientRects().length > 0, { allowPasswordOnly: true });
+    const login = F.pickCaptureFields(inputs, seenField, { allowPasswordOnly: true });
     if (!login) {
       if (controls) await captureDetails(controls);
       return;
@@ -1442,7 +1528,7 @@
    * still be saved under the right name. Needs a real user gesture, like a capture.
    */
   function rememberStep(inputs) {
-    const name = F.pickUsernameStep(inputs, (input) => input.getClientRects().length > 0);
+    const name = F.pickUsernameStep(inputs, seenField);
     if (!name || name === lastStep || navigator.userActivation?.isActive !== true) return;
     lastStep = name;
     void send({ action: "remember_username", username: name });
@@ -1526,14 +1612,26 @@
       // Focus moved on to something we offer nothing for: the top page closes this frame's list.
       if (frameField) { frameField = null; void send({ action: "frame_blur" }); }
     }, true);
+    // A field focused before this script started (autofocus, common in sign-in frames) never sent
+    // focusin, so the first click or Down key on it counts as focusing it.
+    const adopt = (target, force = false) => {
+      if (frameField || target !== deepActive() || !usable(target)) return false;
+      return report(target, { force });
+    };
     // Clicking the focused field again, or the Down key, asks for the list again (also with no saved login).
     listen(doc, "click", (event) => {
       const target = eventTarget(event);
-      if (event.isTrusted && !filling && isInput(target) && target === frameField && usable(target)) report(target, { force: true });
+      if (!event.isTrusted || filling || !isInput(target)) return;
+      if (target === frameField && usable(target)) report(target, { force: true });
+      else adopt(target);
     }, true);
     listen(doc, "keydown", (event) => {
       const target = eventTarget(event);
-      if (!event.isTrusted || !isInput(target) || target !== frameField) return;
+      if (!event.isTrusted || !isInput(target)) return;
+      if (target !== frameField) {
+        if (event.key === "ArrowDown" && !event.altKey) adopt(target, true);
+        return;
+      }
       if (event.key === "ArrowDown" && !event.altKey && usable(target)) report(target, { force: true });
       else if (event.key === "Escape" || event.key === "Tab") void send({ action: "frame_blur" });
     }, true);
@@ -1603,6 +1701,15 @@
       sendResponse({ status: "ok" });
       return false;
     }
+    if (message.action === "popup_forms") {
+      const { card: cardParts, profile } = F.detailFields(controlsIn(doc).filter(usable), DETAILS);
+      sendResponse({ card: cardParts.number.length > 0, profile: Object.keys(profile).length >= 2 });
+      return false;
+    }
+    if (message.action === "popup_fill") {
+      sendResponse(popupFill(message));
+      return false;
+    }
     if (message.action === "frame_blur") {
       if (dropdown.open && dropdown.frameTarget?.frameId === message.frameId && !dropdown.search) closeDropdown();
       sendResponse({ status: "ok" });
@@ -1612,6 +1719,37 @@
     void showForFrame(message).then(sendResponse, () => sendResponse({ status: "none" }));
     return true;
   });
+
+  /**
+   * A card or address chosen in the toolbar popup: fill the form the user is working in (the
+   * focused field's form, else the page's one form of that kind). Returns how many fields filled.
+   */
+  function popupFill(message) {
+    const kind = message.kind;
+    const data = kind === "card" ? message.card : kind === "profile" ? message.profile : null;
+    if (!data || typeof data !== "object") return { status: "error" };
+    const wanted = (field) => field?.isConnected && usable(field) && F.detailKind(field, controlsFor(field), DETAILS) === kind;
+    let field = [focusedField, deepActive()].find(wanted) || null;
+    if (!field) {
+      const { card: cardParts, profile } = F.detailFields(controlsIn(doc).filter(usable), DETAILS);
+      const candidates = kind === "card" ? cardParts.number : Object.values(profile);
+      field = candidates.find(wanted) || null;
+    }
+    if (!field) return { status: "none", filled: 0 };
+    const before = fillCount;
+    let codeField = null;
+    filling = true;
+    try {
+      if (kind === "card") codeField = fillCard(field, { ...data });
+      else fillProfile(field, { ...data });
+    } finally {
+      filling = false;
+      for (const key of Object.keys(data)) data[key] = undefined;
+    }
+    const filled = fillCount - before;
+    if (codeField && filled) void fillCardCode(message.id, codeField);
+    return { status: "ok", filled, codeAsked: Boolean(codeField && filled) };
+  }
 
   /** The frame's announcement may arrive just after the background's message: wait for it briefly. */
   async function announcedFrame(nonce) {
@@ -1744,5 +1882,7 @@
   // Pages usually navigate after a sign-in; the background keeps the prompt for this tab and site.
   void send({ action: "inline_pending" }).then((result) => {
     if (result?.status === "ok" && result.prompt && !card.prompt) showCard(result.prompt, result.theme);
+    // The login just submitted on the previous page is already in Nuvori.
+    else if (result?.status === "notice" && typeof result.text === "string") notice("success", result.text.slice(0, 120), result.theme);
   });
 })();

@@ -1,0 +1,12 @@
+{
+  "name": "nuvori-extension-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests for the Nuvori browser extension against a fake native host and real websites.",
+  "scripts": {
+    "e2e": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}

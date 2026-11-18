@@ -65,7 +65,7 @@ export function syncIndicator(snapshot: AppSnapshot, status: SyncStatus | null, 
 
 export function browserIndicator(snapshot: AppSnapshot, status: BrowserStatus | null, unavailable = false): Indicator {
   if (unavailable || !status) return { kind: "neutral", label: "Unavailable" };
-  const registered = status.hosts.chrome || status.hosts.brave || status.hosts.edge;
+  const registered = status.hosts.chrome || status.hosts.brave || status.hosts.edge || status.hosts.firefox;
   if (!registered) return { kind: "warning", label: "Not set up" };
   if (!status.listening) return { kind: "warning", label: "Not listening" };
   if (snapshot.vaultState !== "unlocked") return { kind: "neutral", label: "Locked" };

@@ -28,8 +28,12 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let caller = std::env::args().nth(1).unwrap_or_default();
-    if !is_registered_extension_origin(&caller) {
+    // Chrome, Edge and Brave pass the extension's origin. Firefox passes the path of the host
+    // manifest it read, then the add-on's ID.
+    let mut args = std::env::args().skip(1);
+    let caller = args.next().unwrap_or_default();
+    let add_on = args.next().unwrap_or_default();
+    if !is_registered_extension_origin(&caller) && !is_registered_firefox_caller(&caller, &add_on) {
         return Err("native host caller is not an extension origin".into());
     }
 
@@ -337,6 +341,36 @@ fn is_registered_extension_origin(value: &str) -> bool {
 
 fn is_extension_origin(value: &str) -> bool {
     browser::is_extension_origin(value)
+}
+
+/// Firefox: the manifest it read must be Nuvori's own Firefox manifest, and that manifest must
+/// list the add-on that started this host.
+fn is_registered_firefox_caller(manifest_arg: &str, add_on: &str) -> bool {
+    if add_on.is_empty() || add_on.len() > 80 {
+        return false;
+    }
+    let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
+        return false;
+    };
+    let manifest_path = std::path::PathBuf::from(local_app_data)
+        .join("Nuvori")
+        .join("BrowserHost")
+        .join("com.nuvori.desktop.firefox.json");
+    let same_path = manifest_arg.trim_matches('"').eq_ignore_ascii_case(&manifest_path.to_string_lossy());    if !same_path {
+        return false;
+    }
+    let Ok(manifest) = std::fs::read(&manifest_path) else {
+        return false;
+    };
+    let Ok(manifest) = serde_json::from_slice::<FirefoxHostManifest>(&manifest) else {
+        return false;
+    };
+    manifest.allowed_extensions.iter().any(|allowed| allowed == add_on)
+}
+
+#[derive(serde::Deserialize)]
+struct FirefoxHostManifest {
+    allowed_extensions: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]

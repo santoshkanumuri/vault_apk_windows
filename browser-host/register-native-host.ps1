@@ -8,12 +8,15 @@ param(
     [string]$HostExecutable = '',
 
     [switch]$Chrome,
-    [switch]$Brave
+    [switch]$Brave,
+    # Firefox: its own registry key and a manifest that lists add-on IDs, not extension origins.
+    [switch]$Firefox,
+    [string]$FirefoxId = 'password-fill@nuvori.santoshkanumuri.com'
 )
 
 $ErrorActionPreference = 'Stop'
 
-if (-not $Chrome -and -not $Brave) {
+if (-not $Chrome -and -not $Brave -and -not $Firefox) {
     $Chrome = $true
     $Brave = $true
 }
@@ -61,6 +64,22 @@ if ($Brave) { $registryPaths += 'HKCU:\Software\BraveSoftware\Brave-Browser\Nati
 foreach ($registryPath in $registryPaths) {
     New-Item -Path $registryPath -Force | Out-Null
     Set-Item -Path $registryPath -Value $manifestPath
+}
+
+if ($Firefox) {
+    $firefoxManifestPath = Join-Path $hostDirectory 'com.nuvori.desktop.firefox.json'
+    $firefoxManifest = [ordered]@{
+        name = 'com.nuvori.desktop'
+        description = 'Nuvori browser bridge'
+        path = $installedHost
+        type = 'stdio'
+        allowed_extensions = @($FirefoxId)
+    }
+    [System.IO.File]::WriteAllText($firefoxManifestPath, (ConvertTo-Json -InputObject $firefoxManifest -Depth 4), [System.Text.UTF8Encoding]::new($false))
+    $firefoxKey = 'HKCU:\Software\Mozilla\NativeMessagingHosts\com.nuvori.desktop'
+    New-Item -Path $firefoxKey -Force | Out-Null
+    Set-Item -Path $firefoxKey -Value $firefoxManifestPath
+    Write-Output "Registered com.nuvori.desktop for Firefox add-on $FirefoxId at $firefoxManifestPath"
 }
 
 Write-Output "Registered com.nuvori.desktop for extension $ExtensionId at $manifestPath"

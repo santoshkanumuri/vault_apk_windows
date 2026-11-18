@@ -54,9 +54,14 @@ function makeDom() {
       this.attrs = {};
       this.className = "";
       this.style = {};
-      this.computed = { visibility: "visible", display: "block", opacity: "1" };
+      this.computed = { visibility: "visible", display: "block", opacity: "1", overflow: "visible" };
     }
     get tagName() { return this._tag; }
+    get previousElementSibling() {
+      const siblings = this.parent ? this.parent.children.filter((node) => node instanceof ElementF) : [];
+      return siblings[siblings.indexOf(this) - 1] || null;
+    }
+    matches(selector) { return selector === ":modal" ? Boolean(this.modal) : false; }
     get shadowRoot() { return null; }
     setAttribute(name, value) { this.attrs[name] = String(value); this.mutated?.(name); }
     getAttribute(name) { return name in this.attrs ? this.attrs[name] : null; }
@@ -151,7 +156,7 @@ function makeDom() {
   return { doc, Node: NodeF, Element: ElementF, Input, Form, Label, ShadowRoot: ShadowRootF, DocumentFragment: DocumentFragmentF, Document: DocumentF, EventTarget: EventTargetF };
 }
 
-async function page({ protocol = "https:", reply = () => ({ status: "none" }), build, before, intersection = true } = {}) {
+async function page({ protocol = "https:", reply = () => ({ status: "none" }), build, before, intersection = true, firefox = false } = {}) {
   const dom = makeDom();
   const { doc, Input, Form } = dom;
   const form = new Form();
@@ -189,7 +194,9 @@ async function page({ protocol = "https:", reply = () => ({ status: "none" }), b
       constructor(callback) { this.callback = callback; }
       observe(target) { queueMicrotask(() => this.callback([{ target, isVisible: visibility.visible, isIntersecting: true }])); }
       unobserve() {}
-    } } : {}),
+    }, IntersectionObserverEntry: class { get isVisible() { return false; } } } : {}),
+    // Firefox: IntersectionObserver v1 only (no isVisible, no trackVisibility).
+    ...(firefox ? { IntersectionObserver: class { constructor() {} observe() {} unobserve() {} }, IntersectionObserverEntry: class {} } : {}),
     Event: class { constructor(type, init = {}) { this.type = type; Object.assign(this, init); } },
     chrome: { runtime: { sendMessage: async (message) => { requests.push(message); return reply(message); } } },
   });
@@ -1042,4 +1049,52 @@ test("search all logins: any saved login fills here, and one saved for another s
   assert.deepEqual([sent.id, sent.want], ["s", "both"]);
   assert.equal(state.username.value, "me@example.com");
   assert.equal(state.password.value, "synthetic-secret");
+});
+
+// ---------------------------------------------------------------------------
+// Firefox: no IntersectionObserver v2. The page UI keeps the delay, the trusted event and the hit
+// test, and offers only what belongs to the site; cards, addresses and every login go to the popup.
+
+test("Firefox: without a visibility report the card still needs the delay and a clear hit test", async () => {
+  const state = await page({ firefox: true, reply: (message) => message.action === "inline_pending" ? { status: "ok", prompt: savePrompt } : { status: "saved" } });
+  const [card] = state.hosts();
+  const button = state.find(card, (node) => node.attrs["data-decision"] === "save");
+  await state.click(button);
+  assert.equal(state.requests.some((request) => request.action === "inline_approve"), false, "too soon after showing");
+  state.clock.now += 1000;
+  state.doc.cover = { id: "page-overlay" };
+  await state.click(button);
+  assert.equal(state.requests.some((request) => request.action === "inline_approve"), false, "covered: the hit test fails");
+  state.doc.cover = null;
+  await state.click(button);
+  assert.ok(state.requests.some((request) => request.action === "inline_approve" && request.decision === "save"));
+});
+
+test("Firefox: another overlay re-raises the card and restarts the delay", async () => {
+  const state = await page({ firefox: true, reply: (message) => message.action === "inline_pending" ? { status: "ok", prompt: savePrompt } : { status: "saved" } });
+  const [card] = state.hosts();
+  state.clock.now += 1000;
+  state.doc.fire("toggle", { target: { id: "page-popover" } });
+  assert.equal(card.popoverOpen, true, "still shown, raised again");
+  await state.click(state.find(card, (node) => node.attrs["data-decision"] === "save"));
+  assert.equal(state.requests.some((request) => request.action === "inline_approve"), false, "the delay restarted");
+  state.clock.now += 450;
+  await state.click(state.find(card, (node) => node.attrs["data-decision"] === "save"));
+  assert.ok(state.requests.some((request) => request.action === "inline_approve"));
+});
+
+test("Firefox: the list has this site's logins only, never 'Search all logins'", async () => {
+  const state = await page({ firefox: true, reply: (message) => message.action === "inline_query" ? accounts : { status: "none" } });
+  await state.focus(state.password);
+  const [dropdown] = state.hosts();
+  assert.equal(dropdown.popoverOpen, true);
+  const search = state.find(dropdown, (node) => node._tag === "BUTTON" && node.textContent === "Search all logins");
+  assert.ok(!search || search.attrs.hidden !== undefined, "Search all logins stays hidden");
+  const empty = await page({ firefox: true, reply: (message) => message.action === "inline_query" ? { status: "ok", accounts: [] } : { status: "none" } });
+  await empty.focus(empty.password);
+  empty.doc.fire("keydown", { key: "ArrowDown", target: empty.password });
+  await settle();
+  const [list] = empty.hosts();
+  assert.doesNotMatch(textOf(list.closedRoot), /search all your logins/);
+  assert.equal(empty.find(list, (node) => node._tag === "BUTTON" && node.className === "btn" && node.textContent === "Search all logins"), undefined);
 });

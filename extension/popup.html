@@ -50,6 +50,12 @@
         </ol>
       </section>
 
+      <section id="site-access" class="notice" data-tone="error" aria-labelledby="site-access-title" hidden>
+        <h2 id="site-access-title">Allow Nuvori on websites</h2>
+        <p>Access to websites is turned off for this extension, so it can't fill or save on any page.</p>
+        <button id="grant-sites" class="btn primary small" type="button">Allow on HTTPS websites</button>
+      </section>
+
       <nav class="tabs" role="tablist" aria-label="Nuvori views">
         <button id="tab-site" type="button" role="tab" data-view="site" aria-selected="true" aria-controls="view-site">This site</button>
         <button id="tab-pending" type="button" role="tab" data-view="pending" aria-selected="false" aria-controls="view-pending">Pending <span id="pending-count" class="count">0</span></button>
@@ -74,6 +80,20 @@
             <h2>Authenticator codes</h2>
           </div>
           <ul id="codes" class="card list" aria-label="Authenticator codes for this site"></ul>
+        </div>
+
+        <div id="cards-section" hidden>
+          <div class="section-head">
+            <h2>Cards</h2>
+          </div>
+          <ul id="cards" class="card list" aria-label="Cards to fill on this page"></ul>
+        </div>
+
+        <div id="profiles-section" hidden>
+          <div class="section-head">
+            <h2>Addresses</h2>
+          </div>
+          <ul id="profiles" class="card list" aria-label="Addresses to fill on this page"></ul>
         </div>
 
         <div class="card save-card">

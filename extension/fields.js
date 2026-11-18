@@ -163,8 +163,11 @@ var NuvoriFields = (() => {
     const codes = members.filter((item) => item.role === "OTP").map((item) => item.input);
     const usernames = members.filter((item) => item.role === "USERNAME").map((item) => item.input);
     if (codes.length > 1) return null;
-    // Separate one-time-code screens only: never mix factors in one fill.
-    if (codes.length) return !secrets.length && !usernames.length ? { kind: "otp", username: null, password: null, fresh: [], otp: codes[0], pin: false } : null;
+    // A one-time-code screen on its own.
+    if (codes.length && !secrets.length && !usernames.length) return { kind: "otp", username: null, password: null, fresh: [], otp: codes[0], pin: false };
+    // A sign-in that also asks for the code on the same form is still a sign-in: the account and
+    // password fill together, and the code field is never part of that fill (factors never mix).
+    const otp = codes[0] || null;
     const split = splitPasswords(secrets);
     if (!split) return null;
     const order = members.map((item) => item.input);
@@ -174,7 +177,7 @@ var NuvoriFields = (() => {
     if (!username && usernames.length === 1) username = usernames[0];
     if (!username && !usernames.length && secrets.length === 1 && split.current) username = precedingAccount(order, split.current);
     const kind = split.current && split.fresh.length ? "change" : split.current ? "login" : "register";
-    return { kind, username, password: split.current, fresh: split.fresh, otp: null, pin: Boolean(split.current && isPin(split.current)) };
+    return { kind, username, password: split.current, fresh: split.fresh, otp, pin: Boolean(split.current && isPin(split.current)) };
   }
 
   /**
@@ -249,8 +252,9 @@ var NuvoriFields = (() => {
     country: "country", countryname: "country" };
   const TEXT_TYPES = new Set(["", "text", "tel", "email", "number", "search", "select-one", "textarea", "url"]);
   const NOT_DETAILS = /search|coupon|promo|voucher|gift|captcha|referral|newsletter|comment|message|quantity|qty/;
-  const CODE_WORDS = /otp|totp|onetime|2fa|twofa|twofactor|2step|twostep|mfa|authcode|authenticat|verificationcode|verifycode|securitycode|logincode|signincode|6digit|sixdigit|8digit/;
-  const AUTHENTICATOR_WORDS = /authenticat|totp|2fa|twofa|twofactor|2step|twostep|mfa/;
+  // "2fa" never as part of "fax" (a field named "22faxphone" is a fax number, not a code).
+  const CODE_WORDS = /otp|totp|onetime|2fa(?!x)|twofa(?!x)|twofactor|2step|twostep|mfa|authcode|authenticat|verificationcode|verifycode|securitycode|logincode|signincode|6digit|sixdigit|8digit/;
+  const AUTHENTICATOR_WORDS = /authenticat|totp|2fa(?!x)|twofa(?!x)|twofactor|2step|twostep|mfa/;
 
   /** Lower-case letters and digits of the field's name, id, placeholder, aria-label, title and label. */
   function fieldText(input, labelOf) {
@@ -272,7 +276,7 @@ var NuvoriFields = (() => {
     const text = fieldText(input, labelOf);
     if (!text || NOT_DETAILS.test(text)) return null;
     if (/cvv|cvc|csc|cvn|cardcode|cardverification|cardsecurity|cvd/.test(text)) return "cvv";
-    if (/nameoncard|cardholder|holdername|ccname|cardname|nameoncc/.test(text)) return "name";
+    if (/nameoncard|cardholder|holdername|ccname|ccuname|cardname|cardusername|nameoncc/.test(text)) return "name";
     if (/expir|expdate|validthru|validtill|validuntil|ccexp|cardexp|mmyy|mmaa/.test(text)) {
       if (/month|(^|[^m])mm($|[^y])/.test(text) && !/mmyy|year/.test(text)) return "expMonth";
       if (/year|yyyy|(^|[^m])yy$/.test(text) && !/mmyy|month/.test(text)) return "expYear";
@@ -307,7 +311,10 @@ var NuvoriFields = (() => {
     const text = fieldText(input, labelOf);
     if (!text || NOT_DETAILS.test(text) || /user|login|password|otp|code(?!postal)/.test(text) && !/postcode|zipcode|pincode|postalcode/.test(text)) return null;
     if (/email|emailaddress/.test(text)) return "email";
-    if (/phone|mobile|telephone|cellnumber|contactnumber/.test(text)) return "phone";
+    // A fax number is not the contact phone.
+    if (/fax/.test(text)) return null;
+    // "phon" covers short names such as "homephon" and "cellphon".
+    if (/phone|phon($|\s)|mobile|telephone|cellnumber|contactnumber/.test(text)) return "phone";
     if (/fullname|yourname|customername|contactname|recipientname/.test(text)) return "name";
     if (/firstname|(^|\s)fname($|\s)|givenname|forename/.test(text)) return "given";
     if (/lastname|(^|\s)lname($|\s)|surname|familyname/.test(text)) return "family";
@@ -484,8 +491,10 @@ var NuvoriFields = (() => {
     const value = (role) => {
       const input = profile[role];
       if (!input) return "";
+      // A drop-down still on its placeholder ("Choose...", value "") holds nothing.
+      const option = typeOf(input) === "select-one" ? input.options?.[input.selectedIndex] : null;
       const raw = typeOf(input) === "select-one"
-        ? String(input.options?.[input.selectedIndex]?.text ?? input.value ?? "")
+        ? (option && String(option.value ?? "").trim() ? String(option.text ?? option.value ?? "") : "")
         : String(input.value ?? "");
       return raw.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 256);
     };

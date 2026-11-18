@@ -34,6 +34,10 @@ const STATUS_ORIGIN = "https://status.nuvori.invalid";
 const MAX_TITLE = 256;
 const MAX_CHOICES = 20;
 const BADGE = { success: "#1E7A33", warning: "#8A5300", text: "#FFFFFF" };
+// Firefox has no IntersectionObserver v2, so the page can't prove Nuvori's in-page list is really
+// visible before a click. There the list fills only what is tied to the page's own site (its
+// logins and its matching codes); cards, addresses, every code and every login fill from the popup.
+const LIMITED_PAGE_UI = String(chrome.runtime.getURL?.("") || "").startsWith("moz-extension:");
 
 // ---------------------------------------------------------------------------
 // Diagnostics: action, status, site host and time only. Never usernames,
@@ -1029,6 +1033,21 @@ async function handleFrameMessage(frame, message) {
 
 const FRAME_ACTIONS = ["frame_field", "frame_blur", "remember_username", "capture_submitted_login"];
 
+// "Already saved" after a sign-in, for the next page of that site in the same tab. Memory only;
+// it carries no account detail, only that the submitted login matched the vault.
+const SAVED_NOTE_MS = 15 * 1000;
+const savedNotes = new Map(); // tabId -> { origin, at }
+function noteSaved(page) {
+  savedNotes.set(page.tabId, { origin: page.origin, at: Date.now() });
+  while (savedNotes.size > 64) savedNotes.delete(savedNotes.keys().next().value);
+}
+function takeSavedNote(page) {
+  const note = savedNotes.get(page.tabId);
+  if (!note) return false;
+  savedNotes.delete(page.tabId);
+  return note.origin === page.origin && Date.now() - note.at < SAVED_NOTE_MS;
+}
+
 const PAGE_ACTIONS = ["page_status", "open_popup", "capture_submitted_login", "remember_username", "inline_query", "inline_fill", "inline_pending", "inline_approve",
   "inline_dont_suggest", "inline_unlock", "inline_items", "inline_fill_item", "inline_card_code", "capture_details", "inline_fill_frame",
   "inline_all_logins", "inline_fill_any"];
@@ -1243,8 +1262,13 @@ async function handlePageMessage(page, message) {
       return pageStatus({ id: page.tabId, url: page.url });
     case "open_popup":
       return chrome.action.openPopup().then(() => ({ status: "ok" }), () => ({ status: "error", message: "Click the Nuvori toolbar icon to continue." }));
-    case "capture_submitted_login":
-      return runInOrder(() => handleCapture(page, message));
+    case "capture_submitted_login": {
+      const result = await runInOrder(() => handleCapture(page, message));
+      // Most sign-ins navigate at once, which would erase the page's "Already saved" note; the
+      // next page of the same site in this tab shows it instead (once, within a few seconds).
+      if (result?.status === "already_saved") noteSaved(page);
+      return result;
+    }
     case "inline_query": {
       const settings = await readSettings();
       const scope = scopeOf(page, message, "login");
@@ -1276,10 +1300,12 @@ async function handlePageMessage(page, message) {
       return result;
     }
     case "inline_items": {
+      if (LIMITED_PAGE_UI && (message.kind !== "code" || message.all === true)) return { status: "disabled" };
       const scope = scopeOf(page, message, message.kind);
       return scope ? handleItems(scope, message) : { status: "missing", message: "Click the field again." };
     }
     case "inline_all_logins": {
+      if (LIMITED_PAGE_UI) return { status: "disabled" };
       const settings = await readSettings();
       const scope = scopeOf(page, message, "login");
       if (!scope) return { status: "missing", message: "Click the field again.", theme: settings.theme };
@@ -1295,6 +1321,7 @@ async function handlePageMessage(page, message) {
       };
     }
     case "inline_fill_any": {
+      if (LIMITED_PAGE_UI) return { status: "disabled" };
       // A login the user chose from every saved login, for this page.
       const result = await handleFill(page, { credentialId: message.id, want: message.want }, { all: true });
       void logEvent("inline_fill_any", result.status, page.origin);
@@ -1321,12 +1348,15 @@ async function handlePageMessage(page, message) {
           return live ? { status: "ok", prompt: detailsPromptView(details), theme: (await readSettings()).theme } : { status: "none" };
         }
         const { prompt, item } = await promptFor(page);
-        if (!prompt || !["confirm", "review"].includes(item.state)) return { status: "none" };
+        if (!prompt || !["confirm", "review"].includes(item.state)) {
+          return takeSavedNote(page) ? { status: "notice", text: "Already saved in Nuvori.", theme: (await readSettings()).theme } : { status: "none" };
+        }
         return { status: "ok", prompt: promptView(prompt, item, await getFeatures()), theme: (await readSettings()).theme };
       });
     case "inline_approve":
       return runInOrder(() => handleApprove(page, message));
     case "inline_fill_frame": {
+      if (LIMITED_PAGE_UI && (!["login", "code"].includes(message.kind) || message.all === true)) return { status: "disabled" };
       const result = await handleFillFrame(page, message);
       void logEvent(`fill_frame_${ITEM_FEATURES[message.kind] ? message.kind : "item"}`, result.status, page.origin);
       return result;
@@ -1474,6 +1504,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })().then(sendResponse, () => sendResponse({ status: "error" }));
     return true;
   }
+  // The popup's cards and addresses for the open tab: list them, and fill one into the page.
+  if (message?.action === "popup_items" || message?.action === "popup_fill_item" || message?.action === "popup_forms") {
+    if (sender?.tab || !chrome.runtime.getURL || !String(sender?.url || "").startsWith(chrome.runtime.getURL(""))) return false;
+    handlePopupItems(message).then(sendResponse, () => sendResponse({ status: "error" }));
+    return true;
+  }
   if (message?.action === "unlock_app") {
     requestUnlock().then((status) => sendResponse({ status }), () => sendResponse({ status: "error" }));
     return true;
@@ -1486,11 +1522,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
+async function handlePopupItems(message) {
+  if (message.action === "popup_forms") {
+    // Which kinds of form the page has: the top page's own forms, or a frame field focused just now.
+    if (!Number.isInteger(message.tabId) || !(await tabPage(message.tabId))) return { card: false, profile: false };
+    const forms = await chrome.tabs.sendMessage(message.tabId, { target: "nuvori-top", action: "popup_forms" }, { frameId: 0 }).catch(() => null);
+    const field = frameFields.get(message.tabId);
+    const recent = field && Date.now() - field.at <= FRAME_FIELD_TTL_MS ? field.detail : "";
+    return { card: forms?.card === true || recent === "card", profile: forms?.profile === true || recent === "profile" };
+  }
+  const kind = message.kind;
+  if ((kind !== "card" && kind !== "profile") || !Number.isInteger(message.tabId)) return { status: "error" };
+  const page = await tabPage(message.tabId);
+  if (!page) return { status: "error", message: "Open an HTTPS page first." };
+  const settings = await readSettings();
+  if (!settings.fill[kind]) return { status: "disabled", items: [] };
+  const unavailable = await itemsUnavailable(kind);
+  if (unavailable) return { status: unavailable, items: [] };
+  if (message.action === "popup_items") {
+    const result = await queryItems(page.tabId, page.origin, kind, false, { fresh: true });
+    return { status: result.status, items: result.items.slice(0, 20).map((choice) => ({ id: choice.id, title: clip(choice.title), subtitle: clip(choice.username), color: cardColor(choice.color) })) };
+  }
+  if (typeof message.id !== "string" || !message.id || message.id.length > 256) return { status: "error" };
+  // A payment or address form in a frame that the user focused a moment ago gets it there.
+  const field = frameFields.get(page.tabId);
+  let result;
+  if (field && field.detail === kind && Date.now() - field.at <= FRAME_FIELD_TTL_MS) {
+    result = await handleFillFrame(page, { kind, id: message.id, frameId: field.anchorFrameId });
+  } else {
+    const item = await handleFillItem(page, { kind, id: message.id });
+    if (item.status !== "ok") return item;
+    const payload = { target: "nuvori-top", action: "popup_fill", kind, id: message.id, card: item.card, profile: item.profile };
+    const reply = await chrome.tabs.sendMessage(page.tabId, payload, { frameId: 0 }).catch(() => null);
+    payload.card = payload.profile = item.card = item.profile = undefined;
+    if (!(reply?.status === "ok" && Number.isInteger(reply.filled) && reply.filled > 0)) {
+      cardCodeTokens.delete(`${page.tabId}|${page.origin}|${message.id}`);
+      result = { status: "error", message: kind === "card" ? "No payment form found. Click the card number field first, then try again." : "No address form found. Click a field of the form first, then try again." };
+    } else result = { status: "ok", filled: reply.filled, codeAsked: reply.codeAsked === true };
+  }
+  void logEvent(`popup_fill_${kind}`, result.status, page.origin);
+  return result;
+}
+
 // ---------------------------------------------------------------------------
-// Clipboard auto-clear through an offscreen document (service workers have no clipboard).
+// Clipboard auto-clear: an offscreen document in Chrome (service workers have no clipboard).
+// Firefox has no offscreen documents; its background page writes the clipboard itself.
 
 async function clearClipboard() {
-  if (!chrome.offscreen) return;
+  if (!chrome.offscreen) {
+    try { await navigator.clipboard?.writeText(" "); } catch { /* best effort */ }
+    return;
+  }
   try {
     if (!(await chrome.offscreen.hasDocument?.())) {
       await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["CLIPBOARD"], justification: "Clear a copied password from the clipboard." });

@@ -366,12 +366,15 @@ pub const NATIVE_HOST_KEYS: [(&str, &str); 3] = [
     ("brave", r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.nuvori.desktop"),
     ("edge", r"Software\Microsoft\Edge\NativeMessagingHosts\com.nuvori.desktop"),
 ];
+/// Firefox reads its own key, and a manifest that lists add-on IDs ("allowed_extensions").
+pub const FIREFOX_HOST_KEY: &str = r"Software\Mozilla\NativeMessagingHosts\com.nuvori.desktop";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct BrowserHosts {
     pub chrome: bool,
     pub brave: bool,
     pub edge: bool,
+    pub firefox: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -573,6 +576,7 @@ pub fn registered_hosts() -> BrowserHosts {
         chrome: registered("chrome"),
         brave: registered("brave"),
         edge: registered("edge"),
+        firefox: native_host_registered(FIREFOX_HOST_KEY),
     }
 }
 

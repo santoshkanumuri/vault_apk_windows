@@ -24,6 +24,7 @@ const inlineToggle = $("#inline-toggle");
 const startupUnlockToggle = $("#startup-unlock-toggle");
 const codesSection = $("#codes-section");
 const codesList = $("#codes");
+const itemSections = { card: [$("#cards-section"), $("#cards")], profile: [$("#profiles-section"), $("#profiles")] };
 // Settings switches stored in chrome.storage.local (all on by default).
 const SWITCHES = { "#fill-cards-toggle": "fillCards", "#fill-profiles-toggle": "fillProfiles", "#fill-codes-toggle": "fillCodes", "#save-details-toggle": "saveDetails" };
 const unlockButton = $("#unlock-app");
@@ -37,6 +38,7 @@ const ICON = {
   lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
   info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
   clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+  card: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></svg>',
 };
 
 let tabId;
@@ -161,10 +163,19 @@ function selectView(name) {
 
 for (const tab of document.querySelectorAll("[data-view]")) tab.addEventListener("click", () => selectView(tab.dataset.view));
 
+/** One of the static ICON drawings as an SVG element (parsed, never assigned as HTML). */
+function svgIcon(name) {
+  if (typeof DOMParser !== "function" || !ICON[name]) return null;
+  const markup = ICON[name].replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ');
+  const parsed = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
+  return parsed?.nodeName === "svg" ? document.importNode(parsed, true) : null;
+}
+
 function iconNode(name, className = "") {
   const span = document.createElement("span");
   if (className) span.className = className;
-  span.innerHTML = ICON[name]; // Static, extension-defined markup only.
+  const icon = svgIcon(name);
+  if (icon) span.append(icon);
   return span;
 }
 
@@ -174,7 +185,8 @@ function iconButton(name, label, onClick) {
   button.className = "icon-btn";
   button.setAttribute("aria-label", label);
   button.title = label;
-  button.innerHTML = ICON[name];
+  const icon = svgIcon(name);
+  if (icon) button.append(icon);
   button.addEventListener("click", onClick);
   return button;
 }
@@ -701,6 +713,76 @@ async function loadCodes() {
   codesSection.hidden = items.length === 0;
 }
 
+// ---------------------------------------------------------------------------
+// Cards and addresses for the page's form. Shown only when the page has that kind of form; the
+// card or address goes to the form the user is working in (in Firefox this is the only way).
+
+async function fillItem(kind, item) {
+  setBusy(true);
+  try {
+    await sameTabStillOpen();
+    let result;
+    try { result = await chrome.runtime.sendMessage({ action: "popup_fill_item", tabId, kind, id: item.id }); } catch { result = null; }
+    if (result?.status === "ok") {
+      showMessage(result.codeAsked ? "Filled. Approve the security code in the Nuvori window." : "Filled. Review the form before you submit it.");
+    } else {
+      showMessage(result?.status === "locked" ? "Unlock Nuvori on Windows first." : result?.message || "Could not fill this page. Click a field of the form, then try again.");
+    }
+  } catch (error) {
+    showMessage(error instanceof Error ? error.message : "Could not fill this page.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function itemRow(kind, item) {
+  const row = document.createElement("li");
+  row.className = "row";
+  const text = document.createElement("span");
+  text.className = "row-text";
+  const title = document.createElement("span");
+  title.className = "title";
+  title.textContent = item.title || item.subtitle || (kind === "card" ? "Card" : "Address");
+  const sub = document.createElement("span");
+  sub.className = "username";
+  sub.textContent = item.subtitle || "";
+  text.append(title, sub);
+  const actions = document.createElement("span");
+  actions.className = "row-actions";
+  actions.append(textButton("Fill", "btn primary small", () => fillItem(kind, item)));
+  row.append(iconNode(kind === "card" ? "card" : "user", "avatar"), text, actions);
+  return row;
+}
+
+async function loadItems() {
+  if (!tabId || !origin) return;
+  let forms;
+  try { forms = await chrome.runtime.sendMessage({ action: "popup_forms", tabId }); } catch { forms = null; }
+  for (const kind of ["card", "profile"]) {
+    const [section, list] = itemSections[kind];
+    if (!section || !list) continue;
+    section.hidden = true;
+    if (!forms?.[kind]) continue;
+    let result;
+    try { result = await chrome.runtime.sendMessage({ action: "popup_items", tabId, kind }); } catch { result = null; }
+    const items = result?.status === "ok" && Array.isArray(result.items) ? result.items : [];
+    list.replaceChildren(...items.map((item) => itemRow(kind, item)));
+    section.hidden = items.length === 0;
+  }
+}
+
+// Firefox lets the user take back an extension's access to websites; without it nothing works.
+const HTTPS_SITES = { origins: ["https://*/*"] };
+async function checkSiteAccess() {
+  const panel = $("#site-access");
+  if (!panel || !chrome.permissions?.contains) return;
+  try { panel.hidden = await chrome.permissions.contains(HTTPS_SITES); } catch { panel.hidden = true; }
+}
+$("#grant-sites")?.addEventListener("click", async () => {
+  try { if (await chrome.permissions.request(HTTPS_SITES)) $("#site-access").hidden = true; } catch { /* the user said no */ }
+});
+void checkSiteAccess();
+
 async function findAccounts() {
   if (busy) return;
   clearTimeout(retryTimer);
@@ -717,6 +799,7 @@ async function findAccounts() {
     }
     retryDelay = 2000;
     void loadCodes();
+    void loadItems();
     const usable = response.credentials.filter((choice) => typeof choice.id === "string" && typeof choice.selectionToken === "string");
     if (usable.length === 0) {
       emptyAccounts.hidden = false;
@@ -778,12 +861,14 @@ const BLOCKED_TEXT = {
   not_controllable: "Your organization controls this setting, so Nuvori can't change it.",
   controlled_by_other_extensions: "Another extension controls this setting, so Nuvori can't change it.",
 };
-const PASSWORD_SETTINGS = { chrome: "chrome://password-manager/settings", brave: "brave://password-manager/settings", edge: "edge://wallet/passwords" };
+const PASSWORD_SETTINGS = { chrome: "chrome://password-manager/settings", brave: "brave://password-manager/settings", edge: "edge://wallet/passwords", firefox: "about:logins" };
+const IS_FIREFOX = String(chrome.runtime.getURL?.("") || "").startsWith("moz-extension:");
 const browserSavingToggle = $("#browser-saving-toggle");
 const browserAutofillToggle = $("#browser-autofill-toggle");
 const browserNote = $("#browser-pm-note");
 
 function browserKind() {
+  if (IS_FIREFOX) return "firefox";
   const brands = (navigator.userAgentData?.brands || []).map((entry) => entry.brand);
   if (navigator.brave || brands.includes("Brave")) return "brave";
   if (brands.includes("Microsoft Edge") || /Edg\//.test(navigator.userAgent || "")) return "edge";
@@ -834,6 +919,9 @@ async function renderBrowserState() {
   $("#browser-pm-path").textContent = PASSWORD_SETTINGS[kind];
   // Only Chrome reliably opens its own password page from an extension; elsewhere the path is shown as text.
   $("#open-password-settings").hidden = kind !== "chrome";
+  // Firefox has no switch for its address and card autofill that an extension can turn off.
+  const autofillRow = browserAutofillToggle.closest?.("label");
+  if (autofillRow) autofillRow.hidden = IS_FIREFOX;
   const granted = await hasPrivacyPermission();
   const [saving, address, card] = granted
     ? await Promise.all([...BROWSER_SETTINGS.saving, ...BROWSER_SETTINGS.autofill].map(readPrivacy))
