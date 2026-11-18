@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261118">
   <script>
     /* Apply the saved theme before the first paint, so the page never flashes. */
     document.documentElement.classList.add("js");
@@ -477,7 +477,7 @@
         </article>
 
         <!-- Extension -->
-        <article class="dl reveal" data-spot>
+        <article class="dl dl--stores reveal" data-spot>
           <div class="dl__inner">
             <div class="dl__face dl__front">
               <div class="dl__top">
@@ -486,6 +486,7 @@
               </div>
               <h3>Browser extension</h3>
               <p>For Chrome, Edge, Brave and Firefox, with Nuvori for Windows. In Edge, allow extensions from other stores first.</p>
+              <p class="dl__detected" data-detected hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span></span></p>
               <div class="dl__actions">
                 <a class="store store--chrome" href="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil" target="_blank" rel="noopener">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#EA4335" d="M12 12 3.34 7A10 10 0 0 1 20.66 7Z"/><path fill="#FBBC04" d="M12 12 20.66 7A10 10 0 0 1 12 22Z"/><path fill="#34A853" d="M12 12 12 22A10 10 0 0 1 3.34 7Z"/><circle cx="12" cy="12" r="4.6" fill="#fff"/><circle cx="12" cy="12" r="3.6" fill="#4285F4"/></svg>
@@ -502,8 +503,18 @@
               </div>
             </div>
             <div class="dl__face dl__back" aria-hidden="true">
-              <img class="qr" src="assets/qr-chrome-web-store.svg" width="240" height="240" alt="QR code for the Nuvori Password Fill listing in the Chrome Web Store">
-              <p>Scan to open the Chrome Web Store listing</p>
+              <div class="qr-tabs" role="tablist" aria-label="Browser store">
+                <button class="qr-tab" type="button" role="tab" id="qr-tab-chrome" aria-controls="qr-panel-chrome" aria-selected="true" tabindex="-1">Chrome</button>
+                <button class="qr-tab" type="button" role="tab" id="qr-tab-firefox" aria-controls="qr-panel-firefox" aria-selected="false" tabindex="-1">Firefox</button>
+              </div>
+              <div class="qr-panel" role="tabpanel" id="qr-panel-chrome" aria-labelledby="qr-tab-chrome">
+                <img class="qr" src="assets/qr-chrome-web-store.svg" width="240" height="240" alt="QR code for the Nuvori Password Fill listing in the Chrome Web Store">
+                <p>Scan to open the Chrome Web Store listing</p>
+              </div>
+              <div class="qr-panel" role="tabpanel" id="qr-panel-firefox" aria-labelledby="qr-tab-firefox" hidden>
+                <img class="qr" src="assets/qr-firefox-add-ons.svg" width="240" height="240" alt="QR code for the Nuvori Password Fill listing on Firefox Add-ons" loading="lazy">
+                <p>Scan to open the Firefox Add-ons listing</p>
+              </div>
               <button class="chip" type="button" data-unflip tabindex="-1">Done</button>
             </div>
           </div>
@@ -587,6 +598,6 @@
   <div class="snack" id="snack" role="status" aria-live="polite"></div>
 
   <script src="palette.js"></script>
-  <script src="script.js"></script>
+  <script src="script.js?v=20261118"></script>
 </body>
 </html>

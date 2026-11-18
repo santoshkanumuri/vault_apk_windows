@@ -291,7 +291,7 @@
   $$("[data-count]").forEach((el) => counterObserver.observe(el));
 
   /* ---------- Device tabs ---------- */
-  const tabs = $$('[role="tab"]');
+  const tabs = $$('.tabs__list [role="tab"]');
   const ink = $(".tabs__ink");
   function placeInk(tab) {
     if (!ink || !tab) return;
@@ -360,8 +360,69 @@
     front.setAttribute("aria-hidden", String(flipped));
     back.setAttribute("aria-hidden", String(!flipped));
     $$("a, button", front).forEach((el) => { if (!el.disabled) el.tabIndex = flipped ? -1 : 0; });
-    $$("button", back).forEach((el) => { el.tabIndex = flipped ? 0 : -1; });
+    // Only the selected store tab is in the tab order; arrow keys move between tabs.
+    $$("button", back).forEach((el) => {
+      const otherTab = el.getAttribute("role") === "tab" && el.getAttribute("aria-selected") !== "true";
+      el.tabIndex = flipped && !otherTab ? 0 : -1;
+    });
     $("[data-flip]", card)?.setAttribute("aria-expanded", String(flipped));
+  }
+
+  /* Store tabs on the back of a card: each tab shows its own QR code. */
+  function selectQrTab(tab, focus) {
+    const tabs = $$('[role="tab"]', tab.closest('[role="tablist"]'));
+    const shown = tab.closest(".dl")?.classList.contains("is-flipped") ?? true;
+    tabs.forEach((t) => {
+      const on = t === tab;
+      t.setAttribute("aria-selected", String(on));
+      t.tabIndex = on && shown ? 0 : -1;
+      const panel = document.getElementById(t.getAttribute("aria-controls"));
+      if (panel) panel.hidden = !on;
+    });
+    if (focus) tab.focus({ preventScroll: true });
+  }
+  $$(".qr-tabs").forEach((list) => {
+    const tabs = $$('[role="tab"]', list);
+    tabs.forEach((tab) => tab.addEventListener("click", () => selectQrTab(tab, false)));
+    list.addEventListener("keydown", (e) => {
+      const i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (next === undefined) return;
+      e.preventDefault();
+      selectQrTab(tabs[(next + tabs.length) % tabs.length], true);
+    });
+  });
+
+  /* ---------- Extension card: put the visitor's browser first ----------
+     Only reorders and highlights. Without a match (phones, Safari, unknown browsers, no script),
+     the card keeps both stores in their usual order. */
+  function detectBrowser() {
+    const ua = navigator.userAgent;
+    const mobile = navigator.userAgentData?.mobile ?? /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    if (mobile) return null;
+    const brands = (navigator.userAgentData?.brands || []).map((b) => b.brand);
+    if (/Firefox\/\d/.test(ua)) return { store: "firefox", name: "Firefox" };
+    if (navigator.brave || brands.includes("Brave")) return { store: "chrome", name: "Brave" };
+    if (/Edg\//.test(ua) || brands.includes("Microsoft Edge")) return { store: "chrome", name: "Edge" };
+    if (/OPR\/|Opera/.test(ua) || brands.includes("Opera")) return null;
+    if (brands.includes("Google Chrome") || (/Chrome\/\d/.test(ua) && /Google/.test(navigator.vendor))) return { store: "chrome", name: "Chrome" };
+    return null;
+  }
+  const storeCard = $(".dl--stores");
+  const browser = storeCard && detectBrowser();
+  if (browser) {
+    const match = $(`.store--${browser.store}`, storeCard);
+    const actions = $(".dl__actions", storeCard);
+    if (match.previousElementSibling) actions.prepend(match);
+    match.classList.add("store--match");
+    const hint = $("[data-detected]", storeCard);
+    $("span", hint).textContent = `${browser.name} detected`;
+    hint.hidden = false;
+    // "Copy link" and the QR card follow the matching store too.
+    $("[data-copy]", storeCard).dataset.copy = match.href;
+    const tab = document.getElementById(`qr-tab-${browser.store}`);
+    if (tab) selectQrTab(tab, false);
   }
   $$("[data-flip]").forEach((button) => {
     const card = button.closest(".dl");
