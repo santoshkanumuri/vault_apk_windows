@@ -1,6 +1,6 @@
 [package]
 name = "nuvori"
-version = "2.2.9"
+version = "2.3.0"
 default-run = "nuvori"
 description = "Nuvori companion app for Windows"
 authors = ["Nuvori"]
@@ -34,6 +34,7 @@ hmac = "0.12.1"
 mdns-sd = "0.21"
 if-addrs = "0.14"
 p256 = { version = "0.14", features = ["ecdsa", "pkcs8"] }
+png = "0.17"
 psl = "2"
 rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
 serde = { version = "1", features = ["derive"] }
@@ -46,8 +47,25 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 url = "2"
 ureq = { version = "2.12", features = ["json"] }
-windows = { version = "0.61", features = ["Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_WinRT", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Security_Credentials", "Security_Credentials_UI", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_System_Com", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_WinRT", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows-core = "0.61"
 windows-future = "0.2"
 zeroize = "1.8"
 tauri-plugin-global-shortcut = "2"
+keepass = { version = "0.17", features = ["totp"] }
+
+# The vault unlock times Argon2id to about one second in release builds. Unoptimized, the same
+# setting takes many times longer, so development builds and tests optimize these two crates.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+# KeePass import opens files whose Argon2 KDF may take a second even optimized.
+[profile.dev.package.rust-argon2]
+opt-level = 3
+
+[dev-dependencies]
+# Tests write real KDBX 4 files to import (keepass_import.rs).
+keepass = { version = "0.17", features = ["totp", "save_kdbx4"] }

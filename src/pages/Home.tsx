@@ -5,7 +5,7 @@ import { Avatar, CountdownRing, Kbd } from "../components/Display";
 import { Menu, type MenuItem } from "../components/Menu";
 import { StatusIcon, type StatusKind } from "../components/Status";
 import { useCopy } from "../app/clipboard";
-import { useBrowserStatus, useConflicts, useHelloAvailable, useLock, useMembership, useNow, useSyncStatus } from "../app/hooks";
+import { useBrowserStatus, useConflicts, useHelloAvailable, useLastSync, useLock, useMembership, useNow, useSyncStatus } from "../app/hooks";
 import { RemovedNoticeBanner } from "./sync/Membership";
 import { dismissHint, readDismissed, readRecent } from "../app/recent";
 import { useRouter } from "../app/router";
@@ -84,6 +84,7 @@ function AttentionStrip() {
   const { snapshot } = useVault();
   const router = useRouter();
   const sync = useSyncStatus(4000);
+  const lastSync = useLastSync(sync.data);
   const browser = useBrowserStatus(10000);
   const conflicts = useConflicts();
   const hello = useHelloAvailable();
@@ -107,7 +108,7 @@ function AttentionStrip() {
     return (
       <p className="calm-line" role="status">
         {syncing ? <StatusIcon kind="progress" size={16} /> : <CircleCheck aria-hidden="true" />}
-        {!snapshot.enrolled ? "Your vault is ready" : syncing ? "Syncing with your devices…" : sync.data?.lastSync ? `Everything's in sync · ${relativeTime(sync.data.lastSync).toLowerCase()}` : "Everything's up to date"}
+        {!snapshot.enrolled ? "Your vault is ready" : syncing ? "Syncing with your devices…" : lastSync ? `Everything's in sync · ${relativeTime(lastSync).toLowerCase()}` : "Everything's up to date"}
       </p>
     );
   }
@@ -154,7 +155,7 @@ function QuickAccess() {
           {items.map(({ entry }) => (
             <li key={entry.id} className={cx("qa-card", router.highlight === entry.id && "is-highlighted")} data-row-id={entry.id}>
               <button type="button" className="qa-open" onClick={() => void router.navigate({ page: "item", id: entry.id })} aria-label={`Open ${entry.title}`}>
-                <Avatar title={entry.title || "?"} cardColor={entry.type === "CARD" ? entry.color : undefined} />
+                <Avatar title={entry.title || "?"} cardColor={entry.type === "CARD" ? entry.color : undefined} site={entry.type === "PASSWORD" ? entry.tertiaryValue : undefined} />
                 <span className="qa-text">
                   <span className="qa-title"><span className="truncate">{entry.title || "Untitled"}</span>{entry.favorite && <Star className="fav-star" aria-label="Favorite" />}</span>
                   <span className="qa-subtitle truncate">{entrySubtitle(entry)}</span>
@@ -237,6 +238,7 @@ function QuickActions() {
   const { snapshot } = useVault();
   const router = useRouter();
   const sync = useSyncStatus(4000);
+  const lastSync = useLastSync(sync.data);
   const syncNow = useSyncNow(sync.data?.phoneAddress ?? "", sync.reload);
   const addItems = useAddItems();
   const running = syncNow.busy || isSyncing(sync.data);
@@ -250,7 +252,7 @@ function QuickActions() {
         {snapshot.enrolled ? (
           <button type="button" className="action-row" disabled={running || !sync.data} onClick={() => void syncNow.run()}>
             <span className="row-icon"><RefreshCw aria-hidden="true" className={running ? "spin" : undefined} /></span>
-            <span className="row-text"><span className="row-title">{running ? "Syncing changes" : "Sync now"}</span><span className="row-description">{sync.data?.lastSync ? `Last sync ${relativeTime(sync.data.lastSync).toLowerCase()}` : "Exchange changes with your devices"}</span></span>
+            <span className="row-text"><span className="row-title">{running ? "Syncing changes" : "Sync now"}</span><span className="row-description">{lastSync ? `Last sync ${relativeTime(lastSync).toLowerCase()}` : "Exchange changes with your devices"}</span></span>
           </button>
         ) : (
           <button type="button" className="action-row" onClick={() => void router.root({ page: "sync" })}>

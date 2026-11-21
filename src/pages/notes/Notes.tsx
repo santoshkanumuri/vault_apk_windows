@@ -15,6 +15,7 @@ import { api, type VaultGroup } from "../../lib/api";
 import { foldersFor, sortItems, type SortMode } from "../../lib/entries";
 import { formatDateTime, plural, relativeTime } from "../../lib/format";
 import { buildIndex, matchesFilter } from "../../lib/search";
+import { deleteMessage, restoreDeleted } from "../../lib/trash";
 import { FolderDialog } from "../FolderDialog";
 import { useUnsavedGuard } from "../items/ItemEditor";
 import { FilterInput, FolderPicker, SortPicker } from "../items/Toolbar";
@@ -79,7 +80,7 @@ export function NoteDetailPage({ id }: { id: string }) {
   const folderNames = groups.filter((group) => note.groupIds?.includes(group.id)).map((group) => group.name);
 
   const remove = async () => {
-    if (!(await confirm({ title: `Delete "${note.title}"?`, message: "It will be removed from this PC and from paired devices on the next sync.", confirmLabel: "Delete", danger: true }))) return;
+    if (!(await confirm({ title: `Delete "${note.title}"?`, message: deleteMessage, confirmLabel: "Delete", danger: true }))) return;
     setBusy(true);
     const copy = { ...note };
     try {
@@ -90,7 +91,7 @@ export function NoteDetailPage({ id }: { id: string }) {
           label: "Undo",
           run: async () => {
             try {
-              upsertNote(await api.saveNote({ title: copy.title, body: copy.body, groupIds: copy.groupIds ?? [] }));
+              await restoreDeleted(copy.id);
               toast.success("Note restored");
               void refresh();
             } catch (failure) {

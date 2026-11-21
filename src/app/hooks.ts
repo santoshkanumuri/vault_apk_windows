@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type BrowserStatus, type BuildStatus, type MembershipStatus, type PhotoSyncStatus, type SyncConflict, type SyncStatus } from "../lib/api";
+import { api, type BrowserStatus, type BuildStatus, type CloudStatus, type MembershipStatus, type PhotoSyncStatus, type SyncConflict, type SyncStatus } from "../lib/api";
 import { clearClipboardNow } from "./clipboard";
 import { useRouter } from "./router";
 import { useToast } from "./toast";
 import { useVault } from "./vault";
+import { newestTime } from "../lib/syncState";
 
 /** Current time, ticking on the second boundary. */
 export function useNow(intervalMs = 1000, enabled = true): number {
@@ -57,6 +58,18 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number, enable
 export function useSyncStatus(intervalMs = 3000) {
   const { unlocked } = useVault();
   return usePolling<SyncStatus>(api.syncStatus, intervalMs, unlocked);
+}
+
+/** Google Drive sync. Polled only while the vault is unlocked and paired. */
+export function useCloudStatus(intervalMs = 15000) {
+  const { unlocked, snapshot } = useVault();
+  return usePolling<CloudStatus>(api.cloudStatus, intervalMs, unlocked && snapshot.enrolled);
+}
+
+/** The last successful sync over Wi-Fi or Google Drive, whichever is newer; "" when none. */
+export function useLastSync(sync: SyncStatus | null): string {
+  const cloud = useCloudStatus();
+  return newestTime(sync?.lastSync, cloud.data?.connected ? cloud.data.lastSync : "");
 }
 
 /** Conflicts waiting for a decision. `data` stays null and `error` is set when the command is unavailable. */

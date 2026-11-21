@@ -75,10 +75,18 @@ foreach ($logo in 'StoreLogo.png', 'Square44x44Logo.png', 'Square150x150Logo.png
 }
 
 # The class ID must equal passkey_plugin::CLSID in src-tauri\src\passkey_plugin.rs.
-# Write virtualization is off so the package uses the same vault folder and browser registration
-# as the installer build (%APPDATA%\com.nuvori.desktop). The Store asks for a reason for the
-# `unvirtualizedResources` capability: the vault must survive an uninstall and stay shared with
-# the installer build.
+# The `unvirtualizedResources` capability keeps exactly these locations outside the package, so
+# the vault and the browser registration stay the same for the Store and installer builds:
+#   - %APPDATA%\com.nuvori.desktop: the vault. It must survive an uninstall.
+#   - %LOCALAPPDATA%\Nuvori\BrowserHost: the native messaging manifests that the browsers read.
+#   - The five HKCU NativeMessagingHosts\com.nuvori.desktop keys (browser_ipc::NATIVE_HOST_KEYS
+#     and FIREFOX_HOST_KEY). The browsers read them. Chromium forks without their own key
+#     (Vivaldi, Opera ...) read Chrome's key or Software\Chromium.
+#   BrowserHost also holds a copy of nuvori-native-host.exe for Firefox and its forks, which
+#   reject the execution alias (a reparse point) that Chromium browsers accept.
+# Windows 11 uses the `virtualization:` lists below, and everything else stays virtualized.
+# Windows 10 ignores those lists and uses the two `desktop6:` switches, which turn off
+# virtualization for all of HKCU and AppData. Keep the lists equal to the code's paths.
 $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package
@@ -89,7 +97,8 @@ $manifest = @"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
-  IgnorableNamespaces="uap rescap com uap3 desktop desktop6">
+  xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
+  IgnorableNamespaces="uap rescap com uap3 desktop desktop6 virtualization">
   <Identity Name="$IdentityName" Publisher="$Publisher" Version="$version.$Revision" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Nuvori</DisplayName>
@@ -97,6 +106,21 @@ $manifest = @"
     <Logo>Assets\StoreLogo.png</Logo>
     <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
     <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+    <virtualization:FileSystemWriteVirtualization>
+      <virtualization:ExcludedDirectories>
+        <virtualization:ExcludedDirectory>`$(KnownFolder:RoamingAppData)\com.nuvori.desktop</virtualization:ExcludedDirectory>
+        <virtualization:ExcludedDirectory>`$(KnownFolder:LocalAppData)\Nuvori\BrowserHost</virtualization:ExcludedDirectory>
+      </virtualization:ExcludedDirectories>
+    </virtualization:FileSystemWriteVirtualization>
+    <virtualization:RegistryWriteVirtualization>
+      <virtualization:ExcludedKeys>
+        <virtualization:ExcludedKey>HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.nuvori.desktop</virtualization:ExcludedKey>
+        <virtualization:ExcludedKey>HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\com.nuvori.desktop</virtualization:ExcludedKey>
+        <virtualization:ExcludedKey>HKEY_CURRENT_USER\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.nuvori.desktop</virtualization:ExcludedKey>
+        <virtualization:ExcludedKey>HKEY_CURRENT_USER\Software\Chromium\NativeMessagingHosts\com.nuvori.desktop</virtualization:ExcludedKey>
+        <virtualization:ExcludedKey>HKEY_CURRENT_USER\Software\Mozilla\NativeMessagingHosts\com.nuvori.desktop</virtualization:ExcludedKey>
+      </virtualization:ExcludedKeys>
+    </virtualization:RegistryWriteVirtualization>
   </Properties>
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />

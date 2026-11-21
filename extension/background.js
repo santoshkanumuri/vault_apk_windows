@@ -236,6 +236,176 @@ const sameName = (left, right) => left.trim().toLowerCase() === right.trim().toL
 const firstBy = (list, first) => [...list.filter(first), ...list.filter((entry) => !first(entry))];
 
 // ---------------------------------------------------------------------------
+// Website icon capture. Only when the app answers a query with iconWanted: true (it says so only for a
+// site that already has a login or passkey). The page's favicon is fetched with no cookies, re-encoded
+// to a 64x64 PNG here, and only that PNG goes to the app: it never receives the site's own bytes.
+
+const ICON_SIZE = 64;
+const ICON_MAX_BYTES = 256 * 1024;
+const ICON_TIMEOUT_MS = 5000;
+const ICON_RETRY_MS = 6 * 60 * 60 * 1000;
+const ICON_ATTEMPTS_KEY = "iconAttempts";
+const iconAttemptsMemory = new Map();
+
+/** "https" or "data" for a favicon address we may read; "" for anything else (http, blob, file, data:text ...). */
+function iconSourceKind(value) {
+  if (typeof value !== "string") return "";
+  if (/^data:image\//i.test(value)) return "data";
+  try { return new URL(value).protocol === "https:" ? "https" : ""; } catch { return ""; }
+}
+
+/** The "contain" box for a width x height image inside a size x size square, centered. */
+function containRect(width, height, size = ICON_SIZE) {
+  if (!(width > 0) || !(height > 0)) return null;
+  const scale = Math.min(size / width, size / height);
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+  return { x: Math.round((size - w) / 2), y: Math.round((size - h) / 2), w, h };
+}
+
+/** A blob we are willing to decode: an image (or the generic type .ico files often carry), 1 B to 256 KB. */
+function iconBlobAcceptable(type, size) {
+  const kind = String(type || "").split(";")[0].trim().toLowerCase();
+  return (kind.startsWith("image/") || kind === "application/octet-stream") && size > 0 && size <= ICON_MAX_BYTES;
+}
+
+/** True (and records the attempt) when this host had no attempt in the last 6 hours. Kept in session storage so it survives worker sleep. */
+async function claimIconAttempt(host, now = Date.now()) {
+  let stored = null;
+  try { stored = (await chrome.storage.session.get(ICON_ATTEMPTS_KEY))?.[ICON_ATTEMPTS_KEY]; } catch { stored = null; }
+  const attempts = stored && typeof stored === "object" ? stored : Object.fromEntries(iconAttemptsMemory);
+  const last = attempts[host];
+  if (typeof last === "number" && now - last >= 0 && now - last < ICON_RETRY_MS) return false;
+  attempts[host] = now;
+  for (const [key, at] of Object.entries(attempts)) if (now - at >= ICON_RETRY_MS || now - at < 0) delete attempts[key];
+  attempts[host] = now;
+  const keys = Object.keys(attempts);
+  for (const key of keys.slice(0, Math.max(0, keys.length - 200))) delete attempts[key];
+  iconAttemptsMemory.clear();
+  for (const [key, at] of Object.entries(attempts)) iconAttemptsMemory.set(key, at);
+  try { await chrome.storage.session.set({ [ICON_ATTEMPTS_KEY]: attempts }); } catch { /* the memory copy is enough */ }
+  return true;
+}
+
+function bytesToBase64(bytes) {
+  let text = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) text += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return btoa(text);
+}
+
+/** Reads the body but stops once it passes the cap, so a hostile server cannot make us download more. */
+async function readIconBody(response) {
+  const declared = Number(response.headers?.get?.("content-length"));
+  if (Number.isFinite(declared) && declared > ICON_MAX_BYTES) return null;
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const blob = await response.blob();
+    return iconBlobAcceptable(blob.type, blob.size) ? blob : null;
+  }
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > ICON_MAX_BYTES) { await reader.cancel().catch(() => {}); return null; }
+    chunks.push(value);
+  }
+  const blob = new Blob(chunks, { type: response.headers?.get?.("content-type") || "" });
+  return iconBlobAcceptable(blob.type, blob.size) ? blob : null;
+}
+
+/** Fetches the favicon (https or data:image) with no cookies, no referrer and a 5 s limit. Null when it is not acceptable. */
+async function fetchIconBlob(source) {
+  const kind = iconSourceKind(source);
+  if (!kind) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ICON_TIMEOUT_MS);
+  try {
+    const response = await fetch(source, { credentials: "omit", cache: "force-cache", redirect: "follow", referrerPolicy: "no-referrer", signal: controller.signal });
+    if (!response.ok) return null;
+    if (kind === "https" && iconSourceKind(response.url || source) !== "https") return null;
+    return await readIconBody(response);
+  } catch { return null; }
+  finally { clearTimeout(timer); }
+}
+
+/** Draws a decoded image into a 64x64 transparent canvas with contain scaling and returns PNG bytes. */
+async function drawIcon(image, width, height) {
+  const box = containRect(width, height);
+  if (!box) return null;
+  const canvas = new OffscreenCanvas(ICON_SIZE, ICON_SIZE);
+  const context = canvas.getContext("2d");
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, box.x, box.y, box.w, box.h);
+  const png = await canvas.convertToBlob({ type: "image/png" });
+  return new Uint8Array(await png.arrayBuffer());
+}
+
+/** Rasterizes SVG through an <img> (scripts never run there) where a DOM exists: the Firefox background page, or Chrome's offscreen document. */
+async function rasterizeSvg(blob) {
+  const dataUrl = `data:image/svg+xml;base64,${bytesToBase64(new Uint8Array(await blob.arrayBuffer()))}`;
+  if (typeof document !== "undefined" && typeof Image !== "undefined") return rasterizeInDocument(dataUrl);
+  if (!chrome.offscreen) return null;
+  // Only one offscreen document can exist, and the clipboard cleanup owns it while it runs: skip then.
+  if (await chrome.offscreen.hasDocument?.()) return null;
+  // Close only a document this call created: if the clipboard cleanup created one in between,
+  // createDocument throws here, and closing would stop the password from being cleared.
+  let created = false;
+  try {
+    await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["BLOBS"], justification: "Draw a site's SVG icon as a small PNG." });
+    created = true;
+    const reply = await chrome.runtime.sendMessage({ target: "offscreen", action: "rasterize_icon", svg: dataUrl });
+    return typeof reply?.png === "string" ? reply.png : null;
+  } catch { return null; }
+  finally { if (created) await chrome.offscreen.closeDocument().catch(() => {}); }
+}
+
+function rasterizeInDocument(dataUrl) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    const timer = setTimeout(() => resolve(null), ICON_TIMEOUT_MS);
+    image.onload = async () => {
+      clearTimeout(timer);
+      try {
+        const bytes = await drawIcon(image, image.naturalWidth || ICON_SIZE, image.naturalHeight || ICON_SIZE);
+        resolve(bytes ? bytesToBase64(bytes) : null);
+      } catch { resolve(null); }
+    };
+    image.onerror = () => { clearTimeout(timer); resolve(null); };
+    image.src = dataUrl;
+  });
+}
+
+/** Any accepted icon blob to base64 of a 64x64 PNG, or null when it cannot be decoded. */
+async function iconToPngBase64(blob) {
+  if (/svg/i.test(blob.type)) return rasterizeSvg(blob);
+  if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas === "undefined") return null;
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const bytes = await drawIcon(bitmap, bitmap.width, bitmap.height);
+    return bytes ? bytesToBase64(bytes) : null;
+  } finally { bitmap.close?.(); }
+}
+
+/** Runs after a query_credentials answer with iconWanted. Never throws and never delays filling. */
+async function captureSiteIcon(tabId, origin) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    let page;
+    try { page = new URL(tab?.url || ""); } catch { return; }
+    if (!tab || tab.incognito === true || page.protocol !== "https:" || page.origin !== origin) return;
+    if (!iconSourceKind(tab.favIconUrl)) return;
+    if (!(await claimIconAttempt(page.hostname.toLowerCase()))) return;
+    const blob = await fetchIconBlob(tab.favIconUrl);
+    if (!blob) return;
+    const icon = await iconToPngBase64(blob);
+    if (!icon) return;
+    await native("save_site_icon", origin, { icon });
+  } catch { /* Icons are optional: give up silently. */ }
+}
+
+// ---------------------------------------------------------------------------
 // Account metadata cache. Selection tokens stay in this worker; pages only
 // ever see { id, title, username }.
 
@@ -253,6 +423,7 @@ function queryOrigin(tabId, origin, { fresh = false } = {}) {
     let result;
     try {
       const response = await native("query_credentials", origin);
+      if (response?.iconWanted === true) void captureSiteIcon(tabId, origin);
       if (response?.status === "ok" && Array.isArray(response.credentials)) {
         result = { status: "ok", credentials: response.credentials.filter((choice) =>
           typeof choice?.id === "string" && choice.id && typeof choice.selectionToken === "string") };
@@ -642,17 +813,22 @@ async function refreshActiveTab() {
 
 let unlockWatch = null;
 
-/** Returns "ok" (already unlocked), "locked" (window shown), "starting", or why it couldn't ask. */
-async function requestUnlock() {
+/**
+ * Returns "ok" (already unlocked), "locked" (window shown), "starting", "skipped" (this browser is
+ * turned off for startup prompts in the app), or why it couldn't ask. `startup` marks a browser
+ * start so the app can apply its per-browser setting; only apps that list "startup_browsers" get it.
+ */
+async function requestUnlock({ startup = false } = {}) {
   const status = await pingStatus();
   if (status === "ok") return "ok";
   if (!["locked", "desktop_unavailable"].includes(status)) return status;
-  if (!(await getFeatures()).includes("unlock_prompt")) return "unsupported";
+  const features = await getFeatures();
+  if (!features.includes("unlock_prompt")) return "unsupported";
   let response;
-  try { response = await native("unlock_prompt", ""); } catch (error) { return hostErrorStatus(error); }
+  try { response = await native("unlock_prompt", "", startup && features.includes("startup_browsers") ? { startup: true } : {}); } catch (error) { return hostErrorStatus(error); }
   const result = response?.status || "error";
   if (result === "locked" || result === "starting") watchForUnlock();
-  return result;
+  return result; // "skipped" is a quiet no-op: nothing to watch
 }
 
 /** After asking, notice the unlock so badges and waiting logins update without a page reload. */
@@ -674,7 +850,7 @@ function watchForUnlock() {
 /** Browser start: ask for the Nuvori password once, unless turned off in Settings. */
 async function unlockOnStartup() {
   if (!(await readSettings()).unlockOnStartup) return;
-  const result = await requestUnlock();
+  const result = await requestUnlock({ startup: true });
   void logEvent("startup_unlock", result, "");
 }
 

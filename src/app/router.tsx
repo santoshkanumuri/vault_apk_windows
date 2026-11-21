@@ -14,6 +14,7 @@ export type Route =
   | { page: "conflicts" }
   | { page: "settings"; section?: string }
   | { page: "activity" }
+  | { page: "trash" }
   | { page: "more" };
 
 export function routeKey(route: Route): string {

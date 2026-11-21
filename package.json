@@ -1,12 +1,12 @@
 {
   "name": "nuvori-windows",
   "private": true,
-  "version": "2.2.9",
+  "version": "2.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "node --test extension/*.test.mjs",
+    "test": "node --test extension/*.test.mjs src/lib/*.test.mjs",
     "preview": "vite preview",
     "tauri": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri.ps1",
     "prepare:pairing": "dotnet publish pairing-helper/Nuvori.PairingHelper.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o pairing-helper/publish",

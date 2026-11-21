@@ -2,11 +2,31 @@ import type { ReactNode } from "react";
 import { ChevronRight, type LucideIcon } from "lucide-react";
 import { css, inkFor } from "../lib/cardColors";
 import { cx, hashIndex, monogram } from "../lib/format";
+import { useSiteIcon } from "../app/siteIcons";
+import { glyphColor, needsBorder } from "../lib/siteIcons";
 
-/** A letter avatar. `cardColor` (a card's own ARGB color) paints it in that card's color. */
-export function Avatar({ title, icon: Icon, size = "md", cardColor }: { title: string; icon?: LucideIcon; size?: "sm" | "md" | "lg"; cardColor?: number }) {
+/**
+ * A letter avatar. `cardColor` (a card's own ARGB color) paints it in that card's color.
+ * `site` (a login's website or a passkey's RP ID) swaps the letter for the site's icon when one is known.
+ */
+export function Avatar({ title, icon: Icon, size = "md", cardColor, site }: { title: string; icon?: LucideIcon; size?: "sm" | "md" | "lg"; cardColor?: number; site?: string }) {
+  const found = useSiteIcon(cardColor === undefined ? site : undefined);
   const tint = hashIndex(title.toLocaleLowerCase(), 6);
   const card = cardColor !== undefined ? { background: css(cardColor), color: inkFor(cardColor) } : undefined;
+  if (found?.kind === "captured") {
+    return (
+      <span className={cx("avatar", `avatar-${size}`, "avatar-site-image")} aria-hidden="true">
+        <img src={found.src} alt="" draggable={false} />
+      </span>
+    );
+  }
+  if (found?.kind === "builtin") {
+    return (
+      <span className={cx("avatar", `avatar-${size}`, "avatar-site-brand", needsBorder(found.hex) && "has-border")} style={{ background: `#${found.hex}` }} aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d={found.path} fill={glyphColor(found.hex)} /></svg>
+      </span>
+    );
+  }
   return (
     <span className={cx("avatar", `avatar-${size}`, card ? "avatar-card" : `tint-${tint}`)} style={card} aria-hidden="true">
       {Icon ? <Icon /> : monogram(title)}

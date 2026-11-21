@@ -110,7 +110,7 @@ function Passkeys({ list, error, reload }: { list: PasskeySummary[] | null; erro
             {list.map((passkey) => (
               <li key={passkey.id} className="list-row static">
                 <div className="list-row-main">
-                  <Avatar title={passkey.rpId} icon={Fingerprint} />
+                  <Avatar title={passkey.rpId} icon={Fingerprint} site={passkey.rpId} />
                   <span className="list-row-text">
                     <span className="list-row-title truncate">{passkey.rpId}</span>
                     <span className="list-row-subtitle truncate">{[passkey.displayName || passkey.username, passkey.createdAt ? `Added ${formatDateTime(passkey.createdAt)}` : ""].filter(Boolean).join(" · ")}</span>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { SearchContext } from "./search";
-import { Activity, ArrowLeft, Clock3, CircleHelp, CreditCard, Ellipsis, FileText, House, KeyRound, LockKeyhole, MonitorSmartphone, Moon, Search, Settings, Sun, UserRound, type LucideIcon } from "lucide-react";
+import { Activity, ArchiveRestore, ArrowLeft, Clock3, CircleHelp, CreditCard, Ellipsis, FileText, House, KeyRound, LockKeyhole, MonitorSmartphone, Moon, Search, Settings, Sun, UserRound, type LucideIcon } from "lucide-react";
 import { IconButton } from "../components/Button";
 import { api, onQuickSearch } from "../lib/api";
 import { Kbd } from "../components/Display";
@@ -16,6 +16,8 @@ import { ConflictsPage } from "../pages/sync/ConflictsPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { ActivityPage } from "../pages/ActivityPage";
 import { MorePage } from "../pages/MorePage";
+import { TrashPage } from "../pages/TrashPage";
+import { AutoTypePicker } from "../components/AutoTypePicker";
 import { SearchPalette } from "../pages/SearchPalette";
 import { categories, categoryForType, type Category } from "../lib/entries";
 import { cx } from "../lib/format";
@@ -40,6 +42,7 @@ const primaryNav: NavItem[] = [
 const secondaryNav: NavItem[] = [
   { id: "sync", label: "Devices & sync", icon: MonitorSmartphone, route: { page: "sync" } },
   { id: "activity", label: "Activity", icon: Activity, route: { page: "activity" } },
+  { id: "trash", label: "Recently deleted", icon: ArchiveRestore, route: { page: "trash" } },
   { id: "settings", label: "Settings", icon: Settings, route: { page: "settings" } }
 ];
 const bottomNav: NavItem[] = [
@@ -238,6 +241,7 @@ export function Shell() {
           {bottomNav.map((item) => navButton(item, bottomSection, "bottom"))}
         </nav>
       </div>
+      <AutoTypePicker />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </SearchContext.Provider>
   );
@@ -257,6 +261,7 @@ function PageFor({ route }: { route: Route }): ReactNode {
     case "conflicts": return <ConflictsPage />;
     case "settings": return <SettingsPage section={route.section} />;
     case "activity": return <ActivityPage />;
+    case "trash": return <TrashPage />;
     case "more": return <MorePage />;
   }
 }
@@ -282,6 +287,7 @@ function useRouteTitle(route: Route): string {
     case "conflicts": return "Needs review";
     case "settings": return "Settings";
     case "activity": return "Activity";
+    case "trash": return "Recently deleted";
     case "more": return "More";
   }
 }

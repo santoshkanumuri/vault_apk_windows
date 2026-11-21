@@ -1,8 +1,10 @@
 pub mod activity;
+mod auto_type;
 pub mod appearance;
 pub mod browser;
 pub mod browser_ipc;
 mod browser_setup;
+mod browsers;
 pub mod change_store;
 pub mod conflicts;
 mod desktop;
@@ -13,6 +15,8 @@ pub mod identity;
 pub mod incoming;
 pub mod incoming_apply;
 pub mod incoming_store;
+pub mod keepass_import;
+pub mod local_recovery;
 mod discovery;
 mod google_drive;
 mod lan_sync;
@@ -28,9 +32,11 @@ pub mod portable_backup;
 pub mod progress;
 pub mod protocol;
 pub mod quick_search;
+pub mod site_icons;
 pub mod snapshot;
 pub mod snapshot_import;
 mod store_build;
+pub mod store_launch;
 pub mod sync;
 mod totp;
 pub mod vault;
@@ -92,6 +98,23 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
                 LoginCandidate { id, title, username, related, passkey, color: None, site: None, preview: None }
             })
             .collect())
+    }
+
+    fn icon_wanted(&self, origin: &str) -> Result<bool, BrowserIpcError> {
+        let mut app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let vault = app.unlocked.as_mut().ok_or(BrowserIpcError::VaultLocked)?;
+        let now = activity::now_millis() as i64;
+        site_icons::wanted(vault.connection(), origin, site_icons::enabled(), now).map_err(|_| BrowserIpcError::InvalidRequest)
+    }
+
+    fn save_site_icon(&self, origin: &str, png: &[u8]) -> Result<(), BrowserIpcError> {
+        let mut app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let vault = app.unlocked.as_mut().ok_or(BrowserIpcError::VaultLocked)?;
+        let now = activity::now_millis() as i64;
+        site_icons::save(vault.connection(), origin, png, site_icons::enabled(), now).map_err(|_| BrowserIpcError::InvalidRequest)?;
+        drop(app);
+        site_icons::notify_saved();
+        Ok(())
     }
 
     fn load_selected_credential(
@@ -709,7 +732,7 @@ fn log_browser_connect(result: std::io::Result<browser_setup::ConnectReport>, ma
         Ok(report) if report.changed => activity::log(Level::Info, Category::Browser,
             format!("Connected the browser extension for {}. Restart the browser to use it", report.browsers.join(", "))),
         Ok(report) if manual && report.browsers.is_empty() => activity::log(Level::Warning, Category::Browser,
-            "No Chrome, Edge or Brave profile was found on this PC"),
+            "No connected browser was found on this PC"),
         Ok(_) => {}
         Err(error) => activity::diagnostic(Category::Browser, "Could not connect the browser extension", error),
     }
@@ -726,6 +749,34 @@ async fn connect_browsers() -> Result<browser_setup::ConnectReport, String> {
         "The browser host is missing. Reinstall Nuvori.".to_owned()
     } else {
         "Couldn't write the browser registration. Try again.".to_owned()
+    })
+}
+
+/// Settings > Browser extension: every browser found on this PC, with its choices.
+#[tauri::command]
+async fn list_browsers() -> Result<Vec<browsers::Browser>, String> {
+    tauri::async_runtime::spawn_blocking(browser_setup::list)
+        .await
+        .map_err(|_| "Couldn't list the browsers".to_owned())?
+        .map_err(|_| "Couldn't list the browsers".to_owned())
+}
+
+/// Connect or disconnect one browser, or change whether it asks for the password at start. The
+/// registration changes at once. `family` counts only for a browser Nuvori could not classify.
+#[tauri::command]
+async fn set_browser(
+    id: String,
+    connected: Option<bool>,
+    ask_at_start: Option<bool>,
+    family: Option<browsers::Family>,
+) -> Result<Vec<browsers::Browser>, String> {
+    let result = tauri::async_runtime::spawn_blocking(move || browser_setup::set(&id, connected, ask_at_start, family))
+        .await
+        .map_err(|_| "Couldn't change the browser".to_owned())?;
+    result.map_err(|error| match error.kind() {
+        std::io::ErrorKind::InvalidInput => "That browser is no longer installed.".to_owned(),
+        std::io::ErrorKind::NotFound => "The browser host is missing. Reinstall Nuvori.".to_owned(),
+        _ => "Couldn't write the browser registration. Try again.".to_owned(),
     })
 }
 
@@ -2094,6 +2145,145 @@ fn delete_entry(id: String, state: State<'_, ManagedState>) -> Result<(), String
     Ok(())
 }
 
+// Import from KeePass (keepass_import.rs). The file arrives as base64 from the import dialog and
+// is opened in memory only. Both commands run the KeePass key derivation off the UI thread.
+
+fn open_keepass(data: &str, password: &str, key_file: Option<&str>) -> Result<keepass_import::Plan, String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    if data.len() > keepass_import::MAX_FILE_BYTES / 3 * 4 + 8 {
+        return Err(keepass_import::KeepassError::TooLarge.to_string());
+    }
+    let bytes = zeroize::Zeroizing::new(STANDARD.decode(data).map_err(|_| keepass_import::KeepassError::Unreadable.to_string())?);
+    let key = match key_file {
+        Some(key) => Some(zeroize::Zeroizing::new(STANDARD.decode(key).map_err(|_| "The key file couldn't be read.".to_owned())?)),
+        None => None,
+    };
+    keepass_import::read(&bytes, password, key.as_deref().map(Vec::as_slice)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn keepass_preview(data: String, password: String, key_file: Option<String>) -> Result<keepass_import::Summary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut password = password;
+        let plan = open_keepass(&data, &password, key_file.as_deref());
+        password.zeroize();
+        Ok(plan?.summary())
+    })
+    .await
+    .map_err(|_| "The KeePass file couldn't be read.".to_owned())?
+}
+
+#[tauri::command]
+async fn keepass_import(data: String, password: String, key_file: Option<String>, state: State<'_, ManagedState>) -> Result<keepass_import::Summary, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut password = password;
+        let plan = open_keepass(&data, &password, key_file.as_deref());
+        password.zeroize();
+        let plan = plan?;
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let summary = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?
+            .import_keepass(&plan).map_err(public_vault_error)?;
+        activity::log(Level::Success, Category::Items, format!("Imported {} logins, {} codes and {} notes from KeePass", summary.logins, summary.codes, summary.notes));
+        Ok(summary)
+    })
+    .await
+    .map_err(|_| "The import stopped unexpectedly.".to_owned())?
+}
+
+// Website icons: captured by the extension, kept on this PC only (site_icons.rs). The page
+// shows an icon from this list, or a built-in one, or the letter avatar.
+
+fn site_icons_view(state: &ManagedState) -> Result<site_icons::View, String> {
+    let enabled = site_icons::enabled();
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let icons = match app.unlocked.as_mut() {
+        Some(vault) if enabled => site_icons::data_urls(vault.connection()).map_err(|_| "Could not read the website icons.")?,
+        _ => Default::default(),
+    };
+    Ok(site_icons::View { enabled, icons })
+}
+
+#[tauri::command]
+fn site_icons(state: State<'_, ManagedState>) -> Result<site_icons::View, String> {
+    site_icons_view(state.inner())
+}
+
+#[tauri::command]
+fn set_site_icons(enabled: bool, state: State<'_, ManagedState>) -> Result<site_icons::View, String> {
+    site_icons::set_enabled(enabled).map_err(|_| "Could not save the setting.".to_owned())?;
+    if !enabled {
+        // A locked vault keeps its icons until the next unlock, which clears them.
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        if let Some(vault) = app.unlocked.as_mut() {
+            site_icons::clear(vault.connection()).map_err(|_| "Could not delete the website icons.")?;
+        }
+    }
+    site_icons_view(state.inner())
+}
+
+#[tauri::command]
+fn clear_site_icons(state: State<'_, ManagedState>) -> Result<site_icons::View, String> {
+    {
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?;
+        site_icons::clear(vault.connection()).map_err(|_| "Could not delete the website icons.")?;
+    }
+    site_icons_view(state.inner())
+}
+
+// Previous passwords and Recently deleted: kept on this PC only (local_recovery.rs).
+
+#[tauri::command]
+fn previous_passwords(entry_id: String, state: State<'_, ManagedState>) -> Result<Vec<local_recovery::PreviousPassword>, String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?
+        .previous_passwords(&entry_id).map_err(public_vault_error)
+}
+
+#[tauri::command]
+fn clear_previous_passwords(entry_id: String, state: State<'_, ManagedState>) -> Result<(), String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?
+        .clear_previous_passwords(&entry_id).map_err(public_vault_error)?;
+    activity::log(Level::Info, Category::Items, "Cleared previous passwords of a login");
+    Ok(())
+}
+
+#[tauri::command]
+fn list_trash(state: State<'_, ManagedState>) -> Result<Vec<local_recovery::TrashedItem>, String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?
+        .trashed_items().map_err(public_vault_error)
+}
+
+#[tauri::command]
+fn restore_trashed(id: String, state: State<'_, ManagedState>) -> Result<serde_json::Value, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let restored = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?
+        .restore_trashed(&id).map_err(public_vault_error)?;
+    activity::log(Level::Success, Category::Items, "Restored an item from Recently deleted");
+    Ok(restored)
+}
+
+#[tauri::command]
+fn forget_trashed(id: String, state: State<'_, ManagedState>) -> Result<(), String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?
+        .forget_trashed(&id).map_err(public_vault_error)?;
+    activity::log(Level::Info, Category::Items, "Deleted an item for good");
+    Ok(())
+}
+
+#[tauri::command]
+fn empty_trash(state: State<'_, ManagedState>) -> Result<(), String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?
+        .empty_trash().map_err(public_vault_error)?;
+    activity::log(Level::Info, Category::Items, "Emptied Recently deleted");
+    Ok(())
+}
+
 #[tauri::command]
 fn list_entry_photos(
     entry_id: String,
@@ -2226,6 +2416,9 @@ fn public_vault_error(error: VaultError) -> String {
         }
         VaultError::AlreadyInitialized => "A Windows vault already exists.".to_owned(),
         VaultError::WrongPasswordOrCorruptKey => "Wrong password or damaged vault key.".to_owned(),
+        VaultError::UnsupportedBootstrap(_) => {
+            "A newer version of Nuvori saved this vault. Update Nuvori to open it.".to_owned()
+        }
         VaultError::InvalidNote => {
             "A note needs a title and contents within the size limit.".to_owned()
         }
@@ -2278,6 +2471,60 @@ async fn set_appearance(accent: String, surface: String, state: State<'_, Manage
     tauri::async_runtime::spawn_blocking(move || appearance::set_from_ui(&state, &accent, &surface))
         .await
         .map_err(|_| "The appearance could not be saved".to_owned())?
+}
+
+// Auto-type commands. The shortcut and the typing live in `auto_type.rs`.
+
+#[tauri::command]
+fn auto_type_status(auto_type: State<'_, auto_type::AutoType>) -> auto_type::Status {
+    auto_type.status()
+}
+
+#[tauri::command]
+fn set_auto_type(
+    app: AppHandle,
+    auto_type: State<'_, auto_type::AutoType>,
+    enabled: bool,
+    preset: Option<String>,
+    press_enter: Option<bool>,
+) -> Result<auto_type::Status, String> {
+    auto_type.change(&app, enabled, preset.as_deref(), press_enter)
+}
+
+/// The window the shortcut recorded, while the picker may still type into it.
+#[tauri::command]
+fn auto_type_pending(auto_type: State<'_, auto_type::AutoType>) -> Option<auto_type::TargetInfo> {
+    auto_type.pending()
+}
+
+#[tauri::command]
+fn auto_type_cancel(auto_type: State<'_, auto_type::AutoType>) {
+    auto_type.cancel();
+}
+
+/// Types the login's username and password into the recorded window. The vault lock is
+/// released before typing starts; the copies are wiped afterwards.
+#[tauri::command]
+async fn auto_type_login(id: String, app: AppHandle, state: State<'_, ManagedState>) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (mut username, mut password) = {
+            let app_state = state.lock().map_err(|_| "Vault state is unavailable")?;
+            let vault = app_state.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?;
+            let entries = vault.list_entries().map_err(public_vault_error)?;
+            let entry = entries.iter().find(|entry| entry["id"] == id.as_str() && entry["type"] == "PASSWORD")
+                .ok_or("That login no longer exists.".to_owned())?;
+            (entry["primaryValue"].as_str().unwrap_or_default().to_owned(), entry["secondaryValue"].as_str().unwrap_or_default().to_owned())
+        };
+        let result = app.state::<auto_type::AutoType>().type_login(&app, &username, &password);
+        username.zeroize();
+        password.zeroize();
+        let target = result?;
+        activity::log(Level::Success, Category::Items, format!("Auto-typed a login into {target}"));
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Auto-type stopped unexpectedly.".to_owned())?
 }
 
 // Quick search shortcut commands. The shortcut itself lives in `quick_search.rs`.
@@ -2347,6 +2594,15 @@ pub fn run() {
             activity::set_diagnostics_file(directory.join("diagnostics.log"));
             // Installed and Store builds connect the browser extension by themselves. A
             // development build leaves the registration alone; use Settings to connect it.
+            browsers::install(&directory);
+            browser_ipc::set_browser_hooks(browser_ipc::BrowserHooks {
+                seen: Box::new(|id| {
+                    if let Some(store) = browsers::installed() {
+                        store.note_seen(id);
+                    }
+                }),
+                ask_at_start: Box::new(|id| browsers::installed().is_none_or(|store| store.ask_at_start(id))),
+            });
             if !cfg!(debug_assertions) {
                 std::thread::spawn(|| log_browser_connect(browser_setup::connect(), false));
             }
@@ -2373,6 +2629,12 @@ pub fn run() {
             app.manage(Arc::new(SyncController::default()));
             app.manage(quick_search::QuickSearch::new(directory.clone()));
             app.state::<quick_search::QuickSearch>().apply(app.handle());
+            let icons_handle = app.handle().clone();
+            site_icons::install(&directory, move || {
+                let _ = icons_handle.emit(site_icons::EVENT, ());
+            });
+            app.manage(auto_type::AutoType::new(directory.clone()));
+            app.state::<auto_type::AutoType>().apply(app.handle());
             let handle = app.handle().clone();
             appearance::install(appearance::AppearanceStore::with_notify(&directory, move |view| {
                 let _ = handle.emit(appearance::EVENT, view);
@@ -2418,6 +2680,22 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_snapshot,
+            site_icons,
+            set_site_icons,
+            clear_site_icons,
+            auto_type_status,
+            set_auto_type,
+            auto_type_pending,
+            auto_type_cancel,
+            auto_type_login,
+            keepass_preview,
+            keepass_import,
+            previous_passwords,
+            clear_previous_passwords,
+            list_trash,
+            restore_trashed,
+            forget_trashed,
+            empty_trash,
             sync_now,
             sync_status,
             configure_sync,
@@ -2456,6 +2734,8 @@ pub fn run() {
             clear_activity_log,
             browser_status,
             connect_browsers,
+            list_browsers,
+            set_browser,
             build_status,
             open_windows_settings,
             cloud_status,

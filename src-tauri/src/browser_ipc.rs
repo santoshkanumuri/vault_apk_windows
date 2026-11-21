@@ -64,6 +64,8 @@ const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
 const MAX_CANDIDATES: usize = 200;
 /// "all_logins": the most logins one listing of every login returns.
 const MAX_ALL_CANDIDATES: usize = 1_000;
+/// Largest decoded site icon (site_icons.rs `MAX_PNG_BYTES` checks the same limit).
+const MAX_ICON_BYTES: usize = 32 * 1024;
 const SELECTION_TTL: Duration = Duration::from_secs(30);
 /// How long the user has to approve a card security code in Nuvori.
 const CVV_TTL: Duration = Duration::from_secs(120);
@@ -85,6 +87,86 @@ static WINDOW_HANDLER: OnceLock<WindowHandler> = OnceLock::new();
 /// Set once by the app at startup. Without a handler, window requests only report the vault state.
 pub fn set_window_handler(handler: impl Fn(&BrowserAction, bool) + Send + Sync + 'static) {
     let _ = WINDOW_HANDLER.set(Box::new(handler));
+}
+
+/// What the app does with the browser id that the native host adds to each request.
+/// `seen` records that the browser used Nuvori; `ask_at_start` answers whether `unlock_prompt`
+/// with `startup` may open a window for that browser. Without hooks (the native host, tests)
+/// every browser is asked.
+pub struct BrowserHooks {
+    pub seen: Box<dyn Fn(&str) + Send + Sync>,
+    pub ask_at_start: Box<dyn Fn(&str) -> bool + Send + Sync>,
+}
+
+static BROWSER_HOOKS: OnceLock<BrowserHooks> = OnceLock::new();
+
+pub fn set_browser_hooks(hooks: BrowserHooks) {
+    let _ = BROWSER_HOOKS.set(hooks);
+}
+
+/// A browser id: lower case exe name without ".exe", at most 40 of `[a-z0-9_-]`.
+pub fn valid_browser_id(id: &str) -> bool {
+    (1..=40).contains(&id.len()) && id.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_')
+}
+
+/// The id for a program's exe file name ("Zen.exe" -> "zen"). Opera starts through `launcher.exe`.
+pub fn browser_id_from_exe(exe: &str) -> Option<String> {
+    let name = exe.rsplit(['\\', '/']).next().unwrap_or(exe).to_ascii_lowercase();
+    let stem = name.strip_suffix(".exe").unwrap_or(&name);
+    if stem == "launcher" {
+        return Some("opera".to_owned());
+    }
+    let id: String = stem.chars().map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' { c } else { '-' }).take(40).collect();
+    valid_browser_id(&id).then_some(id)
+}
+
+/// One running process, as the process snapshot lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessEntry {
+    pub pid: u32,
+    pub parent: u32,
+    pub exe: String,
+}
+
+/// Programs that sit between a browser and its native host: Chrome starts hosts through cmd.exe.
+const HOST_RELAYS: [&str; 3] = ["cmd.exe", "conhost.exe", "nuvori-native-host.exe"];
+
+/// The browser that started process `pid`: walks up at most 4 parents, skips the relays, and
+/// names the first program left.
+pub fn browser_of_chain(table: &[ProcessEntry], pid: u32) -> Option<String> {
+    let mut current = table.iter().find(|entry| entry.pid == pid)?.parent;
+    for _ in 0..4 {
+        let entry = table.iter().find(|entry| entry.pid == current)?;
+        let exe = entry.exe.to_ascii_lowercase();
+        if !HOST_RELAYS.contains(&exe.as_str()) {
+            return browser_id_from_exe(&exe);
+        }
+        current = entry.parent;
+    }
+    None
+}
+
+/// A snapshot of the running processes (name and parent only).
+pub fn process_table() -> Vec<ProcessEntry> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+    let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else { return Vec::new() };
+    let mut table = Vec::new();
+    let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    let mut more = unsafe { Process32FirstW(snapshot, &mut entry) }.is_ok();
+    while more {
+        let length = entry.szExeFile.iter().position(|unit| *unit == 0).unwrap_or(entry.szExeFile.len());
+        table.push(ProcessEntry { pid: entry.th32ProcessID, parent: entry.th32ParentProcessID, exe: String::from_utf16_lossy(&entry.szExeFile[..length]) });
+        more = unsafe { Process32NextW(snapshot, &mut entry) }.is_ok();
+    }
+    unsafe {
+        let _ = CloseHandle(snapshot);
+    }
+    table
+}
+
+/// The browser that started this process, for the native host.
+pub fn calling_browser() -> Option<String> {
+    browser_of_chain(&process_table(), std::process::id())
 }
 
 /// `hand_over`: `allowed` checks the calling process ID; `close` ends this copy of the app after
@@ -158,6 +240,15 @@ pub trait BrowserCredentialProvider: Send + Sync + 'static {
     /// Saves a captured card or address as a new item; false when already saved.
     fn save_details(&self, _pending: &PendingDetails, _title: Option<&str>) -> Result<bool, BrowserIpcError> {
         Err(BrowserIpcError::SaveFailed)
+    }
+    /// "query_credentials": true when the app wants this origin's icon (site_icons.rs `wanted`).
+    fn icon_wanted(&self, _origin: &str) -> Result<bool, BrowserIpcError> {
+        Ok(false)
+    }
+    /// "save_site_icon": keeps a PNG for the origin's site. `InvalidRequest` means the app
+    /// refused it: setting off, no matching login or passkey, or not a valid small PNG.
+    fn save_site_icon(&self, _origin: &str, _png: &[u8]) -> Result<(), BrowserIpcError> {
+        Err(BrowserIpcError::InvalidRequest)
     }
 }
 
@@ -361,10 +452,12 @@ fn with_appearance(mut response: BrowserResponse) -> BrowserResponse {
 }
 
 /// Native messaging host manifests checked by `browser_status` (HKCU, default value).
-pub const NATIVE_HOST_KEYS: [(&str, &str); 3] = [
+pub const NATIVE_HOST_KEYS: [(&str, &str); 4] = [
     ("chrome", r"Software\Google\Chrome\NativeMessagingHosts\com.nuvori.desktop"),
     ("brave", r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.nuvori.desktop"),
     ("edge", r"Software\Microsoft\Edge\NativeMessagingHosts\com.nuvori.desktop"),
+    // Chromium forks without their own key (Vivaldi, Opera, Thorium ...) read Chrome's or this one.
+    ("chromium", r"Software\Chromium\NativeMessagingHosts\com.nuvori.desktop"),
 ];
 /// Firefox reads its own key, and a manifest that lists add-on IDs ("allowed_extensions").
 pub const FIREFOX_HOST_KEY: &str = r"Software\Mozilla\NativeMessagingHosts\com.nuvori.desktop";
@@ -408,7 +501,8 @@ impl BrowserStats {
             activity::log(Level::Info, Category::Browser, "Browser extension connected");
         }
         // Status pings and the security-code wait poll are not activity.
-        if action == RequestKind::Status || (action == RequestKind::Cvv && status == "pending") {
+        // Icon saves can come with every page visit, so they never reach the activity log.
+        if matches!(action, RequestKind::Status | RequestKind::SiteIcon) || (action == RequestKind::Cvv && status == "pending") {
             return;
         }
         self.requests_since_unlock.fetch_add(1, Ordering::Relaxed);
@@ -444,6 +538,7 @@ enum RequestKind {
     Cvv,
     DetailsReview,
     DetailsSave,
+    SiteIcon,
 }
 
 impl From<&BrowserAction> for RequestKind {
@@ -462,6 +557,7 @@ impl From<&BrowserAction> for RequestKind {
             BrowserAction::RequestCvv | BrowserAction::FillCvv => Self::Cvv,
             BrowserAction::SealDetails | BrowserAction::ReviewDetails => Self::DetailsReview,
             BrowserAction::CommitDetails => Self::DetailsSave,
+            BrowserAction::SaveSiteIcon => Self::SiteIcon,
         }
     }
 }
@@ -871,6 +967,15 @@ fn handle_request(
     provider: &RwLock<Option<Arc<dyn BrowserCredentialProvider>>>,
     grants: &Mutex<SelectionGrants>,
 ) -> Result<BrowserResponse, BrowserIpcError> {
+    handle_request_with(request, provider, grants, BROWSER_HOOKS.get())
+}
+
+fn handle_request_with(
+    request: BrowserRequest,
+    provider: &RwLock<Option<Arc<dyn BrowserCredentialProvider>>>,
+    grants: &Mutex<SelectionGrants>,
+    hooks: Option<&BrowserHooks>,
+) -> Result<BrowserResponse, BrowserIpcError> {
     let status_ping = matches!(request.action, BrowserAction::Status);
     let window_request = request.action.is_window_request();
     // "status_no_origin": a status ping may omit the origin; every other action needs one.
@@ -890,8 +995,18 @@ fn handle_request(
     }) {
         return Ok(BrowserResponse::invalid(request.request_id, "Invalid login name."));
     }
+    // "startup_browsers": `startup` belongs to "unlock_prompt" only. The browser id is the host's.
+    if (request.startup.is_some() && !matches!(request.action, BrowserAction::UnlockPrompt))
+        || request.browser.as_deref().is_some_and(|browser| !valid_browser_id(browser))
+    {
+        return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
+    }
     let item_action = matches!(request.action, BrowserAction::QueryItems | BrowserAction::FillItem
         | BrowserAction::RequestCvv | BrowserAction::FillCvv);
+    // An icon belongs to "save_site_icon" only, and that action needs one.
+    if request.icon.is_some() != matches!(request.action, BrowserAction::SaveSiteIcon) {
+        return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
+    }
     // Only the native host takes captured fields ("seal_details"); the app never does.
     if request.card.is_some() || request.profile.is_some()
         || (!item_action && request.kind.is_some())
@@ -910,12 +1025,24 @@ fn handle_request(
             "The browser request is incomplete.",
         ));
     }
+    if let (Some(hooks), Some(browser)) = (hooks, request.browser.as_deref()) {
+        (hooks.seen)(browser);
+    }
     if window_request {
         if request.credential_id.is_some() || request.selection_token.is_some() || request.username.is_some()
             || request.password.is_some() || request.sealed_login.is_some() || request.kind.is_some()
             || request.all.is_some() || request.card.is_some() || request.profile.is_some()
         {
             return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
+        }
+        // The user turned "ask when the browser starts" off for this browser.
+        if request.startup == Some(true)
+            && let (Some(hooks), Some(browser)) = (hooks, request.browser.as_deref())
+            && !(hooks.ask_at_start)(browser)
+        {
+            let mut response = ok_response(request.request_id, None, None);
+            response.status = "skipped".to_owned();
+            return Ok(response);
         }
         let unlocked = provider.read().expect("browser provider lock poisoned").is_some();
         if let Some(handler) = WINDOW_HANDLER.get() {
@@ -952,6 +1079,8 @@ fn handle_request(
                 }
                 Err(error) => return Err(error),
             };
+            // A failed check only means no icon this time.
+            let icon_wanted = provider.icon_wanted(&origin).unwrap_or(false);
             let mut credentials = Vec::new();
             let mut token_store = grants.lock().expect("browser grant lock poisoned");
             let limit = if every { MAX_ALL_CANDIDATES } else { MAX_CANDIDATES };
@@ -973,7 +1102,30 @@ fn handle_request(
                     preview: None,
                 });
             }
-            Ok(ok_response(request.request_id, Some(credentials), None))
+            let mut response = ok_response(request.request_id, Some(credentials), None);
+            response.icon_wanted = icon_wanted;
+            Ok(response)
+        }
+        BrowserAction::SaveSiteIcon => {
+            if request.credential_id.is_some() || request.selection_token.is_some() || request.username.is_some()
+                || request.password.is_some() || request.sealed_login.is_some() || request.title.is_some() || request.all.is_some()
+            {
+                return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
+            }
+            let refused = |request_id: String| BrowserResponse::invalid(request_id, "The site icon was not accepted.");
+            let icon = request.icon.as_deref().unwrap_or_default();
+            // Base64 is 4 characters per 3 bytes; check the text length before it is decoded.
+            if icon.len() > MAX_ICON_BYTES.div_ceil(3) * 4 {
+                return Ok(refused(request.request_id));
+            }
+            let Ok(png) = base64::engine::general_purpose::STANDARD.decode(icon) else {
+                return Ok(refused(request.request_id));
+            };
+            match provider.save_site_icon(&origin, &png) {
+                Ok(()) => Ok(ok_response(request.request_id, None, None)),
+                Err(BrowserIpcError::VaultLocked) => Ok(locked_response(request.request_id)),
+                Err(_) => Ok(refused(request.request_id)),
+            }
         }
         BrowserAction::FillCredential => {
             let (Some(record_id), Some(selection_token)) =
@@ -1003,7 +1155,7 @@ fn handle_request(
                     message: "Choose the account again; this selection expired.".to_owned(),
                     credentials: None,
                     credential: None,
-                    sealed_login: None, features: None, appearance: None, item: None,
+                    sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
                 });
             };
             let loaded = if granted == GrantKind::AnyLogin {
@@ -1027,7 +1179,7 @@ fn handle_request(
                         .to_owned(),
                     credentials: None,
                     credential: None,
-                    sealed_login: None, features: None, appearance: None, item: None,
+                    sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
                 });
             };
             if credential.id != record_id {
@@ -1079,7 +1231,7 @@ fn handle_request(
             }
             let status_response = |request_id: String, status: &str, message: &str| BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id, status: status.to_owned(), message: message.to_owned(),
-                credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
+                credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
             };
             let expired = "Choose the item again; this selection expired.";
             match request.action {
@@ -1156,7 +1308,7 @@ fn handle_request(
                 return Ok(BrowserResponse {
                     version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                     status: "rate_limited".into(), message: "Too many checks for this site. Try again in a minute.".into(),
-                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
+                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
                 });
             }
             let bytes = URL_SAFE_NO_PAD.decode(sealed).map_err(|_| BrowserIpcError::InvalidRequest)?;
@@ -1183,7 +1335,7 @@ fn handle_request(
             };
             Ok(BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id, status: status.to_owned(),
-                message: message.to_owned(), credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
+                message: message.to_owned(), credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
             })
         }
         BrowserAction::CommitLogin | BrowserAction::UpdateLogin | BrowserAction::ReviewLogin => {
@@ -1197,7 +1349,7 @@ fn handle_request(
                     version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                     status: "rate_limited".into(),
                     message: "Too many login checks for this site. Try again in a minute.".into(),
-                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None,
+                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
                 });
             }
             let committing = !updating && !reviewing;
@@ -1232,7 +1384,7 @@ fn handle_request(
                 let Some(expected) = expected else {
                     return Ok(BrowserResponse { version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                         status: "selection_expired".into(), message: "Review this update again; its approval expired.".into(),
-                        credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, });
+                        credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, });
                 };
                 provider.update_login(&origin, &id, &pending.username, &pending.password, &expected).map(|_| true)
             } else if reviewing { provider.review_login(&origin, &pending.username, &pending.password) }
@@ -1273,7 +1425,7 @@ fn handle_request(
             Ok(BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                 status: status.to_owned(), message: message.to_owned(),
-                credentials, credential: None, sealed_login: None, features: None, appearance: None, item: None,
+                credentials, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
             })
         }
     }
@@ -1288,7 +1440,7 @@ fn locked_response(request_id: String) -> BrowserResponse {
         credentials: None,
         credential: None,
         sealed_login: None,
-        features: None, appearance: None, item: None,
+        features: None, appearance: None, item: None, icon_wanted: false,
     }
 }
 
@@ -1305,7 +1457,7 @@ fn ok_response(
         credentials,
         credential,
         sealed_login: None,
-        features: None, appearance: None, item: None,
+        features: None, appearance: None, item: None, icon_wanted: false,
     }
 }
 
@@ -1392,10 +1544,16 @@ fn same_path(left: &Path, right: &Path) -> bool {
     normalize(left) == normalize(right)
 }
 
-/// Image path of the process serving the connected pipe.
-fn pipe_server_image(pipe: &File) -> Option<std::path::PathBuf> {
+/// Process ID of the process serving the connected pipe.
+fn pipe_server_pid(pipe: &File) -> Option<u32> {
     let mut pid = 0u32;
     unsafe { GetNamedPipeServerProcessId(HANDLE(pipe.as_raw_handle() as *mut _), &mut pid) }.ok()?;
+    Some(pid)
+}
+
+/// Image path of the process serving the connected pipe.
+fn pipe_server_image(pipe: &File) -> Option<std::path::PathBuf> {
+    let pid = pipe_server_pid(pipe)?;
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut buffer = vec![0u16; 32_768];
     let mut size = buffer.len() as u32;
@@ -1412,6 +1570,14 @@ fn pipe_server_image(pipe: &File) -> Option<std::path::PathBuf> {
 fn verify_pipe_server(pipe: &File) -> Result<(), BrowserIpcError> {
     let image = pipe_server_image(pipe).ok_or(BrowserIpcError::UntrustedServer)?;
     if trusted_server_images().iter().any(|trusted| same_path(trusted, &image)) {
+        return Ok(());
+    }
+    // A host copied out of the Store package (for Firefox) runs outside it, so the Store app's
+    // folder is not next to it. The server is still trusted when it runs from the recorded,
+    // installed Store package.
+    let store = crate::store_launch::installed_store_build().map(|store| store.family_name);
+    let server = pipe_server_pid(pipe).and_then(crate::store_launch::process_family);
+    if store.zip(server).is_some_and(|(store, server)| store.eq_ignore_ascii_case(&server)) {
         Ok(())
     } else {
         Err(BrowserIpcError::UntrustedServer)
@@ -1871,6 +2037,72 @@ mod tests {
         assert_eq!(handle_request(item(BrowserAction::FillCvv, &declined), &provider, &grants).unwrap().status, "denied");
     }
 
+    fn process(pid: u32, parent: u32, exe: &str) -> ProcessEntry {
+        ProcessEntry { pid, parent, exe: exe.to_owned() }
+    }
+
+    #[test]
+    fn the_calling_browser_is_the_first_program_above_the_host_that_is_not_a_relay() {
+        // Chrome starts native hosts through cmd.exe.
+        let table = [process(1, 0, "explorer.exe"), process(10, 1, "chrome.exe"), process(11, 10, "cmd.exe"),
+            process(12, 11, "conhost.exe"), process(13, 11, "nuvori-native-host.exe")];
+        assert_eq!(browser_of_chain(&table, 13).as_deref(), Some("chrome"));
+        // Firefox starts the host itself.
+        let table = [process(20, 1, "Zen.exe"), process(21, 20, "nuvori-native-host.exe")];
+        assert_eq!(browser_of_chain(&table, 21).as_deref(), Some("zen"));
+        assert_eq!(browser_of_chain(&[process(30, 1, "opera.exe"), process(31, 30, "launcher.exe"), process(32, 31, "cmd.exe"), process(33, 32, "nuvori-native-host.exe")], 33).as_deref(), Some("opera"));
+        // More than 4 relays, a missing parent, or an unknown PID: no answer.
+        let deep = [process(1, 0, "a.exe"), process(2, 1, "cmd.exe"), process(3, 2, "cmd.exe"), process(4, 3, "cmd.exe"),
+            process(5, 4, "cmd.exe"), process(6, 5, "nuvori-native-host.exe")];
+        assert_eq!(browser_of_chain(&deep, 6), None);
+        assert_eq!(browser_of_chain(&[process(6, 99, "nuvori-native-host.exe")], 6), None);
+        assert_eq!(browser_of_chain(&table, 777), None);
+        assert_eq!(browser_id_from_exe(r"C:\Apps\My Browser (x64).EXE").as_deref(), Some("my-browser--x64-"));
+        assert!(valid_browser_id("zen") && !valid_browser_id("Zen") && !valid_browser_id("") && !valid_browser_id(&"a".repeat(41)));
+        // The real snapshot sees this test process under its parent.
+        assert!(process_table().iter().any(|entry| entry.pid == std::process::id()));
+    }
+
+    #[test]
+    fn a_startup_prompt_is_skipped_for_a_browser_that_does_not_ask_and_only_on_unlock_prompt() {
+        let provider: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> = RwLock::new(None);
+        let grants = Mutex::new(SelectionGrants::default());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let hooks = {
+            let seen = Arc::clone(&seen);
+            BrowserHooks {
+                seen: Box::new(move |id| seen.lock().unwrap().push(id.to_owned())),
+                ask_at_start: Box::new(|id| id != "zen"),
+            }
+        };
+        let prompt = |browser: Option<&str>, startup: Option<bool>| {
+            let mut prompt = request(BrowserAction::UnlockPrompt, None, None);
+            prompt.origin = String::new();
+            prompt.browser = browser.map(str::to_owned);
+            prompt.startup = startup;
+            prompt
+        };
+        let status = |request| handle_request_with(request, &provider, &grants, Some(&hooks)).unwrap();
+        let skipped = status(prompt(Some("zen"), Some(true)));
+        assert_eq!((skipped.status.as_str(), skipped.message.as_str()), ("skipped", ""));
+        assert_eq!(status(prompt(Some("chrome"), Some(true))).status, "locked", "chrome asks");
+        assert_eq!(status(prompt(Some("zen"), None)).status, "locked", "a prompt that is not a start-up one always runs");
+        assert_eq!(status(prompt(Some("zen"), Some(false))).status, "locked");
+        assert_eq!(status(prompt(None, Some(true))).status, "locked", "an old host sends no browser: ask");
+        assert_eq!(*seen.lock().unwrap(), ["zen", "chrome", "zen", "zen"], "every request with a browser is recorded");
+        // `startup` belongs to unlock_prompt only; a malformed browser id is refused.
+        let mut query = request(BrowserAction::QueryCredentials, None, None);
+        query.startup = Some(true);
+        assert_eq!(status(query).status, "invalid_request");
+        let mut bad = request(BrowserAction::Status, None, None);
+        bad.origin = String::new();
+        bad.browser = Some("Bad Id".into());
+        assert_eq!(status(bad).status, "invalid_request");
+        // The request JSON accepts both fields and the host's browser field.
+        let json: BrowserRequest = serde_json::from_str(r#"{"version":2,"requestId":"r","action":"unlock_prompt","origin":"","startup":true,"browser":"zen"}"#).unwrap();
+        assert_eq!((json.startup, json.browser.as_deref()), (Some(true), Some("zen")));
+    }
+
     #[test]
     fn unlock_prompt_reports_the_vault_state_and_takes_no_origin_or_fields() {
         let provider: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> = RwLock::new(None);
@@ -1945,6 +2177,91 @@ mod tests {
         bad_seal.sealed_login = Some(sealed("hal", Some(&"x".repeat(300))));
         assert_eq!(handle_request(bad_seal, &provider, &grants).unwrap().status, "invalid_request");
         assert!(activity::global().recent(None).iter().all(|e| !e.message.contains("name")));
+    }
+
+    /// Wants an icon for example.com only, and records what `save_site_icon` receives.
+    struct IconProvider { saved: Mutex<Vec<(String, Vec<u8>)>> }
+
+    impl BrowserCredentialProvider for IconProvider {
+        fn query_credentials(&self, _: &str) -> Result<Vec<LoginCandidate>, BrowserIpcError> { Ok(Vec::new()) }
+        fn load_selected_credential(&self, _: &str, _: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> { Ok(None) }
+        fn save_new_login(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> Result<bool, BrowserIpcError> { Ok(true) }
+        fn update_login(&self, _: &str, _: &str, _: &str, _: &str, _: &[u8; 32]) -> Result<(), BrowserIpcError> { Ok(()) }
+        fn review_login(&self, _: &str, _: &str, _: &str) -> Result<bool, BrowserIpcError> { Ok(true) }
+        fn icon_wanted(&self, origin: &str) -> Result<bool, BrowserIpcError> { Ok(origin == "https://example.com") }
+        fn save_site_icon(&self, origin: &str, png: &[u8]) -> Result<(), BrowserIpcError> {
+            if png.starts_with(b"\x89PNG") {
+                self.saved.lock().unwrap().push((origin.to_owned(), png.to_vec()));
+                Ok(())
+            } else {
+                Err(BrowserIpcError::InvalidRequest)
+            }
+        }
+    }
+
+    #[test]
+    fn site_icons_ride_on_query_credentials_and_save_site_icon() {
+        use base64::engine::general_purpose::STANDARD;
+        let icons = Arc::new(IconProvider { saved: Mutex::new(Vec::new()) });
+        let provider: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> = RwLock::new(Some(icons.clone()));
+        let grants = Mutex::new(SelectionGrants::default());
+        let icon_request = |icon: Option<String>| {
+            let mut save = request(BrowserAction::SaveSiteIcon, None, None);
+            save.icon = icon;
+            save
+        };
+        let png = b"\x89PNG\r\n\x1a\nrest";
+
+        // `iconWanted` is present only when true.
+        let wanted = handle_request(request(BrowserAction::QueryCredentials, None, None), &provider, &grants).unwrap();
+        assert!(wanted.icon_wanted);
+        assert_eq!(serde_json::to_value(&wanted).unwrap()["iconWanted"], true);
+        let mut other = request(BrowserAction::QueryCredentials, None, None);
+        other.origin = "https://other.example".into();
+        let unwanted = serde_json::to_value(handle_request(other, &provider, &grants).unwrap()).unwrap();
+        assert!(unwanted.get("iconWanted").is_none());
+
+        // A good icon reaches the provider, with the origin.
+        let saved = handle_request(icon_request(Some(STANDARD.encode(png))), &provider, &grants).unwrap();
+        assert_eq!(saved.status, "ok");
+        assert_eq!(icons.saved.lock().unwrap().as_slice(), [("https://example.com".to_owned(), png.to_vec())]);
+
+        // Missing, bad base64, URL-safe alphabet, a data: prefix, too long, and refused bytes all fail.
+        let invalid = |icon: Option<String>| handle_request(icon_request(icon), &provider, &grants).unwrap().status;
+        assert_eq!(invalid(None), "invalid_request");
+        assert_eq!(invalid(Some("not base64!".into())), "invalid_request");
+        assert_eq!(invalid(Some(format!("data:image/png;base64,{}", STANDARD.encode(png)))), "invalid_request");
+        assert_eq!(invalid(Some(STANDARD.encode(vec![0u8; MAX_ICON_BYTES + 3]))), "invalid_request");
+        assert_eq!(invalid(Some(STANDARD.encode(b"GIF89a"))), "invalid_request");
+        assert_eq!(icons.saved.lock().unwrap().len(), 1);
+
+        // Extra fields are rejected on this action.
+        let mut extra = icon_request(Some(STANDARD.encode(png)));
+        extra.username = Some("u".into());
+        assert_eq!(handle_request(extra, &provider, &grants).unwrap().status, "invalid_request");
+
+        // `icon` belongs to no other action.
+        for action in [BrowserAction::QueryCredentials, BrowserAction::FillCredential, BrowserAction::Status, BrowserAction::CommitLogin, BrowserAction::UnlockPrompt] {
+            let mut misplaced = request(action, Some("id"), Some("token"));
+            misplaced.icon = Some(STANDARD.encode(png));
+            assert_eq!(handle_request(misplaced, &provider, &grants).unwrap().status, "invalid_request");
+        }
+
+        // A locked vault (no provider) answers "locked" and stores nothing.
+        let locked: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> = RwLock::new(None);
+        let response = handle_request(icon_request(Some(STANDARD.encode(png))), &locked, &grants).unwrap();
+        assert_eq!(response.status, "locked");
+        assert_eq!(icons.saved.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_request_parser_knows_the_icon_field() {
+        let parsed: BrowserRequest = serde_json::from_str(
+            r#"{"version":2,"requestId":"r","action":"save_site_icon","origin":"https://a.example","icon":"AAAA"}"#,
+        ).unwrap();
+        assert!(matches!(parsed.action, BrowserAction::SaveSiteIcon));
+        assert_eq!(parsed.icon.as_deref(), Some("AAAA"));
+        assert!(serde_json::from_str::<BrowserRequest>(r#"{"version":2,"requestId":"r","action":"status","origin":"","image":"x"}"#).is_err());
     }
 
     #[test]

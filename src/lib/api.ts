@@ -41,6 +41,36 @@ export type VaultEntry = {
 
 export type EntryDraft = Omit<VaultEntry, "id" | "createdAt" | "updatedAt"> & { id?: string };
 export type LocalNote = { id: string; title: string; body: string; createdAt: number; updatedAt: number; groupIds: string[] };
+
+/** What a KeePass file holds (preview), or what an import saved. No secrets. */
+export type KeepassSummary = {
+  logins: number; codes: number; notes: number; groups: string[];
+  inRecycleBin: number; withoutContent: number; attachments: number; passkeys: number;
+  /** After an import: logins already in Nuvori, skipped. */
+  duplicates: number;
+  /** After an import: codes Nuvori could not use. */
+  codesSkipped: number;
+};
+
+/** A login's earlier password, kept on this PC only (newest first, up to 10). */
+export type PreviousPassword = { password: string; replacedAt: number };
+
+/** The "Website icons" setting and the icons the browser extension saved: site -> `data:image/png;base64,...`. */
+export type SiteIconsState = { enabled: boolean; icons: Record<string, string> };
+
+/** A deleted item kept on this PC for 30 days. */
+export type TrashedItem = {
+  id: string;
+  /** The deleted item's ID. */
+  itemId: string;
+  kind: "entry" | "note";
+  itemType: EntryType | "NOTE";
+  title: string;
+  deletedAt: number;
+  /** Deleted on a paired device; this PC kept its copy. */
+  deletedElsewhere: boolean;
+  expiresAt: number;
+};
 export type VaultGroup = { id: string; name: string; notes: string; folderType: string };
 export type PasskeySummary = { id: string; rpId: string; username: string; displayName: string; createdAt: number };
 export type EntryPhoto = { id: string; mimeType: string; dataUrl: string; isCover?: boolean; addedAt?: number };
@@ -162,6 +192,22 @@ export async function call<T>(command: string, args?: Record<string, unknown>): 
   return invoke<T>(command, args);
 }
 
+/** Auto-type (auto_type.rs): a shortcut that types a login into any desktop app. */
+export type AutoTypeStatus = {
+  enabled: boolean;
+  preset: string;
+  shortcut: string;
+  pressEnter: boolean;
+  state: "off" | "active" | "inUse";
+  presets: Array<{ id: string; label: string }>;
+};
+
+/** The window the auto-type shortcut recorded. */
+export type BrowserFamily = "chromium" | "firefox";
+/** One installed browser. `family` is "unknown" until the user picks what it is built on. */
+export type Browser = { id: string; name: string; family: BrowserFamily | "unknown"; connected: boolean; askAtStart: boolean; lastSeen: number | null; registered: boolean };
+export type AutoTypeTarget = { title: string; app: string };
+
 export type QuickSearchStatus = {
   enabled: boolean;
   preset: string;
@@ -202,6 +248,20 @@ export function onVaultChanged(handler: () => void): () => void {
   return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
 }
 
+/** Runs `handler` when the auto-type shortcut is pressed in another app. */
+export function onAutoType(handler: (target: AutoTypeTarget) => void): () => void {
+  if (usingDevMock) return () => {};
+  const pending = listen<AutoTypeTarget>("auto-type", (event) => handler(event.payload));
+  return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
+}
+
+/** Runs `handler` when the browser extension saved a new website icon. */
+export function onSiteIconsChanged(handler: () => void): () => void {
+  if (usingDevMock) return () => {};
+  const pending = listen("site-icons-changed", handler);
+  return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
+}
+
 /** Runs `handler` when the quick search shortcut is pressed. `hadFocus` is true if Nuvori was already in front. */
 export function onQuickSearch(handler: (hadFocus: boolean) => void): () => void {
   if (usingDevMock) return () => {};
@@ -236,6 +296,13 @@ export const api = {
   quickSearchStatus: () => call<QuickSearchStatus>("quick_search_status"),
   setQuickSearch: (enabled: boolean, preset?: string) => call<QuickSearchStatus>("set_quick_search", { enabled, preset: preset ?? null }),
   takeQuickSearchRequest: () => call<boolean>("take_quick_search_request"),
+  autoTypeStatus: () => call<AutoTypeStatus>("auto_type_status"),
+  setAutoType: (enabled: boolean, preset?: string, pressEnter?: boolean) =>
+    call<AutoTypeStatus>("set_auto_type", { enabled, preset: preset ?? null, pressEnter: pressEnter ?? null }),
+  autoTypePending: () => call<AutoTypeTarget | null>("auto_type_pending"),
+  autoTypeCancel: () => call<void>("auto_type_cancel"),
+  /** Types the login into the recorded window. Nuvori minimizes itself first. */
+  autoTypeLogin: (id: string) => call<void>("auto_type_login", { id }),
   /** Works while the vault is locked. */
   getAppearance: () => call<Appearance>("get_appearance"),
   /** Saves the choice on this PC and sends it to the group once every device can read it. */
@@ -248,6 +315,19 @@ export const api = {
   listEntries: () => call<VaultEntry[]>("list_entries"),
   saveEntry: (entry: EntryDraft) => call<VaultEntry>("save_entry", { entry }),
   deleteEntry: (id: string) => call<void>("delete_entry", { id }),
+  /** Opens a KeePass file (base64) in memory and lists what an import would add. */
+  keepassPreview: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_preview", { data, password, keyFile }),
+  keepassImport: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_import", { data, password, keyFile }),
+  previousPasswords: (entryId: string) => call<PreviousPassword[]>("previous_passwords", { entryId }),
+  clearPreviousPasswords: (entryId: string) => call<void>("clear_previous_passwords", { entryId }),
+  siteIcons: () => call<SiteIconsState>("site_icons"),
+  setSiteIcons: (enabled: boolean) => call<SiteIconsState>("set_site_icons", { enabled }),
+  clearSiteIcons: () => call<SiteIconsState>("clear_site_icons"),
+  listTrash: () => call<TrashedItem[]>("list_trash"),
+  /** Restores as a new item. Returns its kind, new ID and type. */
+  restoreTrashed: (id: string) => call<{ kind: "entry" | "note"; id: string; type: EntryType | "NOTE" }>("restore_trashed", { id }),
+  forgetTrashed: (id: string) => call<void>("forget_trashed", { id }),
+  emptyTrash: () => call<void>("empty_trash"),
   listEntryPhotos: (entryId: string) => call<EntryPhoto[]>("list_entry_photos", { entryId }),
   addEntryPhoto: (entryId: string, mimeType: string, data: string) => call<void>("add_entry_photo", { entryId, mimeType, data }),
   deleteEntryPhoto: (photoId: string) => call<void>("delete_entry_photo", { photoId }),
@@ -285,6 +365,9 @@ export const api = {
   activityLog: (limit?: number) => call<ActivityEvent[]>("activity_log", limit === undefined ? {} : { limit }),
   clearActivityLog: () => call<void>("clear_activity_log"),
   browserStatus: () => call<BrowserStatus>("browser_status"),
+  listBrowsers: () => call<Browser[]>("list_browsers"),
+  setBrowser: (id: string, change: { connected?: boolean; askAtStart?: boolean; family?: BrowserFamily }) =>
+    call<Browser[]>("set_browser", { id, connected: change.connected ?? null, askAtStart: change.askAtStart ?? null, family: change.family ?? null }),
   connectBrowsers: () => call<{ browsers: string[]; changed: boolean }>("connect_browsers"),
   buildStatus: () => call<BuildStatus>("build_status"),
   cloudStatus: () => call<CloudStatus>("cloud_status"),

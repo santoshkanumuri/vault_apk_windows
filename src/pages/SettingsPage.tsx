@@ -1,20 +1,22 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Activity, Clipboard, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
+import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
+import { KeepassImportDialog } from "./KeepassImport";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
 import { PasswordField, Segmented, TextField, Toggle } from "../components/Field";
 import { StatusBanner, StatusChip, type StatusKind } from "../components/Status";
 import { useConfirm } from "../app/confirm";
-import { useBrowserStatus, useBuildStatus, useLock, useMembership, useSyncStatus } from "../app/hooks";
+import { useBrowserStatus, useBuildStatus, useLastSync, useLock, useMembership, useSyncStatus } from "../app/hooks";
 import { PendingLeaveChip, useLeaveGroup } from "./sync/Membership";
 import { useRouter } from "../app/router";
 import { autoLockChoices, clipboardChoices, usePreferences } from "../app/settings";
 import { AccentPicker, AppearancePreview, SurfacePicker } from "../components/AppearancePicker";
 import { DEFAULT_ACCENT, DEFAULT_SURFACE, useTheme, type ThemePreference } from "../app/theme";
 import { useToast } from "../app/toast";
+import { useSiteIconsSetting } from "../app/siteIcons";
 import { useVault } from "../app/vault";
-import { api, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type QuickSearchStatus } from "../lib/api";
+import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type AutoTypeStatus, type QuickSearchStatus } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { relativeTime } from "../lib/format";
 import { browserIndicator, syncIndicator } from "../lib/syncState";
@@ -27,7 +29,9 @@ export function SettingsPage({ section }: { section?: string }) {
   const router = useRouter();
   const toast = useToast();
   const lock = useLock();
+  const [keepass, setKeepass] = useState(false);
   const sync = useSyncStatus(10000);
+  const lastSync = useLastSync(sync.data);
   const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error));
   const build = useBuildStatus(4000).data;
 
@@ -52,6 +56,7 @@ export function SettingsPage({ section }: { section?: string }) {
         <SettingsRow icon={LockKeyhole} title="Lock now" description="Shortcut: Ctrl+L" control={<Button size="sm" icon={LockKeyhole} onClick={() => void lock()}>Lock</Button>} />
         <HelloRow />
         <QuickSearchRow />
+        <AutoTypeRow />
         {build && <PasskeyProviderRow state={build.passkeyProvider} />}
         <SettingsRow icon={Timer} title="Auto-lock" description="Lock after this long without mouse or keyboard activity."
           control={<select className="input select select-compact" aria-label="Auto-lock" value={autoLockMinutes} onChange={(event) => { const value = Number(event.target.value); setAutoLockMinutes(value); toast.success(value ? `Auto-lock after ${value} min` : "Auto-lock off"); }}>
@@ -67,7 +72,7 @@ export function SettingsPage({ section }: { section?: string }) {
       <BrowserSection />
 
       <SettingsGroup title="Sync" id="settings-devices">
-        <SettingsRow icon={MonitorSmartphone} title="Devices & sync" description={<span className="row-inline"><StatusChip kind={phone.kind} label={phone.label} />{sync.data?.lastSync ? <span className="muted">Last sync {relativeTime(sync.data.lastSync).toLowerCase()}</span> : null}</span>} onClick={() => void router.navigate({ page: "sync" })} />
+        <SettingsRow icon={MonitorSmartphone} title="Devices & sync" description={<span className="row-inline"><StatusChip kind={phone.kind} label={phone.label} />{lastSync ? <span className="muted">Last sync {relativeTime(lastSync).toLowerCase()}</span> : null}</span>} onClick={() => void router.navigate({ page: "sync" })} />
       </SettingsGroup>
 
       <SettingsGroup title="App" id="settings-appearance">
@@ -88,8 +93,15 @@ export function SettingsPage({ section }: { section?: string }) {
             <div className="appearance-actions"><Button size="sm" icon={RotateCcw} onClick={() => changeAppearance(DEFAULT_ACCENT, DEFAULT_SURFACE)}>Reset to Nuvori green</Button></div>
           )}
         </div>
+        <SiteIconsRow />
         <SettingsRow icon={Activity} title="Activity log" description="Recent unlocks, saves, syncs, and browser fills." onClick={() => void router.navigate({ page: "activity" })} />
       </SettingsGroup>
+
+      <SettingsGroup title="Your data" id="settings-data">
+        <SettingsRow icon={FileKey} title="Import from KeePass" description="Logins, codes and notes from a KeePassXC or KeePass database (.kdbx)." onClick={() => setKeepass(true)} />
+        <SettingsRow icon={ArchiveRestore} title="Recently deleted" description="Restore items deleted in the last 30 days." onClick={() => void router.navigate({ page: "trash" })} />
+      </SettingsGroup>
+      <KeepassImportDialog open={keepass} onClose={() => setKeepass(false)} />
 
       <SettingsGroup title="About" id="settings-about">
         <SettingsRow icon={Info} title="Nuvori for Windows" description={build ? `Version ${build.version} · ${build.storeBuild ? "Microsoft Store build" : "Installer build"}` : "Nuvori for Windows"} />
@@ -164,6 +176,64 @@ function HelloRow() {
         </form>
       </Dialog>
     </>
+  );
+}
+
+/** Auto-type (auto_type.rs): off until turned on here. */
+function AutoTypeRow() {
+  const toast = useToast();
+  const [status, setStatus] = useState<AutoTypeStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.autoTypeStatus().then(setStatus).catch(() => setStatus(null)); }, []);
+  if (!status) return null;
+
+  const change = async (enabled: boolean, preset?: string, pressEnter?: boolean) => {
+    setBusy(true);
+    try {
+      const next = await api.setAutoType(enabled, preset, pressEnter);
+      setStatus(next);
+      if (next.state === "inUse") toast.error(`${next.shortcut} is in use by another app`);
+      else if (pressEnter === undefined) toast.success(next.enabled ? `Auto-type: ${next.shortcut}` : "Auto-type off");
+    } catch (error) {
+      toast.error(humanError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const description = status.state === "inUse"
+    ? <span className="row-inline"><StatusChip kind="warning" label="In use by another app" /><span className="muted">Pick another shortcut, or close the app that owns {status.shortcut}.</span></span>
+    : status.enabled ? <span>In an app's sign-in window, press <Kbd>{status.shortcut}</Kbd> and pick a login. Nuvori types it into that window only.</span>
+    : "Off. Turn on to fill logins into desktop apps, not only the browser.";
+  return (
+    <>
+      <SettingsRow icon={Keyboard} title="Auto-type" description={description}
+        control={<span className="row-inline">
+          {status.enabled && <select className="input select select-compact" aria-label="Auto-type shortcut" value={status.preset} disabled={busy} onChange={(event) => void change(true, event.target.value)}>
+            {status.presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+          </select>}
+          <Toggle label="Auto-type" checked={status.enabled} disabled={busy} onChange={(on) => void change(on)} />
+        </span>} />
+      {status.enabled && <SettingsRow icon={CornerDownLeft} title="Press Enter after typing" description="Signs in right away. Turn off to check the form first."
+        control={<Toggle label="Press Enter after typing" checked={status.pressEnter} disabled={busy} onChange={(on) => void change(true, undefined, on)} />} />}
+    </>
+  );
+}
+
+function SiteIconsRow() {
+  const toast = useToast();
+  const { enabled, apply } = useSiteIconsSetting();
+  const [busy, setBusy] = useState(false);
+  const run = async (task: () => Promise<Parameters<typeof apply>[0]>, done: string) => {
+    setBusy(true);
+    try { apply(await task()); toast.success(done); } catch (failure) { toast.error(failure, "Could not change website icons."); } finally { setBusy(false); }
+  };
+  return (
+    <SettingsRow icon={Globe} title="Website icons"
+      description={enabled ? "Logos for popular sites are built in. The browser extension adds the icon of a site you sign in to. Nothing is downloaded." : "Off. Items show their first letter."}
+      control={<Toggle label="Website icons" checked={enabled} disabled={busy} onChange={(value) => void run(() => api.setSiteIcons(value), value ? "Website icons on" : "Website icons off")} />}>
+      {enabled && <div className="site-icons-extra"><Button size="sm" disabled={busy} onClick={() => void run(() => api.clearSiteIcons(), "Saved icons removed")}>Remove saved icons</Button></div>}
+    </SettingsRow>
   );
 }
 
@@ -245,16 +315,77 @@ function InstallerBuildRow() {
   );
 }
 
+/** One row per detected browser. Renders nothing when the backend has no `list_browsers` (older build). */
+/** `onAvailable` tells the section whether this list replaces the older Chrome/Edge/Brave chips. */
+function BrowsersList({ reloadKey, onAvailable }: { reloadKey: number; onAvailable: (available: boolean) => void }) {
+  const toast = useToast();
+  const [browsers, setBrowsers] = useState<Browser[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    api.listBrowsers()
+      .then((list) => { setBrowsers(list); onAvailable(list.length > 0); })
+      .catch(() => { setBrowsers(null); onAvailable(false); });
+  }, [reloadKey, onAvailable]);
+  if (!browsers || !browsers.length) return null;
+
+  const change = async (browser: Browser, patch: { connected?: boolean; askAtStart?: boolean; family?: BrowserFamily }) => {
+    const before = browsers;
+    setBusy(browser.id);
+    setBrowsers(before.map((item) => item.id === browser.id ? { ...item, ...patch } : item)); // optimistic
+    try {
+      setBrowsers(await api.setBrowser(browser.id, patch));
+      if (patch.connected !== undefined) toast.success(patch.connected ? `${browser.name} connected. Restart it to use the extension.` : `${browser.name} disconnected.`);
+    } catch (failure) {
+      setBrowsers(before);
+      toast.error(failure, `Couldn't change ${browser.name}.`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="browser-list" role="group" aria-label="Browsers">
+      <div className="browser-list-title">Browsers</div>
+      {browsers.map((browser) => {
+        const unknown = browser.family === "unknown";
+        const status = !browser.connected ? "Not connected" : browser.lastSeen ? `Used ${relativeTime(browser.lastSeen).toLowerCase()}` : "Connected · not used yet";
+        const off = busy === browser.id;
+        return (
+          <SettingsRow key={browser.id} icon={Globe} title={browser.name} description={status}
+            control={<span className="row-inline">
+              {unknown && <select className="input select select-compact" aria-label={`${browser.name} is built on`} value="" disabled={off}
+                onChange={(event) => { if (event.target.value) void change(browser, { family: event.target.value as BrowserFamily }); }}>
+                <option value="">Built on…</option>
+                <option value="chromium">Built on: Chromium</option>
+                <option value="firefox">Built on: Firefox</option>
+              </select>}
+              <Toggle label={`Connect ${browser.name}`} checked={browser.connected} disabled={off || unknown} onChange={(on) => void change(browser, { connected: on })} />
+            </span>}>
+            {browser.connected && <div className="browser-ask">
+              <span id={`ask-${browser.id}`}>Ask for the password when it starts</span>
+              <Toggle label={`Ask in ${browser.name} when it starts`} checked={browser.askAtStart} disabled={off} onChange={(on) => void change(browser, { askAtStart: on })} />
+            </div>}
+          </SettingsRow>
+        );
+      })}
+      <p className="browser-hint muted">Restart a browser after you connect it. The extension's own setting must also allow asking at start.</p>
+    </div>
+  );
+}
+
 const BROWSER_NAMES: Record<string, string> = { chrome: "Chrome", edge: "Edge", brave: "Brave" };
 
 function BrowserSection() {
   const { snapshot } = useVault();
   const toast = useToast();
   const [connecting, setConnecting] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const browser = useBrowserStatus(4000);
   const status: BrowserStatus | null = browser.data;
   const indicator = browserIndicator(snapshot, status, Boolean(browser.error));
   const hosts: Array<[keyof BrowserStatus["hosts"], string]> = [["chrome", "Chrome"], ["edge", "Edge"], ["brave", "Brave"]];
+  // The Browsers list (newer apps) shows every browser; the old chips stay for older backends only.
+  const [browserListShown, setBrowserListShown] = useState(false);
   const connect = async () => {
     setConnecting(true);
     try {
@@ -264,6 +395,7 @@ function BrowserSection() {
       else if (report.changed) toast.success(`Connected ${names}. Restart the browser to use the extension.`);
       else toast.success(`${names} already connected.`);
       await browser.reload?.();
+      setReloadKey((key) => key + 1);
     } catch (failure) {
       toast.error(failure, "Couldn't connect the browsers.");
     } finally {
@@ -275,13 +407,14 @@ function BrowserSection() {
     <SettingsGroup title="Browser extension" id="settings-browser">
       <SettingsRow icon={Puzzle} title="Connection" description={browser.error ? "Status is unavailable in this version." : status?.listening ? "Nuvori is listening for the extension." : "Nuvori isn't listening for the extension."}
         control={<StatusChip kind={indicator.kind} label={indicator.label} />} />
-      <SettingsRow icon={PlugZap} title="Connect browsers" description="Lets the Nuvori extension in Chrome, Edge and Brave reach this app. Nuvori does this by itself when it starts."
-        control={<Button size="sm" busy={connecting} onClick={() => void connect()}>Connect</Button>} />
+      <SettingsRow icon={PlugZap} title="Connect browsers" description="Lets the Nuvori extension reach this app in the browsers you turn on below. Nuvori does this by itself when it starts."
+        control={<Button size="sm" busy={connecting} onClick={() => void connect()}>Reconnect all</Button>} />
+      <BrowsersList reloadKey={reloadKey} onAvailable={setBrowserListShown} />
       {status && (
         <div className="settings-detail">
-          <div className="chip-row" aria-label="Registered browsers">
+          {!browserListShown && <div className="chip-row" aria-label="Registered browsers">
             {hosts.map(([key, label]) => <StatusChip key={key} kind={status.hosts[key] ? "success" : "neutral"} label={`${label}${status.hosts[key] ? "" : " · not set up"}`} />)}
-          </div>
+          </div>}
           <dl className="facts">
             <div><dt>Last contact</dt><dd>{status.lastRequestAt ? relativeTime(status.lastRequestAt) : "Never"}</dd></div>
             {status.lastAction && <div><dt>Last action</dt><dd>{status.lastAction}</dd></div>}
@@ -293,7 +426,7 @@ function BrowserSection() {
         <summary>Set up the extension</summary>
         <ol className="how-list">
           <li>Install <strong>Nuvori Password Fill</strong> from the Chrome Web Store. In Edge, first allow extensions from other stores. You can also choose <strong>Load unpacked</strong> on the extensions page and pick the <code>extension</code> folder.</li>
-          <li>Nuvori connects the browsers when it starts. If a browser above shows <strong>not set up</strong>, choose <strong>Connect</strong>.</li>
+          <li>Nuvori connects the browsers when it starts. If a browser above shows <strong>not set up</strong>, choose <strong>Reconnect all</strong>.</li>
           <li>Restart the browser. Keep Nuvori open and unlocked, then use the extension on a sign-in page.</li>
         </ol>
       </details>

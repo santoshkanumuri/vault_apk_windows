@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Folder, ImagePlus, Pencil, Star, Trash2, X } from "lucide-react";
+import { Folder, History, ImagePlus, Pencil, Star, Trash2, X } from "lucide-react";
 import { Button, IconButton } from "../../components/Button";
 import { Avatar, CountdownRing, EmptyState } from "../../components/Display";
 import { CardFace } from "../../components/CardFace";
@@ -10,9 +10,10 @@ import { useNow } from "../../app/hooks";
 import { useRouter } from "../../app/router";
 import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
-import { api, type EntryPhoto, type VaultEntry } from "../../lib/api";
+import { api, type EntryPhoto, type PreviousPassword, type VaultEntry } from "../../lib/api";
+import { deleteMessage, restoreDeleted } from "../../lib/trash";
 import { categoryForType, profileFields, profileFrom, typeLabel } from "../../lib/entries";
-import { formatDateTime, groupCardNumber, groupCode, hostFromUrl, maskCard } from "../../lib/format";
+import { formatDateTime, groupCardNumber, groupCode, hostFromUrl, maskCard, relativeTime } from "../../lib/format";
 import { totpAt } from "../../lib/totp";
 import { useTotpCodes } from "../codes/useTotp";
 import { markUsed } from "../../app/recent";
@@ -48,11 +49,11 @@ export function ItemDetailPage({ id }: { id: string }) {
   };
 
   const remove = async () => {
-    // Undo re-creates the item from this copy; it can't bring photos back, so only offer it when there are none.
+    // Recently deleted keeps the item's fields, folders and previous passwords, not its photos.
     const photoCount = await api.listEntryPhotos(entry.id).then((list) => list.length).catch(() => -1);
     const ok = await confirm({
       title: `Delete "${entry.title}"?`,
-      message: `It will be removed from this PC and from paired devices on the next sync.${photoCount > 0 ? ` Its ${photoCount === 1 ? "photo" : `${photoCount} photos`} will be deleted too.` : ""}`,
+      message: `${deleteMessage}${photoCount > 0 ? ` Its ${photoCount === 1 ? "photo is" : `${photoCount} photos are`} deleted for good.` : ""}`,
       confirmLabel: "Delete", danger: true
     });
     if (!ok) return;
@@ -61,20 +62,18 @@ export function ItemDetailPage({ id }: { id: string }) {
     try {
       await api.deleteEntry(entry.id);
       removeEntry(entry.id);
-      const undo = photoCount === 0 ? {
+      const undo = {
         label: "Undo",
         run: async () => {
           try {
-            const { id: _id, createdAt: _created, updatedAt: _updated, ...rest } = copy;
-            const restored = await api.saveEntry(rest);
-            upsertEntry(restored);
+            await restoreDeleted(copy.id);
             toast.success(`${typeLabel(copy.type)} restored`);
             void refresh();
           } catch (failure) {
-            toast.error(failure, "Couldn't restore the item.");
+            toast.error(failure, "Couldn't restore the item. Open Recently deleted.");
           }
         }
-      } : undefined;
+      };
       toast.success(`${typeLabel(entry.type)} deleted`, { action: undo });
       await router.back();
       void refresh();
@@ -88,7 +87,7 @@ export function ItemDetailPage({ id }: { id: string }) {
     <div className="page page-narrow">
       {entry.type === "CARD" && <div className="detail-card"><CardFace entry={entry} size="lg" /></div>}
       <section className="detail-hero">
-        {entry.type !== "CARD" && <Avatar title={entry.title} size="lg" />}
+        {entry.type !== "CARD" && <Avatar title={entry.title} size="lg" site={entry.type === "PASSWORD" ? entry.tertiaryValue : undefined} />}
         <div className="detail-hero-text">
           <h2>{entry.title || "Untitled"}</h2>
           <p>{typeLabel(entry.type)}{entry.type === "CARD" && entry.network ? ` · ${entry.network}` : ""}{entry.type === "PASSWORD" && entry.tertiaryValue ? ` · ${hostFromUrl(entry.tertiaryValue)}` : ""}</p>
@@ -124,9 +123,59 @@ export function ItemDetailPage({ id }: { id: string }) {
         </div>
       )}
 
+      {entry.type === "PASSWORD" && <PreviousPasswords entryId={entry.id} updatedAt={entry.updatedAt} />}
+
       <Photos entryId={entry.id} />
 
       <p className="detail-meta">Updated {formatDateTime(entry.updatedAt)} · Created {formatDateTime(entry.createdAt)}</p>
+    </div>
+  );
+}
+
+/**
+ * Earlier passwords of a login, newest first (up to 10). This PC keeps them when the password
+ * changes here or on a paired device. They are not synced.
+ */
+function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt: number }) {
+  const confirm = useConfirm();
+  const toast = useToast();
+  const [list, setList] = useState<PreviousPassword[]>([]);
+  const [open, setOpen] = useState(false);
+  const now = useNow(60000);
+  useEffect(() => {
+    let live = true;
+    api.previousPasswords(entryId).then((items) => { if (live) setList(items); }, () => { if (live) setList([]); });
+    return () => { live = false; };
+  }, [entryId, updatedAt]);
+  if (list.length === 0) return null;
+
+  const clear = async () => {
+    if (!(await confirm({ title: "Clear previous passwords?", message: "This PC forgets the earlier passwords of this login. The current password stays.", confirmLabel: "Clear", danger: true }))) return;
+    try {
+      await api.clearPreviousPasswords(entryId);
+      setList([]);
+      toast.success("Previous passwords cleared");
+    } catch (failure) {
+      toast.error(failure, "Couldn't clear the previous passwords.");
+    }
+  };
+
+  return (
+    <div className="card fields previous-passwords">
+      <button type="button" className="previous-passwords-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <History aria-hidden="true" />
+        <span>Previous passwords</span>
+        <span className="previous-passwords-count">{list.length}</span>
+      </button>
+      {open && <>
+        {list.map((item, index) => (
+          <DetailField key={`${item.replacedAt}-${index}`} label={`Replaced ${relativeTime(item.replacedAt, now)}`} value={item.password} secret mono />
+        ))}
+        <div className="previous-passwords-footer">
+          <span className="detail-meta">Kept on this PC only, up to 10.</span>
+          <Button variant="ghost" size="sm" icon={Trash2} onClick={() => void clear()}>Clear</Button>
+        </div>
+      </>}
     </div>
   );
 }

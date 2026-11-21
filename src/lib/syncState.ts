@@ -10,6 +10,20 @@ function looksUnreachable(text: string): boolean {
   return ["unreachable", "no paired device answered", "refused", "timed out", "timeout", "no route", "could not connect", "couldn't reach", "not reachable", "10061", "10060", "offline"].some((word) => lower.includes(word));
 }
 
+/**
+ * The newest of several ISO times; "" when none is set. Wi-Fi sync and Google Drive sync each
+ * keep their own last-sync time, and the vault is as fresh as the newer one.
+ */
+export function newestTime(...times: Array<string | null | undefined>): string {
+  let best = "";
+  let bestAt = Number.NEGATIVE_INFINITY;
+  for (const time of times) {
+    const at = time ? Date.parse(time) : Number.NaN;
+    if (!Number.isNaN(at) && at > bestAt) { best = time as string; bestAt = at; }
+  }
+  return best;
+}
+
 export function isSyncing(status: SyncStatus | null): boolean {
   if (!status) return false;
   return status.running || (status.phase !== undefined && ACTIVE_PHASES.has(status.phase));

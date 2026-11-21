@@ -48,6 +48,8 @@ const state = {
   ] as LocalNote[],
   groups: [{ id: "g-work", name: "Work", notes: "", folderType: "PASSWORD" }, { id: "g-home", name: "Home", notes: "", folderType: "" }] as VaultGroup[],
   passkeys: [{ id: id(), rpId: "github.com", username: "dev@example.com", displayName: "Dev", createdAt: minutes(30000) }] as PasskeySummary[],
+  siteIcons: true,
+  capturedIcons: {} as Record<string, string>,
   photos: new Map<string, EntryPhoto[]>(),
   sync: { lastSync: new Date(minutes(3)).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "192.168.1.24", automatic: true, running: false, message: "Sent 2 changes and received 1.", phase: "idle", progressDone: 0, progressTotal: 0, lastError: "", lastAttempt: new Date(minutes(1)).toISOString(), consecutiveFailures: 0, nextRetrySeconds: 0, wifiCheckSeconds: 60, driveCheckSeconds: 15, syncOnOpen: true } as SyncStatus,
   pairing: { stage: "", confirmation: "", message: "", invitation: "" } as PairingStatus,
@@ -68,6 +70,14 @@ state.sync.conflicts = state.conflicts.length;
 if (window.location.search.includes("removed")) {
   state.enrolled = false;
   state.removedNotice = { by: "Pixel 8", at: minutes(60 * 26) };
+}
+
+/** A flat 32x32 SVG, as a data URL, standing in for a PNG the extension would save. */
+const mockCapturedIcon = `data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="6" fill="#e0457b"/><circle cx="16" cy="16" r="7" fill="#fff"/></svg>')}`;
+state.capturedIcons = { "service1.example.com": mockCapturedIcon };
+function siteIconsState() {
+  requireUnlocked();
+  return { enabled: state.siteIcons, icons: state.siteIcons ? { ...state.capturedIcons } : {} };
 }
 
 function log(level: ActivityEvent["level"], category: ActivityEvent["category"], message: string) {
@@ -104,6 +114,35 @@ const setAppearance = (accent: unknown, surface: unknown): Appearance => {
   return { ...state.appearance };
 };
 
+// Previous passwords and Recently deleted (local_recovery.rs). Sample data: one login has history,
+// and one item was deleted on the phone.
+const mockHistory = new Map<string, Array<{ password: string; replacedAt: number }>>();
+const mockTrash: Array<{ id: string; itemId: string; kind: "entry" | "note"; itemType: string; title: string; deletedAt: number; deletedElsewhere: boolean; expiresAt: number; data: unknown }> = [];
+{
+  const now = Date.now();
+  const login = state.entries.find((e) => e.type === "PASSWORD");
+  if (login) mockHistory.set(login.id, [
+    { password: "Summer-Harbor-41", replacedAt: now - 12 * 86_400_000 },
+    { password: "gh_old_pass_2025!", replacedAt: now - 140 * 86_400_000 },
+  ]);
+  const gone = { id: "trash-sample-entry", type: "PASSWORD", title: "Old forum account", primaryValue: "reader@example.com", secondaryValue: "forum-pass-1", tertiaryValue: "https://forum.example.net",
+    fourthValue: "", notes: "", tags: "", favorite: false, groupIds: [], createdAt: now - 400 * 86_400_000, updatedAt: now - 3 * 86_400_000 };
+  mockTrash.push({ id: "trash-sample", itemId: gone.id, kind: "entry", itemType: "PASSWORD", title: gone.title, deletedAt: now - 3 * 86_400_000, deletedElsewhere: true, expiresAt: now + 27 * 86_400_000, data: gone });
+}
+
+type MockBrowser = { id: string; name: string; family: "chromium" | "firefox" | "unknown"; connected: boolean; askAtStart: boolean; lastSeen: number | null; registered: boolean };
+const mockBrowsers: MockBrowser[] = [
+  { id: "chrome", name: "Google Chrome", family: "chromium", connected: true, askAtStart: true, lastSeen: Date.now() - 3 * 60_000, registered: true },
+  { id: "zen", name: "Zen", family: "firefox", connected: true, askAtStart: true, lastSeen: null, registered: true },
+  { id: "vivaldi", name: "Vivaldi", family: "chromium", connected: false, askAtStart: true, lastSeen: null, registered: false },
+  { id: "thorium", name: "Thorium Nightly", family: "unknown", connected: false, askAtStart: true, lastSeen: null, registered: false },
+];
+const mockAutoTypeState = { enabled: false, preset: "ctrl-alt-a", pressEnter: true };
+const autoTypePresets = [{ id: "ctrl-alt-a", label: "Ctrl+Alt+A" }, { id: "ctrl-alt-k", label: "Ctrl+Alt+K" }, { id: "ctrl-shift-u", label: "Ctrl+Shift+U" }];
+const mockAutoType = () => ({ ...mockAutoTypeState, shortcut: autoTypePresets.find((p) => p.id === mockAutoTypeState.preset)?.label ?? "", state: mockAutoTypeState.enabled ? "active" : "off", presets: autoTypePresets });
+let mockAutoTypeTarget: { title: string; app: string } | null = typeof location !== "undefined" && location.search.includes("autotype")
+  ? { title: "Sign in to GitHub - GitHub Desktop", app: "GitHubDesktop.exe" } : null;
+
 export async function mockInvoke(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
   await delay(command.startsWith("list") || command.endsWith("status") || command === "app_snapshot" ? 30 : 250);
   switch (command) {
@@ -123,6 +162,16 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       state.quickSearch = { enabled: args.enabled === true, preset: typeof args.preset === "string" ? args.preset : state.quickSearch.preset };
       return quickSearch();
     case "take_quick_search_request": return false;
+    case "auto_type_status": return mockAutoType();
+    case "set_auto_type":
+      mockAutoTypeState.enabled = args.enabled === true;
+      if (typeof args.preset === "string") mockAutoTypeState.preset = args.preset;
+      if (typeof args.pressEnter === "boolean") mockAutoTypeState.pressEnter = args.pressEnter;
+      return mockAutoType();
+    // A recorded window, so the picker can be tried in the browser: add ?autotype to the URL.
+    case "auto_type_pending": return mockAutoTypeTarget;
+    case "auto_type_cancel": mockAutoTypeTarget = null; return null;
+    case "auto_type_login": mockAutoTypeTarget = null; log("success", "items", "Auto-typed a login into GitHubDesktop.exe"); return null;
     case "get_appearance": return { ...state.appearance };
     case "set_appearance": return setAppearance(args.accent, args.surface);
     case "hide_main_window": case "show_main_window": case "close_unlock_prompt": case "approve_card_code": case "decline_card_code": return null;
@@ -135,7 +184,33 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       state.entries = [saved, ...state.entries.filter((e) => e.id !== saved.id)];
       state.revision++; log("success", "items", "Item saved"); return saved;
     }
-    case "delete_entry": state.entries = state.entries.filter((e) => e.id !== args.id); state.revision++; log("info", "items", "Item deleted"); return null;
+    case "delete_entry": {
+      const gone = state.entries.find((e) => e.id === args.id);
+      if (gone) mockTrash.unshift({ id: id(), itemId: gone.id, kind: "entry", itemType: gone.type, title: gone.title, deletedAt: Date.now(), deletedElsewhere: false, expiresAt: Date.now() + 30 * 86_400_000, data: gone });
+      state.entries = state.entries.filter((e) => e.id !== args.id); state.revision++; log("info", "items", "Item deleted"); return null;
+    }
+    case "keepass_preview": case "keepass_import": {
+      if (args.password === "wrong") throw "The password or key file is wrong for this KeePass database.";
+      const summary = { logins: 42, codes: 5, notes: 3, groups: ["Banking", "Work", "Work / Servers"], inRecycleBin: 4, withoutContent: 1, attachments: 2, passkeys: 1, duplicates: 0, codesSkipped: 0 };
+      if (command === "keepass_import") { log("success", "items", "Imported 40 logins, 5 codes and 3 notes from KeePass"); return { ...summary, logins: 40, duplicates: 2 }; }
+      return summary;
+    }
+    case "previous_passwords": return mockHistory.get(String(args.entryId)) ?? [];
+    case "clear_previous_passwords": mockHistory.delete(String(args.entryId)); return null;
+    case "list_trash": requireUnlocked(); return mockTrash.map(({ data: _data, ...item }) => item);
+    case "restore_trashed": {
+      const item = mockTrash.find((t) => t.id === args.id);
+      if (!item) throw "That item no longer exists.";
+      mockTrash.splice(mockTrash.indexOf(item), 1);
+      if (item.kind === "note") {
+        const note = { ...(item.data as LocalNote), id: id(), updatedAt: Date.now() };
+        state.notes = [note, ...state.notes]; state.revision++; return { kind: "note", id: note.id, type: "NOTE" };
+      }
+      const entry = { ...(item.data as VaultEntry), id: id(), updatedAt: Date.now() };
+      state.entries = [entry, ...state.entries]; state.revision++; return { kind: "entry", id: entry.id, type: entry.type };
+    }
+    case "forget_trashed": mockTrash.splice(mockTrash.findIndex((t) => t.id === args.id), 1); return null;
+    case "empty_trash": mockTrash.length = 0; return null;
     case "list_entry_photos": return state.photos.get(String(args.entryId)) ?? [];
     case "add_entry_photo": {
       const list = state.photos.get(String(args.entryId)) ?? [];
@@ -149,13 +224,20 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       const saved: LocalNote = { id: (args.id as string) ?? id(), title: String(args.title), body: String(args.body), groupIds: (args.groupIds as string[]) ?? [], createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now() };
       state.notes = [saved, ...state.notes.filter((n) => n.id !== saved.id)]; state.revision++; log("success", "items", "Note saved"); return saved;
     }
-    case "delete_note": state.notes = state.notes.filter((n) => n.id !== args.id); state.revision++; return null;
+    case "delete_note": {
+      const gone = state.notes.find((n) => n.id === args.id);
+      if (gone) mockTrash.unshift({ id: id(), itemId: gone.id, kind: "note", itemType: "NOTE", title: gone.title, deletedAt: Date.now(), deletedElsewhere: false, expiresAt: Date.now() + 30 * 86_400_000, data: gone });
+      state.notes = state.notes.filter((n) => n.id !== args.id); state.revision++; return null;
+    }
     case "list_groups": requireUnlocked(); return state.groups.map((g) => ({ ...g }));
     case "save_group": {
       const saved: VaultGroup = { id: (args.id as string) ?? id(), name: String(args.name), notes: String(args.notes ?? ""), folderType: String(args.folderType ?? "") };
       state.groups = [...state.groups.filter((g) => g.id !== saved.id), saved]; state.revision++; log("success", "items", "Folder saved"); return saved;
     }
     case "delete_group": state.groups = state.groups.filter((g) => g.id !== args.id); state.revision++; return null;
+    case "site_icons": return siteIconsState();
+    case "set_site_icons": state.siteIcons = Boolean(args.enabled); if (!state.siteIcons) state.capturedIcons = {}; return siteIconsState();
+    case "clear_site_icons": state.capturedIcons = {}; return siteIconsState();
     case "list_passkeys": return state.passkeys;
     case "passkey_login_ids": {
       // A simple copy of `browser::passkey_matches_login` for previews: same username, RP ID covers the host.
@@ -236,6 +318,19 @@ if (window.location.search.includes("removed")) {
       const total = 3_400_000;
       const done = state.photos_waiting > 0 ? Math.min(total, ((Date.now() / 1000) % 20) / 20 * total) : total;
       return { waiting: state.photos_waiting, transferredBytes: Math.round(done), totalBytes: total };
+    }
+    case "list_browsers": return mockBrowsers.map((b) => ({ ...b }));
+    case "set_browser": {
+      const b = mockBrowsers.find((x) => x.id === args.id);
+      if (!b) throw new Error("Unknown browser");
+      if (b.family === "unknown" && (args.family === "chromium" || args.family === "firefox")) b.family = args.family;
+      if (typeof args.askAtStart === "boolean") b.askAtStart = args.askAtStart;
+      if (typeof args.connected === "boolean") {
+        if (args.connected && b.family === "unknown") throw new Error("Choose what this browser is built on first.");
+        b.connected = args.connected;
+        b.registered = args.connected;
+      }
+      return mockBrowsers.map((x) => ({ ...x }));
     }
     case "connect_browsers": return { browsers: ["chrome", "edge"], changed: true };
     case "build_status": return { version: "2.1.9", storeBuild: true, installerBuildInstalled: true, passkeyProvider: "off" } satisfies BuildStatus;

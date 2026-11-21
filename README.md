@@ -22,6 +22,16 @@ Opening Nuvori syncs on its own: when its window comes to the front (Start menu,
 
 Press **Ctrl+Shift+Space** in any Windows app to open Nuvori's search from the tray (Ctrl+K inside the app does the same). A locked vault shows the unlock screen first, and the search opens after you unlock within a minute. The shortcut never unlocks, copies, or types anything by itself. Change the key (Ctrl+Alt+N or Ctrl+Shift+L) or turn it off in **Settings > Security > Quick search shortcut**; Settings shows "In use by another app" if Windows already gave the key to another program.
 
+The master password protects a random vault key with Argon2id: 64 MiB of memory and enough passes for about one second on this PC, never fewer than the 3 passes that earlier versions used. A vault from an earlier version moves to the timed setting at the next unlock with the master password. An earlier Nuvori then cannot open it and shows that the vault could not be opened; update Nuvori.
+
+The password editor generates a password or a passphrase (EFF word list). **Generate** uses the last settings on this PC; the options button next to it sets the length and character types, or the number of words, the separator, capitals and a number.
+
+Each PC keeps a login's last 10 passwords (**Previous passwords** on the login) and a copy of every deleted item for 30 days (**Recently deleted**). This includes changes and deletes that arrive from paired devices. Both stay in the encrypted vault on this PC and are not synced. A restored item is a new item that syncs to the other devices. Photos and passkeys are not kept.
+
+**Settings > Import from KeePass** reads a `.kdbx` file (KeePassXC, KeePass 2, KeePassDX, Strongbox) with its password and key file, shows what it holds, then adds logins, linked authenticator codes and notes. Logins already in the vault are skipped. The Recycle Bin, history, attachments and passkeys are not imported.
+
+**Auto-type** (Settings > Security, off by default) fills a login into a desktop app. Press the shortcut in the app's sign-in window, then pick the login. Nuvori types the username, Tab, the password and optionally Enter into that window only. It refuses if the window closed or changed, and Windows blocks typing into apps that run as administrator.
+
 Windows Hello is optional. Unlock with the master password, then open More and confirm that password once to enable Hello. Later unlocks can use the Windows PIN, face, or fingerprint. The master password remains the recovery path, and it never depends on Hello.
 
 How the Hello copy of the vault key is protected:
@@ -49,7 +59,7 @@ React Native for Windows was considered. It makes more sense when the mobile app
 
 ## Install or distribute
 
-Download `Nuvori_2.2.9_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
+Download `Nuvori_2.3.0_x64-setup.exe` from the [latest release](https://github.com/santoshkanumuri/vault_apk_windows/releases/latest) and run it on a 64-bit Windows PC. Recipients do not need npm or development tools. See the [installation and distribution guide](docs/DISTRIBUTION.md) for the MSI, checksums, and future builds.
 
 The browser extension **Nuvori Password Fill** comes from the Chrome Web Store. See [extension/README.md](extension/README.md).
 
@@ -139,3 +149,7 @@ store-assets/                Chrome Web Store screenshots and promo images
 ## Third-party notices
 
 Payment-network marks on cards are adapted from [svg-credit-card-payment-icons](https://github.com/aaronfagan/svg-credit-card-payment-icons) under the [Apache-2.0 license](docs/licenses/payment-icons-LICENSE.txt), except the American Express mark, which uses the [Simple Icons](https://simpleicons.org/) path under CC0 1.0; `scripts/make-network-marks.py` generates them from the Android app's copies. The RuPay logo comes from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:RuPay.svg) as a public-domain text logo; RuPay remains an NPCI trademark. Network names and logos identify stored cards and do not imply affiliation or endorsement.
+
+Built-in website icons (`src/lib/site-icons.json`) are the CC0-licensed icons of [Simple Icons](https://simpleicons.org) 16.36.0, matched to domains from the [Tranco](https://tranco-list.eu) top-sites list (ID 46YVX) by `scripts/build-site-icons.py`. Brand names and logos belong to their owners and are shown only to identify a saved site.
+
+The passphrase generator uses the [EFF large word list](https://www.eff.org/dice) (`src/lib/eff-large-wordlist.txt`, the 7,776 words without their dice numbers) by the Electronic Frontier Foundation, under [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/).

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Save, Wand2 } from "lucide-react";
-import { Button } from "../../components/Button";
+import { Save, SlidersHorizontal, Wand2 } from "lucide-react";
+import { Button, IconButton } from "../../components/Button";
+import { generateWithSavedSettings, PasswordGeneratorDialog } from "../../components/PasswordGenerator";
 import { Checkbox, PasswordField, SelectField, TextArea, TextField } from "../../components/Field";
 import { CardColorPicker } from "../../components/CardColorPicker";
 import { StatusBanner } from "../../components/Status";
@@ -12,7 +13,7 @@ import { api, type EntryDraft } from "../../lib/api";
 import { DEFAULT_CARD_COLOR, defaultCardColor, usedColors } from "../../lib/cardColors";
 import { categories, emptyEntry, foldersFor, profileFields, profileFrom, type Category, type Profile } from "../../lib/entries";
 import { cx } from "../../lib/format";
-import { generatePassword, passwordStrength } from "../../lib/strength";
+import { passwordStrength } from "../../lib/strength";
 import { isValidSecret } from "../../lib/totp";
 
 /** Registers a "Discard changes?" guard while the form is dirty. */
@@ -166,10 +167,19 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
 function LoginFields({ draft, set, errors }: { draft: EntryDraft; set: <K extends keyof EntryDraft>(key: K, value: EntryDraft[K]) => void; errors: Record<string, string> }) {
   const strength = passwordStrength(draft.secondaryValue);
   const tone = ["error", "warning", "info", "success", "success"][strength.score];
+  const [generator, setGenerator] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+  // One click uses the settings last chosen in the generator on this PC.
+  const quickGenerate = () => generateWithSavedSettings().then((value) => { setGenerateError(""); set("secondaryValue", value); },
+    () => setGenerateError("Could not generate a passphrase. Open the generator options and try again."));
   return <>
     <TextField label="Username or email" value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} autoComplete="off" spellCheck={false} />
-    <PasswordField label="Password" value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue} autoComplete="new-password" required
-      trailing={<button type="button" className="link-button" onClick={() => set("secondaryValue", generatePassword(20))}><Wand2 aria-hidden="true" /> Generate</button>} />
+    <PasswordField label="Password" value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue || generateError || undefined} autoComplete="new-password" required
+      trailing={<span className="password-tools">
+        <button type="button" className="link-button" onClick={() => void quickGenerate()}><Wand2 aria-hidden="true" /> Generate</button>
+        <IconButton label="Generator options" icon={SlidersHorizontal} size="sm" onClick={() => setGenerator(true)} />
+      </span>} />
+    <PasswordGeneratorDialog open={generator} onClose={() => setGenerator(false)} onUse={(value) => { setGenerator(false); setGenerateError(""); set("secondaryValue", value); }} />
     {draft.secondaryValue && (
       <div className="strength compact">
         <div className={cx("strength-bar", `tone-${tone}`)}>{[0, 1, 2, 3].map((index) => <span key={index} className={cx(index < Math.max(1, strength.score) && "is-on")} />)}</div>

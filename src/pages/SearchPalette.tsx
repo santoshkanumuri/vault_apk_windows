@@ -154,7 +154,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
                   const { doc } = result;
                   return (
                     <div key={result.key} id={`palette-${current}`} data-index={current} role="option" aria-selected={selected} className={cx("palette-item", selected && "is-active")} onMouseMove={() => setActive(current)} onClick={() => choose(result)}>
-                      <Avatar title={doc.title || "?"} size="sm" icon={doc.kind === "note" ? FileText : undefined} />
+                      <Avatar title={doc.title || "?"} size="sm" icon={doc.kind === "note" ? FileText : undefined} site={doc.kind === "entry" && doc.entry.type === "PASSWORD" ? doc.entry.tertiaryValue : undefined} />
                       <span className="palette-text">
                         <span className="palette-title"><Highlighted segments={highlight(doc.title || "Untitled", tokens)} /></span>
                         <span className="palette-subtitle">{doc.kind === "entry" && !tokens.length ? `${typeLabel(doc.entry.type)} · ` : ""}<Highlighted segments={highlight(doc.subtitle, tokens)} /></span>

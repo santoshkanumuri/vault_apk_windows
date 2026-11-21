@@ -24,20 +24,3 @@ export function passwordStrength(password: string): Strength {
     : "";
   return { score, label, hint };
 }
-
-export function generatePassword(length = 20): string {
-  const sets = ["abcdefghijkmnopqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!@#$%^&*-_=+?"];
-  const all = sets.join("");
-  const random = new Uint32Array(length + sets.length);
-  crypto.getRandomValues(random);
-  const chars = sets.map((set, i) => set[random[i] % set.length]);
-  for (let i = sets.length; i < length; i++) chars.push(all[random[i] % all.length]);
-  // Shuffle so the guaranteed characters are not always first.
-  const order = new Uint32Array(chars.length);
-  crypto.getRandomValues(order);
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = order[i] % (i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join("");
-}

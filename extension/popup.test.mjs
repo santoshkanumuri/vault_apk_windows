@@ -338,7 +338,7 @@ test("without activeTab, a tab whose URL is hidden is treated as not secure and 
 
 test("manifest: least privilege, HTTPS-only hosts, no activeTab", () => {
   const manifest = JSON.parse(readFileSync(fileURLToPath(new URL("./manifest.json", import.meta.url)), "utf8"));
-  assert.equal(manifest.version, "0.7.6");
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/); // the release script checks the exact number
   // The Chrome Web Store needs a 128 px icon in the package; every listed icon must exist.
   assert.equal(manifest.icons["128"], "icons/icon-128.png");
   for (const path of [...Object.values(manifest.icons), ...Object.values(manifest.action.default_icon)]) {

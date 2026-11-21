@@ -5,6 +5,7 @@ import { PreferencesProvider } from "./app/settings";
 import { Shell } from "./app/Shell";
 import { ThemeProvider } from "./app/theme";
 import { ToastProvider } from "./app/toast";
+import { SiteIconsProvider } from "./app/siteIcons";
 import { useVault, VaultProvider } from "./app/vault";
 import { SplashScreen, UnlockPage } from "./pages/Unlock";
 
@@ -24,9 +25,11 @@ export default function App() {
         <ToastProvider>
           <ConfirmProvider>
             <VaultProvider>
-              <RouterProvider>
-                <Gate />
-              </RouterProvider>
+              <SiteIconsProvider>
+                <RouterProvider>
+                  <Gate />
+                </RouterProvider>
+              </SiteIconsProvider>
             </VaultProvider>
           </ConfirmProvider>
         </ToastProvider>

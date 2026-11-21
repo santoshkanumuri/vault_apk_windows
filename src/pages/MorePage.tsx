@@ -1,4 +1,4 @@
-import { Activity, CircleHelp, FileText, MonitorSmartphone, LockKeyhole, Settings, UserRound } from "lucide-react";
+import { Activity, ArchiveRestore, CircleHelp, FileText, MonitorSmartphone, LockKeyhole, Settings, UserRound } from "lucide-react";
 import { SettingsGroup, SettingsRow } from "../components/Display";
 import { useLock } from "../app/hooks";
 import { useRouter } from "../app/router";
@@ -19,6 +19,7 @@ export function MorePage() {
       <SettingsGroup title="Manage Nuvori">
         <SettingsRow icon={MonitorSmartphone} title="Devices & sync" description={snapshot.enrolled ? "Phone sync and status" : "Pair with your phone"} onClick={() => void router.navigate({ page: "sync" })} />
         <SettingsRow icon={Activity} title="Activity" description="Recent unlocks, saves, and syncs" onClick={() => void router.navigate({ page: "activity" })} />
+        <SettingsRow icon={ArchiveRestore} title="Recently deleted" description="Restore items deleted in the last 30 days" onClick={() => void router.navigate({ page: "trash" })} />
         <SettingsRow icon={Settings} title="Settings" description="Theme, security, browser extension" onClick={() => void router.navigate({ page: "settings" })} />
         <SettingsRow icon={LockKeyhole} title="Lock vault" description="Ctrl+L" onClick={() => void lock()} />
       </SettingsGroup>

@@ -570,6 +570,20 @@ test("browser start asks Nuvori to show its unlock window when it is locked or n
   }
 });
 
+test("browser start sends startup only when the app lists startup_browsers, and skipped is quiet", async () => {
+  for (const [features, expected] of [[["unlock_prompt"], false], [["unlock_prompt", "startup_browsers"], true]]) {
+    const state = await worker((request) => request.action === "status" ? { status: "locked", features }
+      : request.action === "unlock_prompt" ? { status: expected ? "skipped" : "locked" } : { status: "locked" });
+    state.startup();
+    await new Promise(setImmediate);
+    await new Promise(setImmediate);
+    const unlock = state.requests.find((request) => request.action === "unlock_prompt");
+    assert.ok(unlock);
+    assert.equal(unlock.startup === true, expected);
+    assert.equal("startup" in unlock, expected);
+  }
+});
+
 test("browser start stays quiet when unlocked, turned off, or the host is too old", async () => {
   const cases = [
     [{ status: "ok", features: ["unlock_prompt"] }, {}],

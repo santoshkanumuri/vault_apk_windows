@@ -30,7 +30,10 @@ use crate::{
     sync::{ChangeKind, ChangeRecord, GENESIS_HASH},
 };
 
-const BOOTSTRAP_VERSION: u16 = 1;
+/// Format 2 stores the Argon2id settings in the file. Format 1 (Windows 2.2.9 and earlier) always used
+/// [`KdfParams::LEGACY`]; the next unlock with the master password saves it again in format 2.
+const BOOTSTRAP_VERSION: u16 = 2;
+const LEGACY_BOOTSTRAP_VERSION: u16 = 1;
 const MIN_PASSWORD_LENGTH: usize = 12;
 const BOOTSTRAP_FILE: &str = "vault-key-v1.json";
 const DATABASE_FILE: &str = "vault.db";
@@ -179,20 +182,7 @@ impl VaultStore {
         }
 
         let vault_key = Zeroizing::new(random_array()?);
-        let salt: [u8; 16] = random_array()?;
-        let nonce: [u8; 12] = random_array()?;
-        let wrapping_key = Zeroizing::new(derive(password, &salt)?);
-        let wrapped = Aes256Gcm::new_from_slice(&*wrapping_key)
-            .expect("32-byte key")
-            .encrypt(Nonce::from_slice(&nonce), vault_key.as_ref())
-            .map_err(|_| VaultError::KeyWrappingFailed);
-        let wrapped = wrapped?;
-        let bootstrap = VaultBootstrap {
-            format_version: BOOTSTRAP_VERSION,
-            salt: URL_SAFE_NO_PAD.encode(salt),
-            nonce: URL_SAFE_NO_PAD.encode(nonce),
-            wrapped_key: URL_SAFE_NO_PAD.encode(wrapped),
-        };
+        let bootstrap = wrap_vault_key(&vault_key, password, KdfParams::calibrated()?)?;
 
         let connection = match open_database(&database_path, &vault_key, true) {
             Ok(connection) => connection,
@@ -232,15 +222,15 @@ impl VaultStore {
     }
 
     pub fn unlock(&self, password: &str) -> Result<UnlockedVault, VaultError> {
-        let bootstrap: VaultBootstrap =
-            serde_json::from_slice(&fs::read(self.directory.join(BOOTSTRAP_FILE))?)?;
-        if bootstrap.format_version != BOOTSTRAP_VERSION {
-            return Err(VaultError::UnsupportedBootstrap(bootstrap.format_version));
-        }
+        let bootstrap_path = self.directory.join(BOOTSTRAP_FILE);
+        let bootstrap: VaultBootstrap = serde_json::from_slice(&fs::read(&bootstrap_path)?)?;
+        let params = bootstrap.kdf_params()?;
         let salt: [u8; 16] = decode_array(&bootstrap.salt)?;
         let nonce: [u8; 12] = decode_array(&bootstrap.nonce)?;
         let wrapped = URL_SAFE_NO_PAD.decode(&bootstrap.wrapped_key)?;
-        let wrapping_key = Zeroizing::new(derive(password, &salt)?);
+        let started = std::time::Instant::now();
+        let wrapping_key = Zeroizing::new(derive(password, &salt, params)?);
+        let elapsed = started.elapsed();
         let unwrapped = Aes256Gcm::new_from_slice(&*wrapping_key)
             .expect("32-byte key")
             .decrypt(Nonce::from_slice(&nonce), wrapped.as_ref())
@@ -254,7 +244,18 @@ impl VaultStore {
             }
         };
         unwrapped.zeroize();
-        self.open_with_key(&key)
+        let vault = self.open_with_key(&key)?;
+        if bootstrap.format_version == LEGACY_BOOTSTRAP_VERSION {
+            // The key opened the database, so save it again with settings timed on this PC. The
+            // Argon2id run above already measured this PC, so no extra benchmark runs. A failure
+            // keeps the old file, and the vault still opens.
+            let upgraded = wrap_vault_key(&key, password, KdfParams::for_measured(elapsed, params.iterations))
+                .and_then(|bootstrap| write_new_bootstrap(&bootstrap_path, &bootstrap));
+            if let Err(error) = upgraded {
+                crate::activity::diagnostic(crate::activity::Category::Vault, "Could not strengthen the vault key file", error);
+            }
+        }
+        Ok(vault)
     }
 
     fn open_with_key(&self, key: &[u8; 32]) -> Result<UnlockedVault, VaultError> {
@@ -274,6 +275,8 @@ impl VaultStore {
         };
         vault.backfill_independent_history()?;
         // Local housekeeping only; a failure here must not block unlocking.
+        let _ = now_millis().map(|now| crate::local_recovery::purge(&vault.connection, now));
+        let _ = crate::site_icons::purge(&vault.connection, crate::site_icons::enabled());
         let _ = vault.sweep_orphan_photos();
         let _ = vault.publish_unsynced_photos();
         Ok(vault)
@@ -528,6 +531,7 @@ impl UnlockedVault {
             .optional()?
             .ok_or(VaultError::NoteNotFound)?;
         self.write_note_change(&note, ChangeKind::Delete, |transaction| {
+            crate::local_recovery::keep_deleted(transaction, id, now_millis().unwrap_or_default(), false)?;
             transaction.execute("DELETE FROM local_notes WHERE id = ?1", [id])?;
             transaction.execute("DELETE FROM entry_groups WHERE entry_id = ?1", [id])?;
             Ok(())
@@ -1742,7 +1746,9 @@ impl UnlockedVault {
         }
         let json = serde_json::to_string(&entry)?;
         let payload = serde_json::json!({"entry": entry, "groupIds": group_ids});
+        let history_entry = entry.clone();
         self.write_change("entry", &id, ChangeKind::Upsert, payload, |transaction| {
+            crate::local_recovery::note_entry_write(transaction, &id, &history_entry, now)?;
             transaction.execute(
                 "INSERT INTO local_entries (id, type, data_json, updated_at) VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(id) DO UPDATE SET type = excluded.type, data_json = excluded.data_json, updated_at = excluded.updated_at",
@@ -1766,6 +1772,112 @@ impl UnlockedVault {
                 row.get(0)
             })
             .optional()?)
+    }
+
+    /// Saves a KeePass import (keepass_import.rs) as ordinary new items, so they sync like items
+    /// added by hand. A login that already exists with the same website, username and password is
+    /// skipped, also when the file holds it twice. Returns the counts actually saved.
+    pub fn import_keepass(&mut self, plan: &crate::keepass_import::Plan) -> Result<crate::keepass_import::Summary, VaultError> {
+        fn site(url: &str) -> String {
+            let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+            rest.split(['/', '?', '#']).next().unwrap_or_default().to_ascii_lowercase()
+        }
+        let mut summary = plan.summary();
+        summary.logins = 0;
+        summary.codes = 0;
+        summary.notes = 0;
+        let mut known: BTreeSet<(String, String, String)> = self.list_entries()?.iter()
+            .filter(|entry| entry["type"] == "PASSWORD")
+            .map(|entry| (
+                site(entry["tertiaryValue"].as_str().unwrap_or_default()),
+                entry["primaryValue"].as_str().unwrap_or_default().to_owned(),
+                entry["secondaryValue"].as_str().unwrap_or_default().to_owned(),
+            ))
+            .collect();
+        for login in &plan.logins {
+            if login.has_password() && !known.insert((site(&login.url), login.username.clone(), login.password.clone())) {
+                summary.duplicates += 1;
+                continue;
+            }
+            let mut linked = String::new();
+            if let Some(code) = &login.code {
+                let usable = crate::totp::code_at(&code.secret, code.algorithm, code.digits, code.period, 0).is_some();
+                let saved = usable.then(|| self.save_entry(serde_json::json!({
+                    "type": "AUTHENTICATOR", "title": login.title, "primaryValue": login.username,
+                    "secondaryValue": code.secret, "totpAlgorithm": code.algorithm,
+                    "totpDigits": code.digits, "totpPeriod": code.period, "tags": login.tags,
+                })));
+                match saved {
+                    Some(Ok(entry)) => {
+                        linked = entry["id"].as_str().unwrap_or_default().to_owned();
+                        summary.codes += 1;
+                    }
+                    _ => summary.codes_skipped += 1,
+                }
+            }
+            if login.has_password() {
+                self.save_entry(serde_json::json!({
+                    "type": "PASSWORD", "title": login.title, "primaryValue": login.username,
+                    "secondaryValue": login.password, "tertiaryValue": login.url, "notes": login.notes,
+                    "tags": login.tags, "linkedAuthenticatorId": linked,
+                }))?;
+                summary.logins += 1;
+            } else if login.code.is_none() {
+                self.save_note(None, &login.title, &login.note_body(), None)?;
+                summary.notes += 1;
+            }
+        }
+        Ok(summary)
+    }
+
+    // Previous passwords and Recently deleted: this PC only (local_recovery.rs).
+
+    pub fn previous_passwords(&self, entry_id: &str) -> Result<Vec<crate::local_recovery::PreviousPassword>, VaultError> {
+        Ok(crate::local_recovery::previous_passwords(&self.connection, entry_id)?)
+    }
+
+    pub fn clear_previous_passwords(&self, entry_id: &str) -> Result<(), VaultError> {
+        Ok(crate::local_recovery::clear_previous_passwords(&self.connection, entry_id)?)
+    }
+
+    pub fn trashed_items(&self) -> Result<Vec<crate::local_recovery::TrashedItem>, VaultError> {
+        Ok(crate::local_recovery::trashed_items(&self.connection)?)
+    }
+
+    /// Restores a trashed item as a new item (new ID), which syncs like any new item. It goes back
+    /// into the folders that still exist and still take its type, and keeps its previous passwords.
+    /// Returns `{kind, id, type}` of the new item.
+    pub fn restore_trashed(&mut self, trash_id: &str) -> Result<serde_json::Value, VaultError> {
+        let (item_id, kind, data, group_ids) = crate::local_recovery::trashed(&self.connection, trash_id)?
+            .ok_or(VaultError::EntryNotFound)?;
+        let item_type = if kind == "note" { "NOTE" } else { data["type"].as_str().ok_or(VaultError::InvalidEntry)? }.to_owned();
+        let folders: BTreeMap<String, String> = self.list_groups()?.into_iter().map(|group| (group.id, group.folder_type)).collect();
+        let group_ids: Vec<String> = group_ids.into_iter()
+            .filter(|id| folders.get(id).is_some_and(|folder_type| folder_type.is_empty() || *folder_type == item_type))
+            .collect();
+        let restored_id = if kind == "note" {
+            let title = data["title"].as_str().ok_or(VaultError::InvalidNote)?;
+            let body = data["body"].as_str().ok_or(VaultError::InvalidNote)?;
+            self.save_note(None, title, body, Some(group_ids))?.id
+        } else {
+            let mut draft = data.as_object().cloned().ok_or(VaultError::InvalidEntry)?;
+            draft.remove("id");
+            draft.insert("groupIds".to_owned(), serde_json::to_value(&group_ids)?);
+            let entry = self.save_entry(serde_json::Value::Object(draft))?;
+            let new_id = entry["id"].as_str().ok_or(VaultError::InvalidEntry)?.to_owned();
+            crate::local_recovery::move_history(&self.connection, &item_id, &new_id)?;
+            new_id
+        };
+        self.connection.execute("DELETE FROM local_trash WHERE id = ?1", [trash_id])?;
+        Ok(serde_json::json!({"kind": kind, "id": restored_id, "type": item_type}))
+    }
+
+    pub fn forget_trashed(&self, trash_id: &str) -> Result<(), VaultError> {
+        if crate::local_recovery::forget(&self.connection, trash_id)? { Ok(()) } else { Err(VaultError::EntryNotFound) }
+    }
+
+    pub fn empty_trash(&self) -> Result<(), VaultError> {
+        Ok(crate::local_recovery::empty(&self.connection)?)
     }
 
     pub fn delete_entry(&mut self, id: &str) -> Result<(), VaultError> {
@@ -1796,6 +1908,7 @@ impl UnlockedVault {
             ChangeKind::Delete,
             serde_json::json!({"deleted": true}),
             |transaction| {
+                crate::local_recovery::keep_deleted(transaction, id, now_millis().unwrap_or_default(), false)?;
                 transaction.execute("DELETE FROM local_entries WHERE id = ?1", [id])?;
                 transaction.execute("DELETE FROM local_entry_photos WHERE entry_id = ?1", [id])?;
                 transaction.execute("DELETE FROM sync_attachment_manifests WHERE owner_entity_id = ?1", [id])?;
@@ -2222,6 +2335,8 @@ fn initialize_notes(connection: &Connection) -> Result<(), VaultError> {
             data_json TEXT NOT NULL
         );",
     )?;
+    crate::local_recovery::initialize(connection)?;
+    crate::site_icons::initialize(connection)?;
     migrate_local_schema(connection)
 }
 
@@ -2302,6 +2417,22 @@ impl Drop for UnlockedVault {
     }
 }
 
+/// `PRAGMA key = "x'<64 hex digits>'";` in one buffer of exact size, so it never reallocates and
+/// leaves no copy of the key text behind. The buffer is wiped when it drops.
+fn key_statement(key: &[u8; 32]) -> Zeroizing<String> {
+    const PREFIX: &str = "PRAGMA key = \"x'";
+    const SUFFIX: &str = "'\";";
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut statement = Zeroizing::new(String::with_capacity(PREFIX.len() + 64 + SUFFIX.len()));
+    statement.push_str(PREFIX);
+    for byte in key {
+        statement.push(DIGITS[usize::from(byte >> 4)] as char);
+        statement.push(DIGITS[usize::from(byte & 0x0f)] as char);
+    }
+    statement.push_str(SUFFIX);
+    statement
+}
+
 fn open_database(path: &Path, key: &[u8; 32], create: bool) -> Result<Connection, VaultError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | if create {
@@ -2312,14 +2443,98 @@ fn open_database(path: &Path, key: &[u8; 32], create: bool) -> Result<Connection
     let connection = Connection::open_with_flags(path, flags)?;
     // SQLCipher's raw-key form skips a second password KDF. The random key is
     // wrapped with Argon2id and AES-GCM in the bootstrap file.
-    connection.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex::encode(key)))?;
+    connection.execute_batch(&key_statement(key))?;
     connection.query_row("PRAGMA cipher_version", [], |_| Ok(()))?;
     connection.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))?;
     Ok(connection)
 }
 
-fn derive(password: &str, salt: &[u8; 16]) -> Result<[u8; 32], VaultError> {
-    let params = Params::new(65_536, 3, 1, Some(32))
+/// Argon2id settings that turn the master password into the key that wraps the vault key.
+///
+/// Memory stays at 64 MiB on every device. The number of passes is timed on the device so that
+/// one unlock takes about [`KDF_TARGET`], as KeePassXC does, and it never drops below the
+/// 2.2.9 setting. An attacker who copies the vault folder pays the same cost for each guess.
+/// The Android app uses the same rules (`PasswordCrypto` in the Android repository).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KdfParams {
+    memory_kib: u32,
+    iterations: u32,
+    parallelism: u32,
+}
+
+/// About one second on the device that saves the file. Tests use the minimum, so that the many
+/// test vaults stay fast.
+const KDF_TARGET: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(test) { 0 } else { 1_000 });
+const KDF_MAX_ITERATIONS: u32 = 64;
+
+impl KdfParams {
+    /// The fixed setting of bootstrap format 1, and the lowest setting Nuvori saves.
+    const LEGACY: Self = Self { memory_kib: 65_536, iterations: 3, parallelism: 1 };
+
+    /// Settings read from a file stay within these limits, so that a damaged or edited file
+    /// cannot make the unlock use gigabytes of memory or run for minutes.
+    fn valid(&self) -> bool {
+        self.memory_kib == Self::LEGACY.memory_kib
+            && (Self::LEGACY.iterations..=KDF_MAX_ITERATIONS).contains(&self.iterations)
+            && self.parallelism == Self::LEGACY.parallelism
+    }
+
+    /// Passes that fill [`KDF_TARGET`], given the time that `iterations` passes took here.
+    fn for_measured(elapsed: std::time::Duration, iterations: u32) -> Self {
+        Self::for_measured_within(elapsed, iterations, KDF_TARGET)
+    }
+
+    fn for_measured_within(elapsed: std::time::Duration, iterations: u32, target: std::time::Duration) -> Self {
+        let per_pass = elapsed.as_secs_f64() / f64::from(iterations.max(1));
+        Self { iterations: iterations_for(per_pass, target.as_secs_f64()), ..Self::LEGACY }
+    }
+
+    /// Times the legacy setting (3 passes) on this device, the same measurement as the unlock
+    /// of a format 1 file. Used when no unlock has measured it yet: a new vault.
+    fn calibrated() -> Result<Self, VaultError> {
+        Self::calibrated_within(KDF_TARGET)
+    }
+
+    fn calibrated_within(target: std::time::Duration) -> Result<Self, VaultError> {
+        if target.is_zero() {
+            return Ok(Self::LEGACY);
+        }
+        let salt: [u8; 16] = random_array()?;
+        let started = std::time::Instant::now();
+        Zeroizing::new(derive("nuvori-kdf-calibration", &salt, Self::LEGACY)?);
+        Ok(Self::for_measured_within(started.elapsed(), Self::LEGACY.iterations, target))
+    }
+}
+
+/// Whole passes for `target` seconds when one pass takes `per_pass` seconds, kept between the
+/// legacy minimum and [`KDF_MAX_ITERATIONS`].
+fn iterations_for(per_pass: f64, target: f64) -> u32 {
+    let wanted = if per_pass > 0.0 { (target / per_pass).round() } else { f64::from(KDF_MAX_ITERATIONS) };
+    (wanted.clamp(f64::from(KdfParams::LEGACY.iterations), f64::from(KDF_MAX_ITERATIONS))) as u32
+}
+
+/// Wraps `vault_key` with a fresh salt and nonce under `password`, in bootstrap format 2.
+fn wrap_vault_key(vault_key: &[u8; 32], password: &str, kdf: KdfParams) -> Result<VaultBootstrap, VaultError> {
+    let salt: [u8; 16] = random_array()?;
+    let nonce: [u8; 12] = random_array()?;
+    let wrapping_key = Zeroizing::new(derive(password, &salt, kdf)?);
+    let wrapped = Aes256Gcm::new_from_slice(&*wrapping_key)
+        .expect("32-byte key")
+        .encrypt(Nonce::from_slice(&nonce), vault_key.as_ref())
+        .map_err(|_| VaultError::KeyWrappingFailed)?;
+    Ok(VaultBootstrap {
+        format_version: BOOTSTRAP_VERSION,
+        salt: URL_SAFE_NO_PAD.encode(salt),
+        nonce: URL_SAFE_NO_PAD.encode(nonce),
+        wrapped_key: URL_SAFE_NO_PAD.encode(wrapped),
+        kdf: Some(kdf),
+    })
+}
+
+fn derive(password: &str, salt: &[u8; 16], kdf: KdfParams) -> Result<[u8; 32], VaultError> {
+    let params = Params::new(kdf.memory_kib, kdf.iterations, kdf.parallelism, Some(32))
         .map_err(|error| VaultError::Argon2(error.to_string()))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = [0; 32];
@@ -2367,6 +2582,22 @@ struct VaultBootstrap {
     salt: String,
     nonce: String,
     wrapped_key: String,
+    /// Format 2 only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kdf: Option<KdfParams>,
+}
+
+impl VaultBootstrap {
+    /// The Argon2id settings this file was saved with. A format from a newer Nuvori is refused
+    /// before any key derivation runs.
+    fn kdf_params(&self) -> Result<KdfParams, VaultError> {
+        match (self.format_version, self.kdf) {
+            (LEGACY_BOOTSTRAP_VERSION, None) => Ok(KdfParams::LEGACY),
+            (BOOTSTRAP_VERSION, Some(kdf)) if kdf.valid() => Ok(kdf),
+            (LEGACY_BOOTSTRAP_VERSION | BOOTSTRAP_VERSION, _) => Err(VaultError::InvalidBootstrap),
+            (version, _) => Err(VaultError::UnsupportedBootstrap(version)),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -2522,6 +2753,266 @@ mod tests {
 
     use super::*;
     use crate::identity::verify_signature;
+
+    fn read_bootstrap(directory: &Path) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(directory.join(BOOTSTRAP_FILE)).unwrap()).unwrap()
+    }
+
+    fn login(vault: &mut UnlockedVault, password: &str, group_ids: &[&str]) -> String {
+        let saved = vault.save_entry(serde_json::json!({"type": "PASSWORD", "title": "Mail", "primaryValue": "me@example.com",
+            "secondaryValue": password, "tertiaryValue": "https://mail.example.org", "notes": "keep me", "groupIds": group_ids})).unwrap();
+        saved["id"].as_str().unwrap().to_owned()
+    }
+
+    fn passwords(vault: &UnlockedVault, id: &str) -> Vec<String> {
+        vault.previous_passwords(id).unwrap().into_iter().map(|old| old.password).collect()
+    }
+
+    #[test]
+    fn a_changed_password_is_kept_newest_first_up_to_ten() {
+        let directory = std::env::temp_dir().join(format!("nuvori-history-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let id = login(&mut vault, "first", &[]);
+        assert!(passwords(&vault, &id).is_empty(), "a new login has no history");
+        vault.save_entry(serde_json::json!({"id": id, "title": "Mail (renamed)"})).unwrap();
+        assert!(passwords(&vault, &id).is_empty(), "a change without a new password adds nothing");
+        vault.save_entry(serde_json::json!({"id": id, "secondaryValue": "second"})).unwrap();
+        assert_eq!(passwords(&vault, &id), ["first"]);
+        for index in 3..=13 {
+            vault.save_entry(serde_json::json!({"id": id, "secondaryValue": format!("password {index}")})).unwrap();
+        }
+        let history = passwords(&vault, &id);
+        assert_eq!(history.len(), 10);
+        assert_eq!((history[0].as_str(), history[9].as_str()), ("password 12", "password 3"));
+        // Cards and codes have no password history.
+        let card = vault.save_entry(serde_json::json!({"type": "CARD", "title": "Travel", "primaryValue": "4111 1111 1111 1111"})).unwrap();
+        let card_id = card["id"].as_str().unwrap();
+        vault.save_entry(serde_json::json!({"id": card_id, "secondaryValue": "A Person"})).unwrap();
+        assert!(passwords(&vault, card_id).is_empty());
+        vault.clear_previous_passwords(&id).unwrap();
+        assert!(passwords(&vault, &id).is_empty());
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_deleted_login_restores_as_a_new_item_with_its_folder_and_history() {
+        let directory = std::env::temp_dir().join(format!("nuvori-trash-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let folder = vault.save_group(None, "Work", "", "PASSWORD").unwrap();
+        let id = login(&mut vault, "old secret", &[&folder.id]);
+        vault.save_entry(serde_json::json!({"id": id, "secondaryValue": "new secret"})).unwrap();
+        vault.delete_entry(&id).unwrap();
+
+        let trash = vault.trashed_items().unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!((trash[0].title.as_str(), trash[0].item_type.as_str(), trash[0].deleted_elsewhere), ("Mail", "PASSWORD", false));
+        assert_eq!(trash[0].expires_at - trash[0].deleted_at, 30 * 24 * 60 * 60 * 1000);
+        assert!(vault.list_entries().unwrap().is_empty());
+
+        let restored = vault.restore_trashed(&trash[0].id).unwrap();
+        let new_id = restored["id"].as_str().unwrap();
+        assert_ne!(new_id, id, "the deleted ID keeps its tombstone; the restored item is new");
+        let entries = vault.list_entries().unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!((entry["title"].as_str(), entry["secondaryValue"].as_str(), entry["notes"].as_str()), (Some("Mail"), Some("new secret"), Some("keep me")));
+        assert_eq!(entry["groupIds"], serde_json::json!([folder.id]));
+        assert_eq!(passwords(&vault, new_id), ["old secret"]);
+        assert!(vault.trashed_items().unwrap().is_empty());
+        // The restore is an ordinary signed change, so it syncs like a new item.
+        assert!(ChangeStore::record(&vault.connection, "entry", new_id).unwrap().is_some());
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn notes_go_to_the_trash_and_old_trash_is_purged() {
+        let directory = std::env::temp_dir().join(format!("nuvori-trash-notes-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let note = vault.save_note(None, "Wi-Fi", "router password: synthetic", None).unwrap();
+        vault.delete_note(&note.id).unwrap();
+        let trash = vault.trashed_items().unwrap();
+        assert_eq!((trash[0].kind.as_str(), trash[0].item_type.as_str()), ("note", "NOTE"));
+        vault.restore_trashed(&trash[0].id).unwrap();
+        let notes = vault.list_notes().unwrap();
+        assert_eq!((notes[0].title.as_str(), notes[0].body.as_str()), ("Wi-Fi", "router password: synthetic"));
+
+        // Items older than 30 days are gone after the next unlock, with their previous passwords.
+        let id = login(&mut vault, "a", &[]);
+        vault.save_entry(serde_json::json!({"id": id, "secondaryValue": "b"})).unwrap();
+        vault.delete_entry(&id).unwrap();
+        vault.delete_note(&notes[0].id).unwrap();
+        let old = now_millis().unwrap() - 31 * 24 * 60 * 60 * 1000;
+        vault.connection.execute("UPDATE local_trash SET deleted_at = ?1 WHERE kind = 'entry'", [old]).unwrap();
+        drop(vault);
+        let vault = store.unlock("synthetic-test-password").unwrap();
+        let trash = vault.trashed_items().unwrap();
+        assert_eq!(trash.iter().map(|item| item.kind.as_str()).collect::<Vec<_>>(), ["note"]);
+        assert!(passwords(&vault, &id).is_empty());
+
+        vault.forget_trashed(&trash[0].id).unwrap();
+        assert!(vault.trashed_items().unwrap().is_empty());
+        assert!(matches!(vault.forget_trashed("missing"), Err(VaultError::EntryNotFound)));
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_keepass_import_saves_linked_codes_and_notes_and_skips_duplicates() {
+        use crate::keepass_import::{Code, Login, Plan};
+        let directory = std::env::temp_dir().join(format!("nuvori-keepass-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        login(&mut vault, "already-here", &[]);
+        let item = |title: &str, password: &str, url: &str, code: Option<Code>| Login {
+            title: title.into(), username: "me@example.com".into(), password: password.into(), url: url.into(),
+            notes: "from KeePass".into(), tags: "KeePass: Work".into(), code,
+        };
+        let plan = Plan { logins: vec![
+            item("Mail", "already-here", "https://mail.example.org/other-page", None),
+            item("Bank", "synthetic-bank", "https://bank.example", Some(Code { secret: "JBSWY3DPEHPK3PXP".into(), algorithm: "SHA1", digits: 6, period: 30 })),
+            item("Bank copy", "synthetic-bank", "https://bank.example/login", None),
+            item("Broken code", "synthetic-x", "https://x.example", Some(Code { secret: "JBSWY3DPEHPK3PXP".into(), algorithm: "SHA1", digits: 9, period: 30 })),
+            item("Office Wi-Fi", "", "", None),
+        ], ..Plan::default() };
+
+        let summary = vault.import_keepass(&plan).unwrap();
+        assert_eq!((summary.logins, summary.codes, summary.notes, summary.duplicates, summary.codes_skipped), (2, 1, 1, 2, 1));
+        let entries = vault.list_entries().unwrap();
+        let bank = entries.iter().find(|entry| entry["title"] == "Bank").unwrap();
+        let code = entries.iter().find(|entry| entry["type"] == "AUTHENTICATOR").unwrap();
+        assert_eq!(bank["linkedAuthenticatorId"], code["id"]);
+        assert_eq!((code["secondaryValue"].as_str(), bank["tags"].as_str()), (Some("JBSWY3DPEHPK3PXP"), Some("KeePass: Work")));
+        let notes = vault.list_notes().unwrap();
+        assert_eq!(notes[0].title, "Office Wi-Fi");
+        // Each new item is an ordinary signed change, so it syncs to paired devices.
+        assert!(ChangeStore::record(&vault.connection, "entry", bank["id"].as_str().unwrap()).unwrap().is_some());
+
+        // The same file again adds nothing new.
+        let again = vault.import_keepass(&plan).unwrap();
+        assert_eq!((again.logins, again.duplicates), (0, 4));
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_key_statement_matches_sqlcipher_syntax_without_growing_its_buffer() {
+        let key: [u8; 32] = std::array::from_fn(|index| (index * 37 + 5) as u8);
+        let statement = key_statement(&key);
+        assert_eq!(statement.as_str(), format!("PRAGMA key = \"x'{}'\";", hex::encode(key)));
+        // Exactly the reserved size: no reallocation left a copy of the key text behind.
+        assert_eq!(statement.len(), statement.capacity());
+    }
+
+    #[test]
+    fn a_new_vault_saves_its_argon2id_settings() {
+        let directory = std::env::temp_dir().join(format!("nuvori-kdf-new-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        drop(store.create("synthetic-test-password").unwrap());
+        let file = read_bootstrap(&directory);
+        assert_eq!(file["formatVersion"], 2);
+        assert_eq!(file["kdf"], serde_json::json!({"memoryKib": 65_536, "iterations": 3, "parallelism": 1}));
+        drop(store.unlock("synthetic-test-password").unwrap());
+        assert!(matches!(store.unlock("wrong-test-password"), Err(VaultError::WrongPasswordOrCorruptKey)));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A Windows 2.2.9 vault: format 1, no settings in the file, always 64 MiB and 3 passes.
+    #[test]
+    fn a_format_1_vault_opens_and_is_saved_again_in_format_2() {
+        let directory = std::env::temp_dir().join(format!("nuvori-kdf-legacy-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        vault.save_note(None, "Kept", "across the upgrade", None).unwrap();
+        let key = vault.key;
+        drop(vault);
+        let mut legacy = wrap_vault_key(&key, "synthetic-test-password", KdfParams::LEGACY).unwrap();
+        legacy.format_version = LEGACY_BOOTSTRAP_VERSION;
+        legacy.kdf = None;
+        let path = directory.join(BOOTSTRAP_FILE);
+        write_new_bootstrap(&path, &legacy).unwrap();
+        assert_eq!(read_bootstrap(&directory).get("kdf"), None, "the file looks like 2.2.9 wrote it");
+
+        assert!(matches!(store.unlock("wrong-test-password"), Err(VaultError::WrongPasswordOrCorruptKey)));
+        assert_eq!(read_bootstrap(&directory)["formatVersion"], 1, "a wrong password changes nothing");
+
+        let vault = store.unlock("synthetic-test-password").unwrap();
+        assert_eq!(vault.list_notes().unwrap()[0].title, "Kept");
+        drop(vault);
+        let upgraded = read_bootstrap(&directory);
+        assert_eq!(upgraded["formatVersion"], 2);
+        assert_eq!(upgraded["kdf"]["memoryKib"], 65_536);
+        assert_ne!(upgraded["salt"], serde_json::to_value(&legacy.salt).unwrap(), "a new salt");
+
+        // The same vault key is inside: the database and the Hello unlock keep working.
+        let vault = store.unlock("synthetic-test-password").unwrap();
+        assert_eq!(vault.key, key);
+        drop(vault);
+        assert!(fs::read_dir(&directory).unwrap().all(|entry| !entry.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn edited_or_newer_key_files_are_refused_before_any_key_derivation() {
+        let directory = std::env::temp_dir().join(format!("nuvori-kdf-limits-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        drop(store.create("synthetic-test-password").unwrap());
+        let path = directory.join(BOOTSTRAP_FILE);
+        let original = read_bootstrap(&directory);
+        let edit = |change: &dyn Fn(&mut serde_json::Value)| {
+            let mut file = original.clone();
+            change(&mut file);
+            fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+            store.unlock("synthetic-test-password").err()
+        };
+        // 4 GiB of memory or a thousand passes would freeze the unlock: refused.
+        assert!(matches!(edit(&|file| file["kdf"]["memoryKib"] = 4_194_304.into()), Some(VaultError::InvalidBootstrap)));
+        assert!(matches!(edit(&|file| file["kdf"]["iterations"] = 1_000.into()), Some(VaultError::InvalidBootstrap)));
+        // Fewer passes than 2.2.9 used would weaken the file: refused.
+        assert!(matches!(edit(&|file| file["kdf"]["iterations"] = 1.into()), Some(VaultError::InvalidBootstrap)));
+        assert!(matches!(edit(&|file| file["kdf"]["parallelism"] = 8.into()), Some(VaultError::InvalidBootstrap)));
+        assert!(matches!(edit(&|file| { file.as_object_mut().unwrap().remove("kdf"); }), Some(VaultError::InvalidBootstrap)));
+        assert!(matches!(edit(&|file| file["formatVersion"] = 3.into()), Some(VaultError::UnsupportedBootstrap(3))));
+        fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+        drop(store.unlock("synthetic-test-password").unwrap());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Real Argon2id runs on this machine: the timed setting must take about the target time.
+    #[test]
+    fn calibration_on_this_machine_meets_the_target() {
+        let target = std::time::Duration::from_millis(400);
+        let params = KdfParams::calibrated_within(target).unwrap();
+        assert!(params.valid(), "{params:?}");
+        let salt = [7u8; 16];
+        let started = std::time::Instant::now();
+        derive("synthetic-test-password", &salt, params).unwrap();
+        let took = started.elapsed();
+        eprintln!("calibrated {params:?}: one derivation took {took:?} for a {target:?} target");
+        if params.iterations > KdfParams::LEGACY.iterations && params.iterations < KDF_MAX_ITERATIONS {
+            // A debug build and a busy test machine are noisy: allow a wide band around the target.
+            assert!(took > target / 3 && took < target * 3, "{took:?} for {target:?}");
+        }
+    }
+
+    #[test]
+    fn passes_fill_about_one_second_within_the_limits() {
+        // 44 ms per 64 MiB pass (measured on a desktop PC): about 23 passes for one second.
+        assert_eq!(iterations_for(0.044, 1.0), 23);
+        // A slow phone-class device keeps the 2.2.9 minimum, never less.
+        assert_eq!(iterations_for(0.6, 1.0), 3);
+        // A very fast device, or a timer that reports 0, stops at the maximum.
+        assert_eq!(iterations_for(0.001, 1.0), KDF_MAX_ITERATIONS);
+        assert_eq!(iterations_for(0.0, 1.0), KDF_MAX_ITERATIONS);
+        // The legacy unlock measures 3 passes; the result is per pass.
+        let params = KdfParams { iterations: iterations_for(0.264 / 3.0, 1.0), ..KdfParams::LEGACY };
+        assert_eq!(params.iterations, 11);
+        assert!(params.valid());
+    }
 
     #[test]
     fn encrypted_vault_reopens_and_rejects_wrong_password() {

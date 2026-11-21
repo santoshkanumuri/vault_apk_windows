@@ -12,6 +12,9 @@ mod browser;
 mod browser_ipc;
 #[path = "../dpapi.rs"]
 mod dpapi;
+#[path = "../store_launch.rs"]
+#[allow(dead_code)]
+mod store_launch;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use browser::{BROWSER_PROTOCOL_VERSION, BrowserRequest, BrowserResponse, ItemKind, PendingDetails, PendingLogin};
@@ -37,6 +40,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("native host caller is not an extension origin".into());
     }
 
+    // The browser that started this host, from the parent process chain. Looked up once: a host
+    // lives as long as its browser.
+    let browser = browser_ipc::calling_browser();
+
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = stdin.lock();
@@ -46,13 +53,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let parsed = from_slice::<BrowserRequest>(&message);
         message.zeroize();
         let response = match parsed {
-            Ok(request) => handle(request),
+            Ok(request) => handle(with_host_browser(request, &browser)),
             Err(_) => BrowserResponse::invalid(String::new(), "Malformed JSON request."),
         };
         write_message(&mut writer, &serde_json::to_vec(&response)?)?;
     }
 
     Ok(())
+}
+
+/// Only this host knows the browser. Whatever the extension sent is replaced, or removed when
+/// the host found no browser.
+fn with_host_browser(mut request: BrowserRequest, browser: &Option<String>) -> BrowserRequest {
+    request.browser = browser.clone();
+    request
 }
 
 fn handle(request: BrowserRequest) -> BrowserResponse {
@@ -125,7 +139,7 @@ fn unlock_prompt(request: BrowserRequest) -> BrowserResponse {
                 credentials: None,
                 credential: None,
                 sealed_login: None,
-                features: None, appearance: None, item: None,
+                features: None, appearance: None, item: None, icon_wanted: false,
             },
             Err(_) => BrowserResponse::unavailable(request_id),
         },
@@ -140,14 +154,20 @@ fn launch_app() -> io::Result<()> {
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 
-    let app = browser_ipc::installed_app_image()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Nuvori is not installed"))?;
     // The browser's message pipes must not stay open in the app after this host exits.
     for handle in [io::stdin().as_raw_handle(), io::stdout().as_raw_handle(), io::stderr().as_raw_handle()] {
         unsafe {
             let _ = SetHandleInformation(HANDLE(handle), HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0));
         }
     }
+    // The Store build starts by its app ID: the package's nuvori.exe run directly would have no
+    // package identity. A host copied out of the package (for Firefox) always takes this path
+    // when the Store build is the one in use.
+    if let Some(store) = store_launch::installed_store_build() {
+        return store_launch::activate(&store, "--background");
+    }
+    let app = browser_ipc::installed_app_image()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Nuvori is not installed"))?;
     let spawn = |flags: u32| {
         let mut command = Command::new(&app);
         command
@@ -181,10 +201,21 @@ fn validate(request: &BrowserRequest) -> Result<(), &'static str> {
     } else if browser::canonical_https_origin(&request.origin).is_none() && !(status && request.origin.is_empty()) {
         return Err("Only HTTPS site origins are allowed.");
     }
+    // "startup_browsers": `startup` belongs to "unlock_prompt" only. `browser` is set by the host
+    // itself, so it is always well formed; check it anyway.
+    if (request.startup.is_some() && !unlock)
+        || request.browser.as_deref().is_some_and(|browser| !browser_ipc::valid_browser_id(browser))
+    {
+        return Err("The browser request is incomplete.");
+    }
     // "login_title": a name only accompanies a captured login, its commit, or a details commit.
     if let Some(title) = &request.title
         && (!matches!(request.action, Action::SealLogin | Action::CommitLogin | Action::CommitDetails) || !browser::valid_login_title(title))
     {
+        return Err("The browser request is incomplete.");
+    }
+    // An icon belongs to "save_site_icon" only, and that action needs one.
+    if request.icon.is_some() != matches!(request.action, Action::SaveSiteIcon) {
         return Err("The browser request is incomplete.");
     }
     // Item kinds, "all" and captured fields belong to their own actions only.
@@ -256,6 +287,11 @@ fn validate(request: &BrowserRequest) -> Result<(), &'static str> {
                 && request.selection_token.as_ref().is_some_and(|token| token.len() == 64)
                 && sealed_ok(&request.sealed_login)
         }
+        // Base64 of at most 32 KB. The app decodes and checks the PNG itself.
+        Action::SaveSiteIcon => {
+            request.credential_id.is_none() && request.selection_token.is_none() && no_secrets(request)
+                && request.icon.as_ref().is_some_and(|icon| !icon.is_empty() && icon.len() <= 43_692)
+        }
         // Only a second app launch sends these, never the extension.
         Action::ShowApp | Action::HandOver => false,
     };
@@ -286,7 +322,7 @@ fn seal_login(mut request: BrowserRequest) -> Result<BrowserResponse, Box<dyn st
         message: String::new(),
         credentials: None,
         credential: None,
-        sealed_login: Some(sealed), features: None, appearance: None, item: None,
+        sealed_login: Some(sealed), features: None, appearance: None, item: None, icon_wanted: false,
     })
 }
 
@@ -311,7 +347,7 @@ fn seal_details(mut request: BrowserRequest) -> Result<BrowserResponse, Box<dyn 
         message: String::new(),
         credentials: None,
         credential: None,
-        sealed_login: Some(sealed), features: None, appearance: None, item: None,
+        sealed_login: Some(sealed), features: None, appearance: None, item: None, icon_wanted: false,
     })
 }
 
@@ -467,6 +503,17 @@ mod tests {
     }
 
     #[test]
+    fn site_icons_pass_only_on_their_own_action() {
+        let ok = |json: &str| validate(&parse(json)).is_ok();
+        assert!(ok(r#"{"version":2,"requestId":"r","action":"save_site_icon","origin":"https://a.example","icon":"AAAA"}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"save_site_icon","origin":"https://a.example"}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"save_site_icon","origin":"http://a.example","icon":"AAAA"}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"save_site_icon","origin":"https://a.example","icon":"AAAA","username":"u"}"#));
+        assert!(!ok(&format!(r#"{{"version":2,"requestId":"r","action":"save_site_icon","origin":"https://a.example","icon":"{}"}}"#, "A".repeat(43_693))));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_credentials","origin":"https://a.example","icon":"AAAA"}"#));
+    }
+
+    #[test]
     fn status_may_omit_the_origin_but_other_actions_may_not() {
         assert!(validate(&parse(r#"{"version":2,"requestId":"r","action":"status","origin":""}"#)).is_ok());
         assert!(validate(&parse(r#"{"version":2,"requestId":"r","action":"status","origin":"https://status.nuvori.invalid"}"#)).is_ok());
@@ -480,6 +527,19 @@ mod tests {
         assert!(validate(&parse(r#"{"version":2,"requestId":"r","action":"unlock_prompt","origin":"https://a.example"}"#)).is_err());
         assert!(validate(&parse(r#"{"version":2,"requestId":"r","action":"unlock_prompt","origin":"","username":"u"}"#)).is_err());
         assert!(validate(&parse(r#"{"version":2,"requestId":"r","action":"show_app","origin":""}"#)).is_err());
+    }
+
+    #[test]
+    fn startup_belongs_to_unlock_prompt_and_the_browser_is_the_hosts() {
+        let ok = |json: &str| validate(&parse(json)).is_ok();
+        assert!(ok(r#"{"version":2,"requestId":"r","action":"unlock_prompt","origin":"","startup":true}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"status","origin":"","startup":true}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_credentials","origin":"https://a.example","startup":false}"#));
+        assert!(ok(r#"{"version":2,"requestId":"r","action":"query_credentials","origin":"https://a.example","browser":"zen"}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_credentials","origin":"https://a.example","browser":"Zen Browser!"}"#));
+        let sent = || parse(r#"{"version":2,"requestId":"r","action":"status","origin":"","browser":"evil"}"#);
+        assert_eq!(with_host_browser(sent(), &Some("zen".into())).browser.as_deref(), Some("zen"));
+        assert_eq!(with_host_browser(sent(), &None).browser, None);
     }
 
     #[test]

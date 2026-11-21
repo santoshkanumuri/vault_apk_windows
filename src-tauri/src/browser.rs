@@ -6,9 +6,10 @@ pub const BROWSER_PROTOCOL_VERSION: u16 = 2;
 /// Optional protocol additions this host and app understand. `status` responses list them in
 /// `features`; an extension sends the matching new fields only when the feature is listed,
 /// because requests use `deny_unknown_fields` and older builds reject unknown fields.
-pub const BROWSER_FEATURES: [&str; 12] = [
+pub const BROWSER_FEATURES: [&str; 13] = [
     "status_no_origin", "login_title", "password_only", "multi_update", "unlock_prompt",
     "cards", "profiles", "codes", "save_details", "login_edit", "related_logins", "all_logins",
+    "startup_browsers",
 ];
 
 /// Longest login title accepted from the extension, in characters.
@@ -51,6 +52,18 @@ pub struct BrowserRequest {
     /// "save_details": an address or contact profile captured from a submitted form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<ProfileDetails>,
+    /// `save_site_icon` only: the page's icon as base64 (standard alphabet, no `data:` prefix) of a
+    /// 16 to 64 pixel PNG, at most 32 KB decoded. The app checks it again (site_icons.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// "startup_browsers": `unlock_prompt` only. True when the browser just started, so the app
+    /// skips the prompt when the user turned "ask when the browser starts" off for that browser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup: Option<bool>,
+    /// Which browser started the native host (a lower case exe name such as "chrome" or "zen").
+    /// Only the host sets it, from the parent process; it replaces anything the extension sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -88,6 +101,9 @@ pub enum BrowserAction {
     /// that it can run instead. Never sent by the extension; the native host rejects it, and
     /// the app accepts it only from a process of the recorded Store package.
     HandOver,
+    /// Keep the page's icon on this PC. Only for a site that has a login or passkey, and only
+    /// after `query_credentials` answered `iconWanted`. Never shows a window.
+    SaveSiteIcon,
 }
 
 impl BrowserAction {
@@ -293,6 +309,10 @@ pub struct BrowserResponse {
     /// `fill_item` and `fill_cvv`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<FilledItem>,
+    /// `query_credentials`: the app wants this page's icon (`save_site_icon`). Omitted when false,
+    /// so an older app never sends it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub icon_wanted: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -311,7 +331,7 @@ impl BrowserResponse {
             credentials: None,
             credential: None,
             sealed_login: None,
-            features: None, appearance: None, item: None,
+            features: None, appearance: None, item: None, icon_wanted: false,
         }
     }
 
@@ -330,7 +350,7 @@ impl BrowserResponse {
             credentials: None,
             credential: None,
             sealed_login: None,
-            features: None, appearance: None, item: None,
+            features: None, appearance: None, item: None, icon_wanted: false,
         }
     }
 }
@@ -529,7 +549,7 @@ fn valid_host(host: &str) -> bool {
 
 /// The registrable domain of an HTTPS origin ("https://login.example.co.uk" -> "example.co.uk"),
 /// or `None` for an IP address or a host that is itself a public suffix.
-fn registrable_site(origin: &str) -> Option<String> {
+pub(crate) fn registrable_site(origin: &str) -> Option<String> {
     let parsed = url::Url::parse(origin).ok()?;
     let host = match parsed.host()? {
         url::Host::Domain(domain) => domain.to_ascii_lowercase(),
@@ -813,7 +833,7 @@ mod protocol_addition_tests {
         let response = BrowserResponse::unavailable("r".into()).with_features();
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["features"], serde_json::json!(["status_no_origin", "login_title", "password_only", "multi_update", "unlock_prompt",
-            "cards", "profiles", "codes", "save_details", "login_edit", "related_logins", "all_logins"]));
+            "cards", "profiles", "codes", "save_details", "login_edit", "related_logins", "all_logins", "startup_browsers"]));
         assert!(serde_json::to_value(BrowserResponse::unavailable("r".into())).unwrap().get("features").is_none());
     }
 

@@ -178,12 +178,18 @@ The screenshots come from `npm run dev`, which uses the development stand-in bac
 
 ### Submission options
 
-**Restricted capabilities**. The package declares two. Paste this text into the justification box:
+**Restricted capabilities**. The package declares two, and Partner Center shows one box for each.
+
+"Why do you need the runFullTrust capability":
 
 ```text
-runFullTrust: Nuvori is a Win32 desktop app (Tauri with WebView2). Its package contains three full-trust executables: the app, a passkey provider COM server that Windows activates through webauthn.dll, and a browser native messaging host that the Nuvori extension for Chrome, Edge and Brave starts through an app execution alias.
+Nuvori is a Win32 desktop app (Tauri with WebView2). Its package contains three full-trust executables: the app, a passkey provider COM server that Windows activates through webauthn.dll, and a browser native messaging host that the Nuvori extension for Chrome, Edge, Brave, Firefox and their forks starts. Chromium browsers start it through an app execution alias. Firefox-based browsers reject an alias, so the app also copies the host to `%LOCALAPPDATA%\Nuvori\BrowserHost`.
+```
 
-unvirtualizedResources: Nuvori keeps its encrypted vault in %APPDATA%\com.nuvori.desktop and registers its native messaging host in HKCU for the browsers. File system and registry write virtualization are off, so that the vault is not deleted when the user uninstalls or reinstalls the app, and so that the vault stays shared with the existing installer (EXE/MSI) version of Nuvori on the same PC. A password vault that is deleted together with the app would cause data loss.
+"Why do you need the unvirtualizedResources capability". The box takes at most 500 characters; this text has 492. Certification denied a shorter text on 2026-11-19 (policy 10.6.3) and asked five questions. This box answers the keys, the Windows 11 and Windows 10 settings and HKLM. The notes for certification answer the rest. The long form is in [Full unvirtualizedResources answers](#full-unvirtualizedresources-answers).
+
+```text
+On Windows 11, Flexible Virtualization excludes only 7 paths. 5 HKCU keys: Software\Google\Chrome, \Microsoft\Edge, \BraveSoftware\Brave-Browser, \Chromium, \Mozilla, each + \NativeMessagingHosts\com.nuvori.desktop (default REG_SZ = manifest path). 2 folders: %APPDATA%\com.nuvori.desktop (encrypted vault; must survive uninstall) and %LOCALAPPDATA%\Nuvori\BrowserHost (manifests, host copy). Windows 10 lacks this, so desktop6 is disabled; same 7 paths. No HKLM. See Notes for certification.
 ```
 
 **Notes for certification**:
@@ -196,6 +202,50 @@ Passkeys in Windows (Windows 11 with the latest updates): open Settings > Securi
 Device sync needs the Nuvori Android app on the same Wi-Fi network, and Google Drive sync needs a Google account. Both are optional; the app works fully without them.
 
 Closing the window keeps Nuvori in the notification area so the browser extension can fill logins. Quit from the tray icon.
+
+unvirtualizedResources details:
+- Why not narrower: Chrome, Edge, Brave, Chromium forks and Firefox find native messaging hosts only in HKCU/HKLM keys; a key in the package hive is invisible to them. A vault in the package's AppData is deleted on uninstall or reinstall, so all passwords would be lost. The installer (EXE/MSI) build uses the same vault folder.
+- No HKLM writes, no service, no driver. Nothing else is written outside the package. WebView2 data stays virtualized.
+- Safeguards: at start the app checks that the vault folder is not redirected into the package, and exits without touching the vault if it is. Only one Nuvori runs per session. Vault creation refuses to run if a vault exists. The app never deletes the vault folder.
+- Uninstall: MSIX runs no code; the vault, 5 keys, 2 manifests and the host copy stay. The Chromium manifest points to the removed execution alias, so those browsers start nothing. Firefox needs a plain file, so its manifest points to the host copy; with Nuvori gone, the copy finds no app, answers "unavailable" and exits. Reinstall: the app rewrites only values that differ.
+```
+
+### Full unvirtualizedResources answers
+
+The long form of the answers, for a reconsideration request or a Microsoft representative. The Partner Center boxes are too short for it.
+
+```text
+Nuvori is a password manager. It needs two things outside the package: browsers must read its native messaging registration, and the encrypted vault must not be deleted when the app is uninstalled or reinstalled.
+
+1. Exact HKCU keys. Nuvori writes one value in each key: the default value (REG_SZ), set to the full path of its host manifest. It writes no other values.
+- HKCU\Software\Google\Chrome\NativeMessagingHosts\com.nuvori.desktop = %LOCALAPPDATA%\Nuvori\BrowserHost\com.nuvori.desktop.json
+- HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.nuvori.desktop = same file
+- HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.nuvori.desktop = same file
+- HKCU\Software\Chromium\NativeMessagingHosts\com.nuvori.desktop = same file (Chromium forks such as Vivaldi or Opera read Chrome's key or this one)
+- HKCU\Software\Mozilla\NativeMessagingHosts\com.nuvori.desktop = %LOCALAPPDATA%\Nuvori\BrowserHost\com.nuvori.desktop.firefox.json
+Nuvori writes a key only for a browser it detects (Windows StartMenuInternet entries or the browser's profile folder) that the user kept connected in Settings. It deletes a key only when the value names Nuvori's own manifest.
+
+2. Windows 11 Flexible Virtualization: yes. The manifest declares virtualization:ExcludedKeys with exactly the five keys above, and virtualization:ExcludedDirectories with exactly two folders:
+- $(KnownFolder:RoamingAppData)\com.nuvori.desktop: the encrypted vault (SQLCipher database, device identity, sync state, logs).
+- $(KnownFolder:LocalAppData)\Nuvori\BrowserHost: the two host manifest JSON files that the browsers read, and a copy of nuvori-native-host.exe. The Chromium manifest names the package's app execution alias. The Firefox manifest names the copy, because Firefox rejects an alias (it is a reparse point). Both manifests name only Nuvori's own extension IDs. The copy is replaced only when the package's host differs.
+All other AppData and HKCU writes stay virtualized on Windows 11. For example, the WebView2 data in %LOCALAPPDATA%\com.nuvori.desktop stays in the package.
+Windows 10 (build 19041 and later) does not support Flexible Virtualization. There, the manifest's desktop6:FileSystemWriteVirtualization and desktop6:RegistryWriteVirtualization are set to disabled. Windows 11 ignores these when it reads the virtualization lists. On Windows 10 the app writes the same seven locations and nothing else.
+
+3. No HKLM writes. The app has no code that opens HKLM for writing, and it has no installer, service or driver. Apart from the six locations above, it writes no files or registry values outside the package.
+
+4. Why narrower options do not work:
+- Chrome, Edge, Brave and Firefox on Windows find native messaging hosts only through these HKCU (or HKLM) keys. A key in the package's private hive is invisible to them, and MSIX has no manifest extension for native messaging.
+- A vault in the package's private AppData is deleted when the user uninstalls the app. This includes an uninstall followed by a reinstall to fix a problem. For a password manager, that means permanent loss of all passwords, passkeys and authenticator codes.
+- The same vault folder is used by Nuvori's installer (EXE/MSI) build. A user who moves between the Store and installer builds keeps one vault, not two copies with split sync history.
+
+5. Safeguards for vault data:
+- At each start, the app writes a marker file in the vault folder and checks that it was not redirected into the package. If it was, the app shows an error and exits without opening or changing the vault.
+- Only one copy of Nuvori runs per Windows session. If the installer build is running, the Store build asks it to close before it opens the vault.
+- The app never deletes or replaces the vault folder at install, update, start or uninstall. Vault creation refuses to run when a vault database already exists, so an existing vault is never overwritten by a new empty one. The vault is encrypted with the user's master password.
+- Uninstall: MSIX runs no uninstall code, so the vault, the five keys, the two small manifest files and the host copy stay. The Chromium manifest names the package's execution alias, which Windows removes, so those browsers cannot start anything. The copy for Firefox-based browsers still starts, finds no Nuvori, and exits; the extension shows "Nuvori for Windows isn't running or isn't reachable." No other program is affected.
+- Reinstall: Windows restores the same alias path. At each start the app compares the manifests, the host copy and the five key values with the expected values and rewrites only those that differ. If the user returns to the installer build, that build points the same keys at its own host at its next start.
+
+The Windows passkey provider is registered through the Windows WebAuthn plug-in API and the package's COM server declaration. Windows stores that registration; the app writes no registry values for it.
 ```
 
 ## After you submit

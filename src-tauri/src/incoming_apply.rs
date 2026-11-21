@@ -812,6 +812,8 @@ fn materialize(
                         params![operation.entity_id, serde_json::to_string(entry)?],
                     )?;
                 } else {
+                    // This PC keeps the password that a paired device replaced (local_recovery.rs).
+                    crate::local_recovery::note_entry_write(transaction, &operation.entity_id, entry, local_now())?;
                     transaction.execute(
                     "INSERT INTO local_entries (id, type, data_json, updated_at)
                      VALUES (?1, ?2, ?3, ?4)
@@ -899,6 +901,8 @@ fn materialize(
                     [&operation.entity_id],
                 )?;
             } else {
+                // A paired device deleted it: this PC keeps a copy in Recently deleted.
+                crate::local_recovery::keep_deleted(transaction, &operation.entity_id, local_now(), true)?;
                 transaction.execute(
                     "DELETE FROM local_entries WHERE id = ?1",
                     [&operation.entity_id],
@@ -955,6 +959,11 @@ fn materialize(
         }
     }
     Ok(())
+}
+
+/// This PC's clock, for the local history and trash only (never part of a signed change).
+fn local_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_millis() as i64)
 }
 
 fn to_i64(value: u64) -> Result<i64, ApplyError> {
@@ -1060,6 +1069,7 @@ mod tests {
                  );",
             )
             .unwrap();
+        crate::local_recovery::initialize(&connection).unwrap();
         connection
     }
 
@@ -1488,6 +1498,47 @@ mod tests {
             ApplyOutcome::Replay
         );
         assert_eq!(applied_count(&connection), 1);
+    }
+
+    /// A paired device changes a login's password, then deletes the login. This PC keeps the old
+    /// password and a copy of the login (local_recovery.rs); the signed changes are unchanged.
+    #[test]
+    fn a_remote_password_change_and_delete_are_kept_on_this_pc() {
+        let mut connection = connection();
+        let signer = SigningKey::from_bytes(&[17; 32]);
+        let first = operation(&signer, "device-b", 1, GENESIS_HASH, "mutation-1",
+            RecordVersion::from_entries([("device-b", 1)]), ChangeKind::Upsert,
+            json!({"entry": entry("entry-a", "Remote login"), "groupIds": []}), 0);
+        insert_persisted(&connection, &first);
+        IncomingApply::apply(&mut connection, &first, &CONTENT_KEY).unwrap();
+        assert!(crate::local_recovery::previous_passwords(&connection, "entry-a").unwrap().is_empty());
+
+        let mut changed = entry("entry-a", "Remote login");
+        changed["secondaryValue"] = json!("new secret");
+        changed["updatedAt"] = json!(300);
+        let second = operation(&signer, "device-b", 2, &first.hash, "mutation-2",
+            RecordVersion::from_entries([("device-b", 2)]), ChangeKind::Upsert,
+            json!({"entry": changed, "groupIds": []}), 1);
+        insert_persisted(&connection, &second);
+        IncomingApply::apply(&mut connection, &second, &CONTENT_KEY).unwrap();
+        let history = crate::local_recovery::previous_passwords(&connection, "entry-a").unwrap();
+        assert_eq!(history.iter().map(|old| old.password.as_str()).collect::<Vec<_>>(), ["secret"]);
+
+        let deletion = operation(&signer, "device-b", 3, &second.hash, "mutation-3",
+            RecordVersion::from_entries([("device-b", 3)]), ChangeKind::Delete, json!({"deleted": true}), 2);
+        insert_persisted(&connection, &deletion);
+        assert_eq!(IncomingApply::apply(&mut connection, &deletion, &CONTENT_KEY).unwrap(), ApplyOutcome::Applied);
+        let trash = crate::local_recovery::trashed_items(&connection).unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!((trash[0].title.as_str(), trash[0].item_type.as_str(), trash[0].deleted_elsewhere), ("Remote login", "PASSWORD", true));
+        let (item_id, kind, data, _) = crate::local_recovery::trashed(&connection, &trash[0].id).unwrap().unwrap();
+        assert_eq!((item_id.as_str(), kind.as_str(), data["secondaryValue"].as_str()), ("entry-a", "entry", Some("new secret")));
+        // The previous password stays with the trashed copy until it is restored or purged.
+        assert_eq!(crate::local_recovery::previous_passwords(&connection, "entry-a").unwrap().len(), 1);
+        // The tombstone is applied as before.
+        let tombstones: i64 = connection
+            .query_row("SELECT COUNT(*) FROM sync_tombstones WHERE entity_id = 'entry-a'", [], |row| row.get(0)).unwrap();
+        assert_eq!(tombstones, 1);
     }
 
     #[test]
