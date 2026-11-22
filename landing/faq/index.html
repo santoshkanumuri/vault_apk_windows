@@ -249,7 +249,10 @@
                   <li>Wait while the vault copies. Then tap <strong>Done</strong>.</li>
                 </ol>
                 <p>The new device needs an empty vault. A device that already has items can't join this way.</p>
-                <!-- screenshot: android-sync-devices -->
+                <figure>
+                  <img src="../assets/faq/android-sync-devices.webp" alt="The Devices &amp; sync screen on Android: a sync status card with a Sync now button, and the devices in this vault with their status." width="540" height="1200" loading="lazy">
+                  <figcaption>Settings &gt; Devices &amp; sync on the phone. Sample devices.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -269,7 +272,10 @@
                 <!-- verify: may change if duplicate fix ships (snapshot_import.rs migrate_inventory re-issues every local item under a new ID; proposal P2 in sync-lifecycle-report.md). -->
                 <p>The first pairing always needs both devices on the same network, for example the same Wi-Fi or a phone hotspot.</p>
                 <p class="note">If the PC can't reach the phone, choose <strong>Show QR to phone</strong> on the PC. Then, on the phone, tap <strong>Scan Windows QR if the PC cannot reach this phone</strong>.</p>
-                <!-- screenshot: windows-sync-devices -->
+                <figure>
+                  <img src="../assets/faq/windows-sync-devices.webp" alt="The Devices &amp; sync page in Nuvori for Windows: the devices in the group, with the phone marked as the managing device, and the connection settings." width="1200" height="750" loading="lazy">
+                  <figcaption>Devices &amp; sync on the PC after pairing. Sample devices.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -295,6 +301,10 @@
                   <li>When the browser says <strong>Google Drive is connected</strong>, close the tab and go back to Nuvori.</li>
                 </ol>
                 <p>Nuvori gets access only to its own hidden folder in your Drive. It can't see or change your other files.</p>
+                <figure>
+                  <img src="../assets/faq/windows-drive-sync.webp" alt="The Google Drive card in Nuvori for Windows: connected, the last Drive sync, what is stored in Drive (encrypted changes only), and how often to check." width="1200" height="750" loading="lazy">
+                  <figcaption>The Google Drive card on the PC, once connected.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -489,6 +499,10 @@
                 <p>For the strongest protection, start a new group, which gets new keys. See <a href="#start-new-sync-group">How do I leave a sync group or start a new one?</a> If you lost the managing phone, you can't remove it. See <a href="#lost-one-of-three">I have three devices and lost one</a>.</p>
                 <p class="note">Removal can't erase what is already on the lost device. That copy stays encrypted, and the vault locks when the screen turns off. If you think someone knows your master password, change the passwords of your most important accounts.</p>
                 <!-- verify: recheck when key rotation ships (card_app_windows/docs/KEY-ROTATION.md is "design, not implemented"; sync-lifecycle-report.md section 1). -->
+                <figure>
+                  <img src="../assets/faq/android-remove-device.webp" alt="The confirmation to remove a device on Android. It says the device doesn't need to approve, and that removal doesn't change the vault's encryption keys." width="540" height="1200" loading="lazy">
+                  <figcaption>Removing a device from the managing phone.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -533,7 +547,10 @@
                   <li>Enter your master password and choose where to save the <strong>.pvault</strong> file.</li>
                 </ol>
                 <p>Both kinds include your items, photos and passkeys, and open only with your master password. Nuvori for Windows has no backup feature. It gets your vault by pairing with your phone.</p>
-                <!-- screenshot: android-backup -->
+                <figure>
+                  <img src="../assets/faq/android-backup-export.webp" alt="The Backup and import screen on Android: Turn on Google Drive backup, Export encrypted backup, Restore encrypted backup, and Find backups in Google Drive." width="540" height="1200" loading="lazy">
+                  <figcaption>Settings &gt; Backup and import.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -624,6 +641,10 @@
                   <li><strong>Keyboard suggestions</strong>: after you unlock, your logins appear in the keyboard. Tap the field again if the keyboard closed. <strong>Choose another login</strong> opens the account picker.</li>
                 </ul>
                 <p>Codes and new passwords always use the picker. Keyboards without inline suggestions show Android's suggestion menu instead.</p>
+                <figure>
+                  <img src="../assets/faq/android-autofill.webp" alt="The Autofill and codes screen on Android, with How logins appear set to Account picker. Keyboard suggestions is the other choice." width="540" height="1200" loading="lazy">
+                  <figcaption>Settings &gt; Autofill and codes &gt; How logins appear.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -637,6 +658,10 @@
                   <li>Choose <strong>Passwords</strong>, <strong>TOTP</strong>, <strong>Cards</strong> or <strong>Questions</strong>. Tap a field to copy it.</li>
                 </ol>
                 <p>The other fields of that item stay in your notifications for 2 minutes, so you can paste them one by one.</p>
+                <figure>
+                  <img src="../assets/faq/android-quick-copy.webp" alt="The Quick copy sheet on Android with the TOTP tab open: three sample accounts, each with a hidden code, a timer, Show and a copy button." width="540" height="1200" loading="lazy">
+                  <figcaption>Quick copy, opened from the Quick Settings tile. Sample accounts.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -650,6 +675,10 @@
                   <li>Open a sign-in page. Pick your login under the field, or click the Nuvori icon in the browser toolbar.</li>
                 </ol>
                 <p>When you sign in with a new login, Nuvori offers to save it. Logins you save on the PC sync to your phone.</p>
+                <figure>
+                  <img src="../assets/faq/windows-browser-extension.webp" alt="Settings &gt; Browser extension in Nuvori for Windows: the connection status, and a list of browsers found on the PC, each with an on or off switch. An unknown browser has a Built on choice." width="1200" height="750" loading="lazy">
+                  <figcaption>Settings &gt; Browser extension on the PC. Turn on each browser you use.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -663,6 +692,10 @@
                   <li><strong>Passkey requests</strong>: the recent apps and websites that asked Nuvori, and why Nuvori was not offered, if it wasn't.</li>
                 </ul>
                 <p>A passkey's private key is never shown. It stays encrypted in your vault.</p>
+                <figure>
+                  <img src="../assets/faq/android-passkeys.webp" alt="The Passkeys screen on Android: set up passkeys, import from another manager, saved passkeys, and passkey history." width="540" height="1200" loading="lazy">
+                  <figcaption>Settings &gt; Passkeys on the phone.</figcaption>
+                </figure>
               </div>
             </details>
 
@@ -715,7 +748,8 @@
             <details class="qa" id="site-changed-its-logo">
               <summary><span class="qa__q">A website changed its logo. When does Nuvori update it?</span><span class="faq__plus" aria-hidden="true"></span></summary>
               <div class="faq__body">
-                <p>Your PC asks the browser for a saved site's icon again after 30 days. The next time you use that site, the extension sends the new icon, and sync passes it on. The newest icon wins on every device.</p>
+                <p>Your PC asks the browser for a saved site's icon again after 30 days, the next time you use that site. If the logo really changed, the PC shares the new icon, and sync passes it on to your other devices. So a new logo can take up to a month to show.</p>
+                <p>Small differences in how two browsers draw the same logo don't count as a change, so your devices don't swap icons back and forth.</p>
                 <p>Built-in logos change only with an app update.</p>
                 <p>To refresh all icons now, select <strong>Remove saved icons</strong> under <strong>Settings &gt; Website icons</strong> on the PC. Each site gets its icon again the next time you use it.</p>
                 <!-- verify: after "Remove saved icons", the phone keeps the icons it already received until a new icon for that site arrives (sync only sends new icons, never removals). -->
@@ -734,6 +768,8 @@
               <summary><span class="qa__q">Does sync history keep growing forever?</span><span class="faq__plus" aria-hidden="true"></span></summary>
               <div class="faq__body">
                 <p>Partly, yes. To sync safely, each device keeps a signed record of the changes in your vault. Nuvori doesn't clean up old records yet, so this record grows a little with each change.</p>
+                <p>It stays small: one change takes about 2 KB. With 20 edits a day, that is about 15 MB a year on each device, and about the same in Google Drive if you use Drive sync. You won't notice it in your storage.</p>
+                <p class="note note--warn">One limit matters today. A new device receives the whole record when it joins, and that transfer has a size limit. After about a year of heavy use, pairing a new device can stop with <strong>Sync history is too large for enrollment</strong>. Your existing devices keep syncing normally. If you see this message, contact us. A fix that sends only your current items is planned.</p>
                 <p>Other lists have limits:</p>
                 <ul>
                   <li><strong>Recently deleted:</strong> 30 days.</li>
@@ -743,7 +779,7 @@
                   <li>Website icons saved on the PC: at most 2,000.</li>
                 </ul>
                 <p>Google Drive sync files also stay in your Drive. See <a href="#google-drive-space">How much Google Drive space does Nuvori use?</a></p>
-                <!-- verify: growth of the signed change history (sync_operations) and Drive files; no compaction found in card_app sync/ or src-tauri change_store.rs / cloud_sync.rs ("Verified checkpoints and cleanup: Pending" in PERSONAL-DEVICE-SYNC.md). Being investigated separately. -->
+                <!-- verify: numbers from growth-icons-report.md (1,798 B per login change; 16 MiB enrollment snapshot limit in SyncSnapshot.kt:237 and snapshot.rs:28, about 9,300 changes). Update when compaction or checkpoint enrollment ships (proposal P1). -->
               </div>
             </details>
 
