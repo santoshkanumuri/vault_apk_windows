@@ -161,25 +161,12 @@
       <header class="section__head reveal">
         <p class="eyebrow">Switch freely</p>
         <h2>Your vault lives outside the browser.<br><span class="muted">Change browsers any time.</span></h2>
-        <p class="section__lead">Nuvori for Windows holds your vault. The extension in each browser asks it only for the login you pick. Choose a browser, and watch the same login fill.</p>
+        <p class="section__lead">Nuvori for Windows holds your vault. The extension in each browser asks it only for the login you pick. Watch the same login fill in one browser after another.</p>
       </header>
 
       <div class="switcher">
-        <div class="switcher__chips reveal" role="group" aria-label="Pick a browser to show" id="browserChips">
-          <button class="bchip" type="button" data-browser="zen" aria-pressed="true">Zen</button>
-          <button class="bchip" type="button" data-browser="helium" aria-pressed="false">Helium</button>
-          <button class="bchip" type="button" data-browser="comet" aria-pressed="false">Comet</button>
-          <button class="bchip" type="button" data-browser="arc" aria-pressed="false">Arc</button>
-          <button class="bchip" type="button" data-browser="brave" aria-pressed="false">Brave</button>
-          <button class="bchip" type="button" data-browser="vivaldi" aria-pressed="false">Vivaldi</button>
-          <button class="bchip" type="button" data-browser="firefox" aria-pressed="false">Firefox</button>
-          <button class="bchip" type="button" data-browser="chrome" aria-pressed="false">Chrome</button>
-          <button class="bchip" type="button" data-browser="edge" aria-pressed="false">Edge</button>
-          <button class="bchip bchip--other" type="button" data-browser="other" aria-pressed="false">Another browser?</button>
-        </div>
-
         <div class="switcher__grid">
-          <div class="switcher__stage reveal reveal--scale" role="img" aria-label="A sign-in form in Zen. The Nuvori list opens under the email field, and the login fills." data-switch-label>
+          <div class="switcher__stage reveal reveal--scale" role="img" aria-label="A sign-in form in one browser after another: Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox, Chrome and Edge. Each time the Nuvori list opens under the email field, and the same login fills.">
             <div class="bw bw--lg is-filled" id="switchBw" data-bw data-layout="side" data-tint="sky">
               <div class="bw__top">
                 <i class="bw__dots"><b></b><b></b><b></b></i>
@@ -201,20 +188,19 @@
                 </div>
               </div>
             </div>
+            <p class="switcher__caption" aria-hidden="true"><span class="bw__mono" data-cap-mono data-tint="sky">Z</span><span>Filled in <b data-cap-name>Zen</b></span><span class="tag tag--green" data-cap-family>Built on Firefox</span></p>
           </div>
 
-          <article class="switcher__info reveal" id="switchInfo">
+          <article class="switcher__info reveal">
             <div class="switcher__name">
-              <span class="bw__mono bw__mono--lg" data-info-mono data-tint="sky" aria-hidden="true">Z</span>
-              <h3 data-info-name>Zen</h3>
-              <span class="tag tag--green" data-info-family>Built on Firefox</span>
+              <h3>Any of them, in three steps</h3>
             </div>
-            <ol class="steps" data-info-steps>
-              <li>Add <strong>Nuvori Password Fill</strong> from Firefox Add-ons. The listing is under review.</li>
-              <li>Nuvori for Windows finds Zen and connects it. Restart Zen once.</li>
-              <li>Unlock Nuvori. Logins, cards, addresses and codes fill on HTTPS pages.</li>
+            <ol class="steps">
+              <li>Install <strong>Nuvori for Windows</strong> and unlock your vault.</li>
+              <li>Add <strong>Nuvori Password Fill</strong> to your browser: from the Chrome Web Store for browsers built on Chromium, or from Firefox Add-ons for browsers built on Firefox (that listing is under review).</li>
+              <li>Nuvori finds the browser and connects it. Restart the browser once. Logins, cards, addresses and codes then fill on HTTPS pages.</li>
             </ol>
-            <p class="switcher__note" data-info-note>In Firefox-based browsers, logins and codes show under the field. Cards and addresses fill from the Nuvori button in the toolbar.</p>
+            <p class="switcher__note">Trying a new browser tomorrow? Add the extension there too. Your vault doesn't move.</p>
           </article>
         </div>
 

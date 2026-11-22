@@ -53,7 +53,7 @@ After the first deploy, open the page URL in a private window. Then you can use 
 - **The "Under review", "Closed testing" and "Available" tags** are the `.tag` elements in the same cards (`.tag--amber`, `.tag--violet`, `.tag--green`). The extension card links to the Chrome Web Store item `lpohaakdindhljdhpofnfmggbfllgdil`, with `assets/qr-chrome-web-store.svg`.
 - **QR codes** (`assets/qr-*.svg`) are made from the store URLs. If a URL changes, make the QR code again, and scan it before you publish.
 - **`palette.js`** is generated. Run `python scripts/appearance/generate.py <path to card_app_windows>` in the Android repository, and it rewrites this file together with the app palettes.
-- **Browser names** (hero, marquee, "Pick a browser" chips, `#browsers` lists, FAQ "Switching browsers") must match what Nuvori for Windows recognizes in `src-tauri/src/browsers.rs` (`classify`). The chips' steps and notes are in `BROWSERS` in `script.js`. Name browsers as text only, never with their logos.
+- **Browser names** (hero, marquee, the `#browsers` animation and lists, FAQ "Switching browsers") must match what Nuvori for Windows recognizes in `src-tauri/src/browsers.rs` (`classify`). The animated browsers and their order are `BROWSERS` and `ORDER` in `script.js`. Name browsers as text only, never with their logos.
 - **Screenshots** in `assets/` are WebP copies of `card_app/docs/assets/screenshots` and `store-assets/`, with synthetic sample data only.
 
 ## FAQ page

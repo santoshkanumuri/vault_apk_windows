@@ -494,41 +494,22 @@
     });
   });
 
-  /* ---------- Browser switch: the hero deck and the "Pick a browser" section ----------
+  /* ---------- Browser switch: the hero deck and the "Switch freely" section ----------
      The mock windows are drawn in HTML and CSS: browser names as text, monograms in our own
      colors, no browser logos. The HTML ships in the "filled" state, so the page reads the same
      without JavaScript or with reduced motion; the script only adds the sequence. */
   const BROWSERS = {
     zen: { name: "Zen", mono: "Z", family: "firefox", layout: "side", tint: "sky" },
-    helium: { name: "Helium", mono: "H", family: "chromium", layout: "top", tint: "teal",
-      note: "Helium has no built-in password manager, by design. Nuvori fills that gap. If Chrome is on the same PC, Nuvori lists them together as “Google Chrome and Helium”." },
+    helium: { name: "Helium", mono: "H", family: "chromium", layout: "top", tint: "teal" },
     comet: { name: "Comet", mono: "C", family: "chromium", layout: "top", tint: "violet" },
     arc: { name: "Arc", mono: "A", family: "chromium", layout: "side", tint: "amber" },
     brave: { name: "Brave", mono: "B", family: "chromium", layout: "top", tint: "rose" },
     vivaldi: { name: "Vivaldi", mono: "V", family: "chromium", layout: "top", tint: "plum" },
     firefox: { name: "Firefox", mono: "F", family: "firefox", layout: "top", tint: "indigo" },
     chrome: { name: "Chrome", mono: "C", family: "chromium", layout: "top", tint: "green" },
-    edge: { name: "Edge", mono: "E", family: "chromium", layout: "top", tint: "cyan", note: "In Edge, allow extensions from other stores first." },
-    other: { name: "Another browser", tab: "New browser", mono: "?", family: "either", layout: "top", tint: "slate",
-      note: "This works for most browsers built on Chromium or Firefox. Nuvori lists the browsers installed on your PC." },
+    edge: { name: "Edge", mono: "E", family: "chromium", layout: "top", tint: "cyan" },
   };
-  const FIREFOX_NOTE = "In Firefox-based browsers, logins and codes show under the field. Cards and addresses fill from the Nuvori button in the toolbar.";
-  const UNLOCK_STEP = "Unlock Nuvori. Logins, cards, addresses and codes fill on HTTPS pages.";
-  const FAMILY_LABEL = { chromium: "Built on Chromium", firefox: "Built on Firefox", either: "Chromium or Firefox" };
-
-  function stepsFor(b) {
-    if (b.family === "either") return [
-      "Built on Chromium? Add <strong>Nuvori Password Fill</strong> from the Chrome Web Store. Built on Firefox? Add it from Firefox Add-ons.",
-      "In Nuvori, open <strong>Settings &gt; Browser extension</strong>. Next to the browser, choose <strong>Built on: Chromium</strong> or <strong>Built on: Firefox</strong>, then connect it.",
-      UNLOCK_STEP,
-    ];
-    const store = b.family === "firefox" ? "Firefox Add-ons. The listing is under review" : "the Chrome Web Store";
-    return [
-      `Add <strong>Nuvori Password Fill</strong> from ${store}.`,
-      `Nuvori for Windows finds ${b.name} and connects it. Restart ${b.name} once.`,
-      UNLOCK_STEP,
-    ];
-  }
+  const FAMILY_LABEL = { chromium: "Built on Chromium", firefox: "Built on Firefox" };
 
   function paintWindow(bw, b) {
     bw.dataset.layout = b.layout;
@@ -645,77 +626,52 @@
     reduceMotion.addEventListener?.("change", heroPlay);
   }
 
-  /* "Pick a browser": chips re-draw the window and the steps, and the vault fills again. */
-  const chipGroup = $("#browserChips");
+  /* "Switch freely": the big window runs through the browsers by itself, and the same login fills
+     each time. No controls: the setup steps beside it are the same for every browser. */
   const switchBw = $("#switchBw");
-  const switchInfo = $("#switchInfo");
-  if (chipGroup && switchBw && switchInfo) {
-    const chips = $$(".bchip", chipGroup);
-    const stageBox = $("[data-switch-label]");
-    let current = "zen";
+  const caption = $(".switcher__caption");
+  if (switchBw) {
+    const ORDER = ["zen", "helium", "comet", "arc", "brave", "vivaldi", "firefox", "chrome", "edge"];
+    let index = 0;
     let token = 0;
-    let picked = false;
-    let autoTimer = 0;
     let visible = false;
-
-    function paintInfo(b, id) {
-      const mono = $("[data-info-mono]", switchInfo);
+    const paintCaption = (b) => {
+      if (!caption) return;
+      const mono = $("[data-cap-mono]", caption);
       mono.textContent = b.mono;
       mono.dataset.tint = b.tint;
-      $("[data-info-name]", switchInfo).textContent = b.name;
-      $("[data-info-family]", switchInfo).textContent = FAMILY_LABEL[b.family];
-      $("[data-info-steps]", switchInfo).innerHTML = stepsFor(b).map((s) => `<li>${s}</li>`).join("");
-      const note = $("[data-info-note]", switchInfo);
-      const text = b.note || (b.family === "firefox" ? FIREFOX_NOTE : "");
-      note.textContent = text;
-      note.hidden = !text;
-      const where = id === "other" ? "a new browser" : b.name;
-      stageBox?.setAttribute("aria-label", `A sign-in form in ${where}. The Nuvori list opens under the email field, and the login fills.`);
-    }
-
-    async function show(id) {
-      const b = BROWSERS[id];
-      if (!b) return;
-      current = id;
-      const my = ++token;
-      const alive = () => my === token;
-      chips.forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.browser === id)));
-      if (reduceMotion.matches) {
-        paintWindow(switchBw, b);
-        paintInfo(b, id);
-        resetWindow(switchBw, ["is-swap"]);
-        switchBw.classList.add("is-filled");
-        return;
-      }
-      switchBw.classList.add("is-swap");
-      switchInfo.classList.add("is-swap");
-      await sleep(320); if (!alive()) return;
-      paintWindow(switchBw, b);
-      paintInfo(b, id);
-      resetWindow(switchBw);
-      switchBw.classList.remove("is-swap");
-      switchInfo.classList.remove("is-swap");
-      if (!(await fillSequence(switchBw, alive))) return;
-    }
-
-    const stopAuto = () => { clearInterval(autoTimer); autoTimer = 0; };
-    const startAuto = () => {
-      stopAuto();
-      if (picked || !visible || document.hidden || reduceMotion.matches) return;
-      autoTimer = setInterval(() => {
-        const next = chips[(chips.findIndex((c) => c.dataset.browser === current) + 1) % (chips.length - 1)];
-        show(next.dataset.browser);
-      }, 5200);
+      $("[data-cap-name]", caption).textContent = b.name;
+      $("[data-cap-family]", caption).textContent = FAMILY_LABEL[b.family];
     };
-    chips.forEach((chip) => chip.addEventListener("click", () => {
-      picked = true;
-      stopAuto();
-      // Announce the steps only after a person picks a browser, never during the automatic tour.
-      switchInfo.setAttribute("aria-live", "polite");
-      show(chip.dataset.browser);
-    }));
-    new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; startAuto(); }, { threshold: 0.35 }).observe(switchBw);
-    document.addEventListener("visibilitychange", startAuto);
+    const settle = () => {
+      switchBw.classList.remove("is-swap", "is-menu", "no-tr");
+      switchBw.classList.add("is-filled");
+      caption?.classList.remove("is-swap");
+    };
+    async function tour(my) {
+      const alive = () => my === token;
+      while (alive()) {
+        await sleep(2600); if (!alive()) return;
+        switchBw.classList.add("is-swap");
+        caption?.classList.add("is-swap");
+        await sleep(320); if (!alive()) return;
+        index = (index + 1) % ORDER.length;
+        const b = BROWSERS[ORDER[index]];
+        paintWindow(switchBw, b);
+        paintCaption(b);
+        resetWindow(switchBw);
+        switchBw.classList.remove("is-swap");
+        caption?.classList.remove("is-swap");
+        if (!(await fillSequence(switchBw, alive))) return;
+      }
+    }
+    const play = () => {
+      token++;
+      if (visible && !document.hidden && !reduceMotion.matches) tour(token); else settle();
+    };
+    new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; play(); }, { threshold: 0.35 }).observe(switchBw);
+    document.addEventListener("visibilitychange", play);
+    reduceMotion.addEventListener?.("change", play);
   }
 
   /* Phone and PC: a login saved in the browser travels to the phone (Wi-Fi, then Google Drive)
