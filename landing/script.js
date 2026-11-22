@@ -494,6 +494,276 @@
     });
   });
 
+  /* ---------- Browser switch: the hero deck and the "Pick a browser" section ----------
+     The mock windows are drawn in HTML and CSS: browser names as text, monograms in our own
+     colors, no browser logos. The HTML ships in the "filled" state, so the page reads the same
+     without JavaScript or with reduced motion; the script only adds the sequence. */
+  const BROWSERS = {
+    zen: { name: "Zen", mono: "Z", family: "firefox", layout: "side", tint: "sky" },
+    helium: { name: "Helium", mono: "H", family: "chromium", layout: "top", tint: "teal",
+      note: "Helium has no built-in password manager, by design. Nuvori fills that gap. If Chrome is on the same PC, Nuvori lists them together as “Google Chrome and Helium”." },
+    comet: { name: "Comet", mono: "C", family: "chromium", layout: "top", tint: "violet" },
+    arc: { name: "Arc", mono: "A", family: "chromium", layout: "side", tint: "amber" },
+    brave: { name: "Brave", mono: "B", family: "chromium", layout: "top", tint: "rose" },
+    vivaldi: { name: "Vivaldi", mono: "V", family: "chromium", layout: "top", tint: "plum" },
+    firefox: { name: "Firefox", mono: "F", family: "firefox", layout: "top", tint: "indigo" },
+    chrome: { name: "Chrome", mono: "C", family: "chromium", layout: "top", tint: "green" },
+    edge: { name: "Edge", mono: "E", family: "chromium", layout: "top", tint: "cyan", note: "In Edge, allow extensions from other stores first." },
+    other: { name: "Another browser", tab: "New browser", mono: "?", family: "either", layout: "top", tint: "slate",
+      note: "This works for most browsers built on Chromium or Firefox. Nuvori lists the browsers installed on your PC." },
+  };
+  const FIREFOX_NOTE = "In Firefox-based browsers, logins and codes show under the field. Cards and addresses fill from the Nuvori button in the toolbar.";
+  const UNLOCK_STEP = "Unlock Nuvori. Logins, cards, addresses and codes fill on HTTPS pages.";
+  const FAMILY_LABEL = { chromium: "Built on Chromium", firefox: "Built on Firefox", either: "Chromium or Firefox" };
+
+  function stepsFor(b) {
+    if (b.family === "either") return [
+      "Built on Chromium? Add <strong>Nuvori Password Fill</strong> from the Chrome Web Store. Built on Firefox? Add it from Firefox Add-ons.",
+      "In Nuvori, open <strong>Settings &gt; Browser extension</strong>. Next to the browser, choose <strong>Built on: Chromium</strong> or <strong>Built on: Firefox</strong>, then connect it.",
+      UNLOCK_STEP,
+    ];
+    const store = b.family === "firefox" ? "Firefox Add-ons. The listing is under review" : "the Chrome Web Store";
+    return [
+      `Add <strong>Nuvori Password Fill</strong> from ${store}.`,
+      `Nuvori for Windows finds ${b.name} and connects it. Restart ${b.name} once.`,
+      UNLOCK_STEP,
+    ];
+  }
+
+  function paintWindow(bw, b) {
+    bw.dataset.layout = b.layout;
+    bw.dataset.tint = b.tint;
+    $$("[data-bw-name]", bw).forEach((el) => { el.textContent = b.tab || b.name; });
+    $$("[data-bw-mono]", bw).forEach((el) => { el.textContent = b.mono; });
+  }
+  /* Puts a window back at "empty form, no list" without animating, so the next fill starts clean. */
+  function resetWindow(bw, extra = []) {
+    bw.classList.add("no-tr");
+    bw.classList.remove("is-filled", "is-menu", ...extra);
+    void bw.offsetWidth;
+    bw.classList.remove("no-tr");
+  }
+  /* Opens the Nuvori list, presses the login and fills it. Returns false when cancelled. */
+  async function fillSequence(bw, alive, phone) {
+    await sleep(450); if (!alive()) return false;
+    bw.classList.add("is-menu");
+    phone?.classList.add("is-suggest");
+    await sleep(1000); if (!alive()) return false;
+    const row = $(".nvm__row", bw);
+    row?.classList.add("is-press");
+    await sleep(240); if (!alive()) return false;
+    row?.classList.remove("is-press");
+    bw.classList.remove("is-menu");
+    bw.classList.add("is-filled");
+    phone?.classList.remove("is-suggest");
+    phone?.classList.add("is-filled");
+    return true;
+  }
+
+  /* Hero deck: one browser after another, the same login each time, and the phone. */
+  const heroBw = $("#heroBw");
+  const heroPhone = $("#heroPhone");
+  if (stage && heroBw && heroPhone) {
+    const ORDER = ["zen", "helium", "comet", "arc", "brave", "vivaldi", "firefox", "chrome", "edge"];
+    const heroToast = $(".stage__toast", stage);
+    const ghosts = $$("[data-ghost]", stage);
+    let index = 0;
+    let token = 0;
+    const setGhosts = () => ghosts.forEach((g) => {
+      const name = BROWSERS[ORDER[(index + Number(g.dataset.ghost)) % ORDER.length]].name;
+      if (g.textContent === name) return;
+      g.classList.add("is-swap");
+      setTimeout(() => { g.textContent = name; g.classList.remove("is-swap"); }, 250);
+    });
+    const pulse = () => {
+      stage.classList.remove("is-pulse");
+      void stage.offsetWidth;
+      stage.classList.add("is-pulse");
+    };
+    /* A safe still frame: the current browser, filled. */
+    const settle = () => {
+      heroBw.classList.remove("is-leave", "is-enter", "is-menu", "no-tr");
+      heroBw.classList.add("is-filled");
+      heroPhone.classList.remove("is-suggest");
+      heroPhone.classList.add("is-filled");
+      heroToast?.classList.add("is-on");
+      stage.classList.remove("is-pulse");
+    };
+    async function loop(my) {
+      const alive = () => my === token;
+      while (alive()) {
+        await sleep(2400); if (!alive()) return;
+        heroToast?.classList.remove("is-on");
+        stage.classList.remove("is-pulse");
+        heroBw.classList.add("is-leave");
+        heroPhone.classList.remove("is-filled");
+        await sleep(620); if (!alive()) return;
+        index = (index + 1) % ORDER.length;
+        paintWindow(heroBw, BROWSERS[ORDER[index]]);
+        resetWindow(heroBw, ["is-leave"]);
+        heroBw.classList.add("no-tr", "is-enter");
+        void heroBw.offsetWidth;
+        heroBw.classList.remove("no-tr", "is-enter");
+        setGhosts();
+        if (!(await fillSequence(heroBw, alive, heroPhone))) return;
+        pulse();
+        heroToast?.classList.add("is-on");
+      }
+    }
+    /* The dashed lines run from the vault badge to the window and to the phone, measured from the real boxes. */
+    const lines = $(".stage__lines", stage);
+    const badge = $(".vault-badge", stage);
+    function placeLines() {
+      if (!lines || !badge) return;
+      const box = stage.getBoundingClientRect();
+      if (!box.width) return;
+      const rel = (el) => { const r = el.getBoundingClientRect(); return { l: r.left - box.left, t: r.top - box.top, r: r.right - box.left, b: r.bottom - box.top }; };
+      const v = rel(badge), w = rel(heroBw), p = rel(heroPhone);
+      const vx = (v.l + v.r) / 2, vy = (v.t + v.b) / 2;
+      const wx = Math.min(Math.max(vx + 30, w.l + 40), w.r - 40);
+      const d = {
+        window: `M${vx.toFixed(1)} ${v.t.toFixed(1)} C ${vx.toFixed(1)} ${((v.t + w.b) / 2).toFixed(1)}, ${wx.toFixed(1)} ${((v.t + w.b) / 2).toFixed(1)}, ${wx.toFixed(1)} ${w.b.toFixed(1)}`,
+        phone: `M${v.l.toFixed(1)} ${vy.toFixed(1)} C ${((v.l + p.r) / 2).toFixed(1)} ${vy.toFixed(1)}, ${((v.l + p.r) / 2).toFixed(1)} ${(vy - 20).toFixed(1)}, ${p.r.toFixed(1)} ${(vy - 20).toFixed(1)}`,
+      };
+      lines.setAttribute("viewBox", `0 0 ${box.width.toFixed(1)} ${box.height.toFixed(1)}`);
+      $$("[data-line]", lines).forEach((path) => path.setAttribute("d", d[path.dataset.line]));
+      lines.classList.add("is-ready");
+    }
+    // Measure without the parallax offsets, which move the layers by a few pixels.
+    const measure = () => requestAnimationFrame(placeLines);
+    if (window.ResizeObserver) new ResizeObserver(measure).observe(stage); else addEventListener("resize", measure);
+    document.fonts?.ready.then(measure);
+
+    let heroVisible = false;
+    const heroPlay = () => {
+      const play = heroVisible && !document.hidden && !reduceMotion.matches;
+      token++;
+      if (play) loop(token); else settle();
+    };
+    new IntersectionObserver(([entry]) => { heroVisible = entry.isIntersecting; heroPlay(); }, { threshold: 0.2 }).observe(stage);
+    document.addEventListener("visibilitychange", heroPlay);
+    reduceMotion.addEventListener?.("change", heroPlay);
+  }
+
+  /* "Pick a browser": chips re-draw the window and the steps, and the vault fills again. */
+  const chipGroup = $("#browserChips");
+  const switchBw = $("#switchBw");
+  const switchInfo = $("#switchInfo");
+  if (chipGroup && switchBw && switchInfo) {
+    const chips = $$(".bchip", chipGroup);
+    const stageBox = $("[data-switch-label]");
+    let current = "zen";
+    let token = 0;
+    let picked = false;
+    let autoTimer = 0;
+    let visible = false;
+
+    function paintInfo(b, id) {
+      const mono = $("[data-info-mono]", switchInfo);
+      mono.textContent = b.mono;
+      mono.dataset.tint = b.tint;
+      $("[data-info-name]", switchInfo).textContent = b.name;
+      $("[data-info-family]", switchInfo).textContent = FAMILY_LABEL[b.family];
+      $("[data-info-steps]", switchInfo).innerHTML = stepsFor(b).map((s) => `<li>${s}</li>`).join("");
+      const note = $("[data-info-note]", switchInfo);
+      const text = b.note || (b.family === "firefox" ? FIREFOX_NOTE : "");
+      note.textContent = text;
+      note.hidden = !text;
+      const where = id === "other" ? "a new browser" : b.name;
+      stageBox?.setAttribute("aria-label", `A sign-in form in ${where}. The Nuvori list opens under the email field, and the login fills.`);
+    }
+
+    async function show(id) {
+      const b = BROWSERS[id];
+      if (!b) return;
+      current = id;
+      const my = ++token;
+      const alive = () => my === token;
+      chips.forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.browser === id)));
+      if (reduceMotion.matches) {
+        paintWindow(switchBw, b);
+        paintInfo(b, id);
+        resetWindow(switchBw, ["is-swap"]);
+        switchBw.classList.add("is-filled");
+        return;
+      }
+      switchBw.classList.add("is-swap");
+      switchInfo.classList.add("is-swap");
+      await sleep(320); if (!alive()) return;
+      paintWindow(switchBw, b);
+      paintInfo(b, id);
+      resetWindow(switchBw);
+      switchBw.classList.remove("is-swap");
+      switchInfo.classList.remove("is-swap");
+      if (!(await fillSequence(switchBw, alive))) return;
+    }
+
+    const stopAuto = () => { clearInterval(autoTimer); autoTimer = 0; };
+    const startAuto = () => {
+      stopAuto();
+      if (picked || !visible || document.hidden || reduceMotion.matches) return;
+      autoTimer = setInterval(() => {
+        const next = chips[(chips.findIndex((c) => c.dataset.browser === current) + 1) % (chips.length - 1)];
+        show(next.dataset.browser);
+      }, 5200);
+    };
+    chips.forEach((chip) => chip.addEventListener("click", () => {
+      picked = true;
+      stopAuto();
+      // Announce the steps only after a person picks a browser, never during the automatic tour.
+      switchInfo.setAttribute("aria-live", "polite");
+      show(chip.dataset.browser);
+    }));
+    new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; startAuto(); }, { threshold: 0.35 }).observe(switchBw);
+    document.addEventListener("visibilitychange", startAuto);
+  }
+
+  /* Phone and PC: a login saved in the browser travels to the phone (Wi-Fi, then Google Drive)
+     and fills there. The HTML ships in the "saved and arrived" state. */
+  const syncScene = $("#syncScene");
+  if (syncScene) {
+    let token = 0;
+    let route = "wifi";
+    let sceneVisible = false;
+    const STATES = ["is-press", "is-saved", "is-sending", "is-arrived", "is-app", "is-suggest", "is-filled"];
+    const settleScene = () => {
+      syncScene.classList.remove(...STATES);
+      syncScene.classList.add("is-saved", "is-arrived");
+    };
+    async function sceneLoop(my) {
+      const alive = () => my === token;
+      while (alive()) {
+        syncScene.classList.remove(...STATES);
+        syncScene.dataset.route = route;
+        await sleep(1000); if (!alive()) return;
+        syncScene.classList.add("is-press");
+        await sleep(240); if (!alive()) return;
+        syncScene.classList.remove("is-press");
+        syncScene.classList.add("is-saved");
+        await sleep(500); if (!alive()) return;
+        syncScene.classList.add("is-sending");
+        await sleep(route === "wifi" ? 1600 : 1900); if (!alive()) return;
+        syncScene.classList.remove("is-sending");
+        syncScene.classList.add("is-arrived");
+        await sleep(1700); if (!alive()) return;
+        syncScene.classList.add("is-app");
+        await sleep(900); if (!alive()) return;
+        syncScene.classList.add("is-suggest");
+        await sleep(1000); if (!alive()) return;
+        syncScene.classList.remove("is-suggest");
+        syncScene.classList.add("is-filled");
+        await sleep(2400); if (!alive()) return;
+        route = route === "wifi" ? "drive" : "wifi";
+      }
+    }
+    const scenePlay = () => {
+      token++;
+      if (sceneVisible && !document.hidden && !reduceMotion.matches) sceneLoop(token); else settleScene();
+    };
+    new IntersectionObserver(([entry]) => { sceneVisible = entry.isIntersecting; scenePlay(); }, { threshold: 0.3 }).observe(syncScene);
+    document.addEventListener("visibilitychange", scenePlay);
+  }
+
   /* ---------- Footer year ---------- */
   const year = $("[data-year]");
   if (year) year.textContent = String(new Date().getFullYear());

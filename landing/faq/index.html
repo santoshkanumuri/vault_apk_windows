@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>FAQ · Nuvori</title>
+  <meta name="description" content="Answers about Nuvori: sync between your phone and PC, Google Drive, lost or new devices, backups, autofill, passkeys, website icons and privacy.">
+  <meta name="theme-color" content="#050705" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f8faf5" media="(prefers-color-scheme: light)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Nuvori FAQ">
+  <meta property="og:description" content="Plain answers about sync, backups, lost devices, autofill, passkeys and privacy in Nuvori.">
+  <meta property="og:url" content="https://nuvori.santoshkanumuri.com/faq/">
+  <meta property="og:image" content="https://nuvori.santoshkanumuri.com/assets/og-image.jpg">
+  <link rel="canonical" href="https://nuvori.santoshkanumuri.com/faq/">
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="../assets/favicon-64.png">
+  <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="../styles.css?v=20261122">
+  <link rel="stylesheet" href="faq.css?v=20261122">
+  <script>
+    document.documentElement.classList.add("js");
+    try { var t = localStorage.getItem("nuvori.site.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="nav" id="nav">
+    <div class="nav__inner wrap">
+      <a class="brand" href="../" aria-label="Nuvori home">
+        <img src="../assets/logo-192.png" alt="" width="34" height="34">
+        <span>Nuvori</span>
+      </a>
+      <nav class="nav__links" aria-label="Pages">
+        <a href="../">Home</a>
+        <a href="./" class="is-active" aria-current="page">FAQ</a>
+        <a href="../privacy/">Privacy</a>
+        <a href="../terms/">Terms</a>
+      </nav>
+      <div class="nav__actions">
+        <button class="icon-btn" id="themeToggle" type="button" aria-label="Switch to light theme">
+          <svg class="i i--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <svg class="i i--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+        <a class="btn btn--primary btn--sm" href="../#download">Get Nuvori</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="help">
+      <header class="help__head">
+        <p class="eyebrow">Help</p>
+        <h1>Questions and answers</h1>
+        <p class="help__lead">Plain answers about switching browsers, sync, backups, lost or new devices, autofill and more. Search, or pick a topic.</p>
+      </header>
+
+      <div class="search" role="search">
+        <label class="visually-hidden" for="faq-search">Search the questions</label>
+        <svg class="i search__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input class="search__input" id="faq-search" type="search" placeholder="Search, for example: lost phone" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-describedby="faq-status" aria-controls="faq-list">
+        <kbd class="search__kbd" aria-hidden="true" title="Press / to search">/</kbd>
+        <button class="search__clear" id="faq-clear" type="button" aria-label="Clear search" hidden>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="faq-status" id="faq-status" role="status" aria-live="polite"></p>
+
+      <nav aria-label="Topics">
+        <ul class="cats">
+          <li><a class="cat" href="#main" data-faq-filter="all">All</a></li>
+          <li><a class="cat" href="#cat-getting-started" data-faq-filter="getting-started">Getting started</a></li>
+          <li><a class="cat" href="#cat-browsers" data-faq-filter="browsers">Switching browsers</a></li>
+          <li><a class="cat" href="#cat-sync" data-faq-filter="sync">Sync and devices</a></li>
+          <li><a class="cat" href="#cat-lost-device" data-faq-filter="lost-device">Lost or new device</a></li>
+          <li><a class="cat" href="#cat-backup" data-faq-filter="backup">Backup and restore</a></li>
+          <li><a class="cat" href="#cat-autofill" data-faq-filter="autofill">Autofill and passkeys</a></li>
+          <li><a class="cat" href="#cat-icons" data-faq-filter="icons">Website icons</a></li>
+          <li><a class="cat" href="#cat-storage" data-faq-filter="storage">Storage and logs</a></li>
+          <li><a class="cat" href="#cat-troubleshooting" data-faq-filter="troubleshooting">Troubleshooting</a></li>
+          <li><a class="cat" href="#cat-privacy" data-faq-filter="privacy">Privacy and security</a></li>
+        </ul>
+      </nav>
+
+      <!--
+        HOW TO ADD A QUESTION: copy one <details class="qa"> block into the right section and give it a new,
+        unique id (lowercase words with hyphens). The id is the deep link: /faq/#your-id. faq.js needs no change.
+        See landing/README.md, "FAQ page".
+      -->
+      <div id="faq-list" data-faq>
+
+        <!-- ================= Getting started ================= -->
+        <section class="faq-cat" id="cat-getting-started" data-faq-category="getting-started" aria-labelledby="h-getting-started">
+          <h2 id="h-getting-started">Getting started</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="is-nuvori-free">
+              <summary><span class="qa__q">Is Nuvori free?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Yes. Nuvori costs nothing. It has no ads, no in-app purchases and no Nuvori account.</p>
+                <p>Google Drive sync and Google Drive backup are optional. They use storage in your own Google account.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="which-devices">
+              <summary><span class="qa__q">Which devices can I use, and how many?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ul>
+                  <li><strong>Android</strong> phones and tablets with Android 10 or newer.</li>
+                  <li><strong>Wear OS</strong> 3 or newer watches, together with the phone app. The watch shows your authenticator codes.</li>
+                  <li><strong>Windows</strong> 10 (version 2004) or newer, 64-bit.</li>
+                  <li>The <strong>browser extension</strong> for browsers built on Chromium or Firefox, such as Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox, Chrome and Edge. It works together with Nuvori for Windows. See <a href="#which-browsers">Which browsers work?</a></li>
+                </ul>
+                <p>One vault can have up to 6 phones or tablets and 2 Windows PCs. Passkeys need Android 14 or newer, or Windows 11.</p>
+                <p>There is no Nuvori app for iPhone, iPad or Mac.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="what-syncs">
+              <summary><span class="qa__q">What does sync copy between my devices?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Sync copies your vault to every device in your sync group:</p>
+                <ul>
+                  <li>Logins, cards, authenticator codes, notes and security questions.</li>
+                  <li>Autofill details: names, emails, phone numbers and addresses.</li>
+                  <li>Passkeys and photos.</li>
+                  <li>Folders, device names, and your accent and background colors.</li>
+                  <li>Website icons that Nuvori for Windows saves from your browser.</li>
+                </ul>
+                <p>Some things stay on each device: most settings, <strong>Recently deleted</strong>, <strong>Previous passwords</strong>, passkey history and the activity log.</p>
+                <!-- verify: "most settings stay local" — only colors (appearance-v1) and website icons (site-icons-v1) are synced settings-like records in AppearanceSync.kt / SiteIconSync.kt; no other settings sync found. -->
+                <p>Each device keeps its own full copy. It works offline and catches up the next time it connects.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="same-master-password">
+              <summary><span class="qa__q">Do all my devices need the same master password?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p><strong>Phones and tablets:</strong> yes. All Android devices in one vault use the same master password. Pairing checks this before it copies anything.</p>
+                <p>If the new device's empty vault has another password, choose <strong>Change this empty vault's password</strong> on the pairing screen.</p>
+                <p><strong>Windows PCs:</strong> no. A PC has its own master password, and it can differ from your phone's. During pairing, you type your phone's master password once on the PC.</p>
+                <p>While other devices share your vault, the <strong>Change master password</strong> button on Android stays off.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="forgot-master-password">
+              <summary><span class="qa__q">I forgot my master password. Can you reset it?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>No. Nobody can reset or recover it, including the developer. There is no Nuvori server with a copy. Backups also open only with a master password.</p>
+                <p>What you can still do:</p>
+                <ul>
+                  <li><strong>Another device still unlocks:</strong> your items are safe there. Set up the forgotten device again as a new, empty device, and pair it. For a PC, see <a href="#new-pc-or-reinstalled-windows">I reinstalled Windows or got a new PC</a>. For a phone, see <a href="#lost-phone-pc-synced">I lost my phone, but my PC has my vault</a>.</li>
+                  <li><strong>No device unlocks:</strong> the vault can't be opened. Start a new vault. On Android, uninstall and reinstall Nuvori. This deletes the old vault on that phone.</li>
+                </ul>
+                <!-- verify: how to start over on Windows when the PC's password is forgotten. "Reset this PC's vault" (Settings > Danger zone) needs an unlocked vault; the unlock screen has no reset. Whether uninstalling removes the PC's vault file was not checked. -->
+                <p class="note">Keep a copy of your master password somewhere safe, for example on paper at home.</p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Switching browsers ================= -->
+        <section class="faq-cat" id="cat-browsers" data-faq-category="browsers" aria-labelledby="h-browsers">
+          <h2 id="h-browsers">Switching browsers</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="switching-browsers" data-keywords="change move new browser switch leave">
+              <summary><span class="qa__q">I'm switching browsers. What happens to my passwords?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Nothing. Your logins, cards, addresses and codes stay in Nuvori for Windows, not in the browser.</p>
+                <ol>
+                  <li>Add <strong>Nuvori Password Fill</strong> to the new browser, from the Chrome Web Store or Firefox Add-ons.</li>
+                  <li>Nuvori finds the browser and connects it. Restart the browser once.</li>
+                  <li>Unlock Nuvori. The same logins fill in the new browser.</li>
+                </ol>
+                <p>You can keep using the old browser too. Check its connection in <strong>Settings &gt; Browser extension</strong>.</p>
+                <!-- verify: "Nuvori finds the browser and connects it": browsers.rs Entry::default() is connected: true; registration runs at start in installed builds and from Settings > Browser extension (browser_setup.rs). -->
+              </div>
+            </details>
+
+            <details class="qa" id="import-again" data-keywords="import export csv again reimport move passwords passkeys">
+              <summary><span class="qa__q">Do I need to import my passwords again when I change browsers?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>No. You move your passwords into Nuvori once. After that, no browser needs an import.</p>
+                <ul>
+                  <li><strong>The first time:</strong> export the passwords from your browser as a CSV file. Import the file in Nuvori for Android, then delete it. Sync takes the logins to your PC. Nuvori for Windows can also open a KeePass database.</li>
+                  <li><strong>Every browser after that:</strong> add the extension. The extension has no vault of its own, so there is nothing to copy.</li>
+                  <li><strong>Passkeys:</strong> the extension doesn't handle passkeys. Passkeys in Nuvori stay in your vault. Android 14 or newer and Windows 11 (Microsoft Store version) offer them in the system passkey prompt.</li>
+                </ul>
+                <p class="note">The extension can also turn off the browser's own &ldquo;Save password?&rdquo; offer, so only Nuvori asks. Turn it on in the extension's <strong>Settings</strong>.</p>
+                <!-- verify: Android import formats in card_app BrowserPasswords.kt (Chromium, Firefox, Safari, 1Password, LastPass, KeePass CSV, Bitwarden CSV/JSON); Windows import is KeePass only (keepass_import.rs). Passkeys: extension/README.md "Passkeys"; passkey_plugin.rs (MSIX only). Browser saving switch: extension/popup.js BROWSER_SETTINGS. -->
+              </div>
+            </details>
+
+            <details class="qa" id="which-browsers" data-keywords="supported browsers chromium firefox zen helium comet arc brave vivaldi opera chrome edge safari mac">
+              <summary><span class="qa__q">Which browsers work?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Browsers built on Chromium or Firefox, on Windows, with Nuvori for Windows on the same PC.</p>
+                <ul>
+                  <li><strong>Built on Chromium</strong> (version 127 or newer): Helium, Comet, Arc, Brave, Vivaldi, Opera, Thorium, Chromium, Chrome and Edge. Get the extension from the Chrome Web Store. In Edge, allow extensions from other stores first.</li>
+                  <li><strong>Built on Firefox</strong> (version 140 or newer): Zen, Firefox, LibreWolf, Waterfox, Floorp, Mullvad Browser and Tor Browser. Get the add-on from Firefox Add-ons. In these browsers, cards and addresses fill from the Nuvori button in the toolbar.</li>
+                </ul>
+                <p>Safari doesn't work, and there is no Nuvori for Mac, iPhone, iPad or Linux. On Android, Nuvori fills through Android's autofill service instead of an extension.</p>
+                <!-- verify: names from browsers.rs classify() and known_name(); versions from extension/manifest.json (minimum_chrome_version 127) and scripts/package-extension.ps1 (strict_min_version 140.0). Firefox card/address limit: extension/README.md "Firefox". -->
+              </div>
+            </details>
+
+            <details class="qa" id="new-browser" data-keywords="ai browser arc zen helium comet new unknown not listed built on">
+              <summary><span class="qa__q">Can I use Nuvori with a new browser like Zen, Helium or Comet?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Yes. Nuvori for Windows recognizes Zen, Helium, Comet, Arc and many more by name, and connects them by itself.</p>
+                <p>Helium has no built-in password manager, by design. Nuvori fills that gap.</p>
+                <p>A browser that Nuvori doesn't recognize yet can still work if it is built on Chromium or Firefox:</p>
+                <ol>
+                  <li>Install the extension from the matching store.</li>
+                  <li>In Nuvori, open <strong>Settings &gt; Browser extension</strong>.</li>
+                  <li>Next to the browser, choose <strong>Built on: Chromium</strong> or <strong>Built on: Firefox</strong>. Then turn on its switch.</li>
+                  <li>Restart the browser.</li>
+                </ol>
+                <p class="note">This works for most browsers built on Chromium or Firefox. A browser that reads its own, different connection key can't be connected this way.</p>
+                <!-- verify: unknown-family choice in src/pages/SettingsPage.tsx BrowsersList; family_keys() writes Chrome + Chromium keys for Chromium, the Mozilla key for Firefox (browsers.rs). Helium: browsers.rs chrome.exe with a non-Chrome Start menu name; "no password manager" per Helium's patches/helium/core/disable-password-manager.patch (checked by the coordinator, not in this repo). -->
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Sync and devices ================= -->
+        <section class="faq-cat" id="cat-sync" data-faq-category="sync" aria-labelledby="h-sync">
+          <h2 id="h-sync">Sync and devices</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="add-phone-or-tablet">
+              <summary><span class="qa__q">How do I add another phone or tablet?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Put both devices on the same Wi-Fi and keep them unlocked during pairing.</p>
+                <ol>
+                  <li>On the new device, install Nuvori. Choose <strong>Join an existing vault</strong> and create the vault with the same master password as your other phone. Tap <strong>Create and continue</strong>.</li>
+                  <li>On the managing device, open <strong>Settings &gt; Devices &amp; sync</strong> and tap <strong>Create QR</strong>. Enter your master password and tap <strong>Verify and connect</strong>.</li>
+                  <li>On the new device, tap <strong>Scan QR</strong> and point the camera at the code. Enter its master password and tap <strong>Verify and pair</strong>.</li>
+                  <li>Check that both screens show the same code. Tap <strong>Codes match</strong>.</li>
+                  <li>Wait while the vault copies. Then tap <strong>Done</strong>.</li>
+                </ol>
+                <p>The new device needs an empty vault. A device that already has items can't join this way.</p>
+                <!-- screenshot: android-sync-devices -->
+              </div>
+            </details>
+
+            <details class="qa" id="add-windows-pc">
+              <summary><span class="qa__q">How do I add a Windows PC, or a second PC?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your phone adds PCs. A PC can't add other devices. One vault can have up to 2 PCs.</p>
+                <ol>
+                  <li>Install Nuvori for Windows. Choose a master password and select <strong>Create vault</strong>.</li>
+                  <li>On the PC, open <strong>Devices &amp; sync</strong>. Under <strong>Pair with your phone</strong>, keep <strong>Scan phone's QR</strong> selected.</li>
+                  <li>On the managing phone, open <strong>Settings &gt; Devices &amp; sync</strong> and tap <strong>Create QR</strong>. Enter your master password and tap <strong>Verify and connect</strong>.</li>
+                  <li>On the PC, select <strong>Use camera</strong> and hold the phone in front of it. No camera? Use <strong>Read QR image</strong> with a photo of the QR, or paste the link from <strong>Copy link</strong> into <strong>Setup link</strong>.</li>
+                  <li>Type your phone's master password in <strong>Phone's master password</strong> and select <strong>Continue</strong>.</li>
+                  <li>Check that both screens show the same code. Select <strong>Codes match</strong> on both devices.</li>
+                </ol>
+                <p>Best: pair a PC with an empty vault. If the PC already has items, it keeps them and adds them to your vault as new copies. Items that are also on your phone then show twice.</p>
+                <!-- verify: may change if duplicate fix ships (snapshot_import.rs migrate_inventory re-issues every local item under a new ID; proposal P2 in sync-lifecycle-report.md). -->
+                <p>The first pairing always needs both devices on the same network, for example the same Wi-Fi or a phone hotspot.</p>
+                <p class="note">If the PC can't reach the phone, choose <strong>Show QR to phone</strong> on the PC. Then, on the phone, tap <strong>Scan Windows QR if the PC cannot reach this phone</strong>.</p>
+                <!-- screenshot: windows-sync-devices -->
+              </div>
+            </details>
+
+            <details class="qa" id="wifi-or-google-drive">
+              <summary><span class="qa__q">Should I sync over Wi-Fi or through Google Drive?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>You can use both. A sync tries your devices on the same Wi-Fi first, then Google Drive.</p>
+                <ul>
+                  <li><strong>Wi-Fi sync</strong> works as soon as devices are paired. They talk directly to each other on your local network.</li>
+                  <li><strong>Google Drive sync</strong> is optional. It helps when your devices are not on the same Wi-Fi, for example a phone on mobile data and a PC at home. Every change is encrypted before it goes to your Drive.</li>
+                </ul>
+                <p>The first pairing always needs the same Wi-Fi. Google Drive only carries changes between devices that are already paired.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="turn-on-google-drive-sync">
+              <summary><span class="qa__q">How do I turn on Google Drive sync?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Pair your devices first. The Google Drive card shows only after pairing. Use the same Google account on every device.</p>
+                <ol>
+                  <li>On the phone, open <strong>Settings &gt; Devices &amp; sync</strong>. Find <strong>Sync when your devices are apart</strong> and tap <strong>Connect Google Drive</strong>. Choose your Google account and allow access.</li>
+                  <li>On the PC, open <strong>Devices &amp; sync</strong>. On the same card, select <strong>Connect Google Drive</strong>. Sign in with the same account in your browser.</li>
+                  <li>When the browser says <strong>Google Drive is connected</strong>, close the tab and go back to Nuvori.</li>
+                </ol>
+                <p>Nuvori gets access only to its own hidden folder in your Drive. It can't see or change your other files.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="sync-when-closed-or-locked">
+              <summary><span class="qa__q">Does sync work when Nuvori is closed or locked?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ul>
+                  <li><strong>Android over Wi-Fi:</strong> yes, while <strong>Automatic sync</strong> is on. Android shows a small notification while it runs. A locked phone receives changes and applies them after you unlock it.</li>
+                  <li><strong>Android through Google Drive:</strong> only while Nuvori is open, when you unlock it, and when you tap <strong>Sync now</strong>. Your own changes upload right after you make them.</li>
+                  <li><strong>Windows:</strong> only while the vault on the PC is unlocked.</li>
+                </ul>
+                <p>Both apps can also check once each time you open them. That is the <strong>Sync when Nuvori opens</strong> switch.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="device-offline-for-weeks">
+              <summary><span class="qa__q">One of my devices was off for weeks. Is that a problem?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>No. Each device keeps its own copy and works offline. When it connects again, it gets every change it missed and sends its own.</p>
+                <p>Nuvori doesn't remove a device just because it was away.</p>
+                <!-- verify: no automatic removal or expiry for long-offline devices (PERSONAL-DEVICE-SYNC.md: "Do not automatically remove a tablet after 30 or 45 days"); storage/catch-up limits are being checked separately. -->
+                <ul>
+                  <li>Open Nuvori on it and unlock it, so it can sync.</li>
+                  <li>If it missed app updates, update Nuvori first. See <a href="#same-app-version">Do all my devices need the same Nuvori version?</a></li>
+                  <li>If the same item changed on both devices meanwhile, Nuvori asks which version to keep. See <a href="#edited-on-two-devices">What if I change the same item on two devices?</a></li>
+                </ul>
+              </div>
+            </details>
+
+            <details class="qa" id="edited-on-two-devices">
+              <summary><span class="qa__q">What if I change the same item on two devices?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>If two devices change the same item before they sync with each other, Nuvori keeps both versions and asks you to choose. It doesn't quietly throw one away.</p>
+                <ul>
+                  <li><strong>Phone:</strong> open <strong>Settings &gt; Devices &amp; sync</strong>. Under <strong>Conflicts to review</strong>, tap <strong>Review</strong>. Choose <strong>Keep this device's version</strong> or <strong>Use incoming version</strong>.</li>
+                  <li><strong>PC:</strong> open <strong>Devices &amp; sync</strong> and select <strong>Review</strong>. Choose <strong>Keep this PC's version</strong> or <strong>Keep phone version</strong>.</li>
+                </ul>
+                <p>Your choice syncs to your other devices. Colors and website icons never ask: the newest change wins.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="havent-synced-warning">
+              <summary><span class="qa__q">Home says “Devices haven't synced in 3 days”. What should I do?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your phone shows this when it hasn't exchanged changes with your other devices for more than 3 days. Your items are safe. Each device still has its own copy.</p>
+                <ol>
+                  <li>Open Nuvori on your other device and unlock it.</li>
+                  <li>Put both devices on the same Wi-Fi, or turn on Google Drive sync on both.</li>
+                  <li>Tap <strong>Sync now</strong>.</li>
+                </ol>
+                <p>The warning counts Google Drive syncs too. Older versions looked only at Wi-Fi sync, so update Nuvori on both devices if the warning stays.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="same-app-version">
+              <summary><span class="qa__q">Do all my devices need the same Nuvori version?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your items sync between different versions. But some newer features start only when every device in the group has a version that knows them. For example:</p>
+                <ul>
+                  <li>Website icons that your PC shares with your phone.</li>
+                  <li>Shared accent and background colors.</li>
+                  <li>Removing a device so the others still get its last changes.</li>
+                </ul>
+                <p>Until every device is updated, Nuvori waits with these changes. Nothing is lost.</p>
+                <p>If a device says changes <strong>could not be applied</strong> or <strong>could not be read</strong>, update Nuvori on all your devices. Then tap <strong>Retry changes</strong> on the phone. The easiest rule: keep every device up to date.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="managing-device">
+              <summary><span class="qa__q">What is the managing device, and how do I move that role?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>One phone or tablet in each group is the managing device. It adds new devices and removes old ones. Only an Android phone or tablet can manage the group, so the role can't move to a PC.</p>
+                <p>The managing device doesn't need to be online for everyday sync. Your other devices keep syncing with each other.</p>
+                <p>To move the role, for example to a new phone:</p>
+                <ol>
+                  <li>Sync both devices.</li>
+                  <li>On the managing device, open <strong>Settings &gt; Devices &amp; sync</strong>. Under <strong>Managing role</strong>, tap <strong>Offer to</strong> and the other device's name. Tap <strong>Offer</strong>.</li>
+                  <li>On the other device, tap <strong>Accept managing role</strong>, then <strong>Accept</strong>.</li>
+                  <li>Back on the old managing device, tap <strong>Complete transfer</strong>.</li>
+                </ol>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Lost or new device ================= -->
+        <section class="faq-cat" id="cat-lost-device" data-faq-category="lost-device" aria-labelledby="h-lost-device">
+          <h2 id="h-lost-device">Lost or new device</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="lost-only-phone">
+              <summary><span class="qa__q">I lost my only phone. Can I get my vault back?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Only from a Nuvori backup. Your vault was only on that phone, and Nuvori has no server copy. Android's own Google backup doesn't include Nuvori.</p>
+                <p>If <strong>Google Drive backup</strong> was on:</p>
+                <ol>
+                  <li>Install Nuvori on the new phone. Choose <strong>Restore a backup</strong>.</li>
+                  <li>Create a master password for this phone.</li>
+                  <li>Tap <strong>Find backups in Google Drive</strong>. Sign in with the Google account of your old phone.</li>
+                  <li>Pick the backup. Enter the old phone's master password in <strong>Master password of the backup</strong>.</li>
+                  <li>Check what Nuvori found, and confirm to replace the new, empty vault.</li>
+                </ol>
+                <p>If you saved a <strong>.pvault</strong> file instead, tap <strong>Restore encrypted backup</strong> and choose the file.</p>
+                <p class="note note--warn">Without a backup or another synced device, the vault can't be recovered. Google Drive backup is off until you turn it on, so turn it on today. See <a href="#make-backup">How do I make a backup?</a></p>
+              </div>
+            </details>
+
+            <details class="qa" id="lost-phone-pc-synced">
+              <summary><span class="qa__q">I lost my phone, but my PC has my vault. What now?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your PC has every change that reached it before the phone was lost. Only the lost phone could add or remove devices, so the old group can't be repaired. Instead, you start a new group from the new phone, and the PC moves into it.</p>
+                <ol>
+                  <li>On the new phone, install Nuvori and create a new, empty vault. Don't restore a backup on it.</li>
+                  <li>On the PC, open <strong>Devices &amp; sync</strong> and select <strong>Leave group</strong>. Choose <strong>Keep this PC's items</strong>, then <strong>Leave group</strong>.</li>
+                  <li>On the same Wi-Fi, pair the PC with the new phone, as in <a href="#add-windows-pc">How do I add a Windows PC?</a> On the PC, type the new phone's master password.</li>
+                  <li>The PC adds its items to the new group, and they copy to the new phone. Keep both unlocked until nothing is waiting.</li>
+                </ol>
+                <p>The new group has new keys. The lost phone can't read anything you add from now on.</p>
+                <p class="note">Changes that were only on the lost phone are gone. <strong>Already restored a backup on the new phone?</strong> Then choose <strong>Start with an empty vault</strong> on the PC in step 2. With <strong>Keep this PC's items</strong>, every item would show twice. Edits made only on the PC after that backup are then lost.</p>
+                <p>If the lost phone used Google Drive sync, also remove Nuvori's access in your Google account. See <a href="#remove-lost-device">How do I stop a lost or stolen device from getting new data?</a></p>
+                <!-- verify: may change if duplicate fix ships. Path from sync-lifecycle-report.md scenario 2 (source-traced, not run on devices): a new phone with no group can host "Create QR"; the PC's kept items are re-issued with new IDs (snapshot_import.rs migrate_inventory). The report suggests the new phone use the PC's master password; the Windows pairing only checks the phone password typed on the PC, so this answer does not require it. -->
+              </div>
+            </details>
+
+            <details class="qa" id="new-phone-old-still-works">
+              <summary><span class="qa__q">I got a new phone and my old one still works. How do I switch?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ol>
+                  <li>Add the new phone to your vault, as in <a href="#add-phone-or-tablet">How do I add another phone or tablet?</a></li>
+                  <li>Wait until the new phone shows all your items, and the old phone shows nothing waiting.</li>
+                  <li>If the old phone is the managing device, move the role to the new phone: <strong>Offer to</strong> the new phone, <strong>Accept managing role</strong> there, then <strong>Complete transfer</strong> on the old phone. See <a href="#managing-device">What is the managing device?</a></li>
+                  <li>On the old phone, open <strong>Settings &gt; Devices &amp; sync</strong>. Under <strong>Leave the group</strong>, tap <strong>Remove this device from the group</strong>, then <strong>Leave group</strong>. Or, on the new phone, tap <strong>Remove</strong> and the old phone's name on its card.</li>
+                  <li>If you used them, turn on Google Drive sync and Google Drive backup on the new phone.</li>
+                  <li>Uninstall Nuvori from the old phone before you reset it or give it away.</li>
+                </ol>
+                <p>If you use a watch for codes, set it up again from the new phone under <strong>Settings &gt; Watch codes</strong>.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="new-pc-or-reinstalled-windows">
+              <summary><span class="qa__q">I reinstalled Windows or got a new PC. How do I set it up again?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your old PC is still listed in your group, and it counts toward the limit of 2 PCs. Remove it first.</p>
+                <ol>
+                  <li>On the managing phone, open <strong>Settings &gt; Devices &amp; sync</strong>. On the old PC's card, tap <strong>Remove</strong> and its name, then <strong>Remove</strong>.</li>
+                  <li>Install Nuvori for Windows on the new PC and select <strong>Create vault</strong>.</li>
+                  <li>Pair it with your phone, as in <a href="#add-windows-pc">How do I add a Windows PC?</a></li>
+                  <li>Install the browser extension again in each browser you use.</li>
+                </ol>
+                <p>The PC receives an encrypted copy of your vault from the phone. Changes that were only on the old PC, and never synced, are not in that copy.</p>
+                <p>Nuvori for Windows has no backup of its own. Your phone is where the vault comes back from.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="lost-one-of-three">
+              <summary><span class="qa__q">I have three devices and lost one. What should I do?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your other devices keep their copies and keep syncing with each other. The next step depends on which device you lost.</p>
+                <p><strong>You lost a device that is not the managing device:</strong></p>
+                <ol>
+                  <li>On the managing phone, open <strong>Settings &gt; Devices &amp; sync</strong>.</li>
+                  <li>On the lost device's card, tap <strong>Remove</strong> and its name.</li>
+                  <li>If the dialog names another of your devices, cancel and sync that device first. Then it gets every change the lost device made. Tap <strong>Remove</strong> to finish.</li>
+                </ol>
+                <p><strong>You lost the managing device:</strong> the others still sync, but no device can add or remove devices, and the old group can't be repaired. Start a new group from a phone or tablet you keep:</p>
+                <ol>
+                  <li>Choose the phone or tablet with the newest items. Sync all your devices first, until nothing is waiting.</li>
+                  <li>On that device, open <strong>Settings &gt; Devices &amp; sync</strong>. Tap <strong>Remove this device from the group</strong>, then <strong>Leave group</strong>. It keeps its items, gets new keys, and can now add devices.</li>
+                  <li>On your PC, select <strong>Leave group</strong> and choose <strong>Start with an empty vault</strong>. Then pair it with the device from step 2.</li>
+                  <li>Another phone or tablet must join with an empty vault. Clear Nuvori's storage in Android settings, or reinstall Nuvori, then pair it.</li>
+                </ol>
+                <p class="note">Changes that reach only the old group after step 2 are not copied over. If you have only a PC left, see <a href="#lost-phone-pc-synced">I lost my phone, but my PC has my vault</a>.</p>
+                <!-- verify: lost-manager recovery from sync-lifecycle-report.md scenarios 4 and 8 (source-traced, not run on devices). The PC uses "Start with an empty vault" because kept items are re-issued as new copies (may change if duplicate fix ships). -->
+              </div>
+            </details>
+
+            <details class="qa" id="remove-lost-device">
+              <summary><span class="qa__q">How do I stop a lost or stolen device from getting new data?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Remove it from your sync group on the managing phone. The lost device doesn't need to agree.</p>
+                <ol>
+                  <li>Open <strong>Settings &gt; Devices &amp; sync</strong>.</li>
+                  <li>On the lost device's card, tap <strong>Remove</strong> and its name. Tap <strong>Remove</strong> to confirm.</li>
+                </ol>
+                <p>Your other devices learn about it at their next sync, over Wi-Fi or Google Drive. Then they refuse its changes and stop syncing with it.</p>
+                <p>Removal doesn't change your vault's encryption keys. So if the lost device used Google Drive sync, also do this:</p>
+                <ol>
+                  <li>Remove Nuvori's access in your Google account's security settings.</li>
+                  <li>Select <strong>Sign in again</strong> on each device you keep.</li>
+                </ol>
+                <p>For the strongest protection, start a new group, which gets new keys. See <a href="#start-new-sync-group">How do I leave a sync group or start a new one?</a> If you lost the managing phone, you can't remove it. See <a href="#lost-one-of-three">I have three devices and lost one</a>.</p>
+                <p class="note">Removal can't erase what is already on the lost device. That copy stays encrypted, and the vault locks when the screen turns off. If you think someone knows your master password, change the passwords of your most important accounts.</p>
+                <!-- verify: recheck when key rotation ships (card_app_windows/docs/KEY-ROTATION.md is "design, not implemented"; sync-lifecycle-report.md section 1). -->
+              </div>
+            </details>
+
+            <details class="qa" id="start-new-sync-group">
+              <summary><span class="qa__q">How do I leave a sync group or start a new one?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ul>
+                  <li><strong>A phone or tablet:</strong> open <strong>Settings &gt; Devices &amp; sync</strong>. Under <strong>Leave the group</strong>, tap <strong>Remove this device from the group</strong>, then <strong>Leave group</strong>. It keeps its items as a separate vault.</li>
+                  <li><strong>The managing device:</strong> move the role first. See <a href="#managing-device">What is the managing device?</a> Or tap <strong>Start a separate group on this device instead</strong>. The other devices keep their copies, but no one can add or remove devices in the old group.</li>
+                  <li><strong>A PC:</strong> open <strong>Devices &amp; sync</strong> and select <strong>Leave group</strong>. Choose <strong>Keep this PC's items</strong> or <strong>Start with an empty vault</strong>.</li>
+                </ul>
+                <p>A phone or tablet that left starts its own group with new keys. Pair new devices with it as usual. If you used a watch, pair it again for codes.</p>
+                <p>Devices that join the new group must start empty. On a PC, choose <strong>Start with an empty vault</strong> when it leaves. On a phone, clear Nuvori's storage or reinstall it. Your old sync files stay in Google Drive until you delete them.</p>
+                <p class="note">Sync every device first, and resolve conflicts. A phone can't leave while changes are still waiting. A device can't rejoin a group it left as it is: a PC needs <strong>Reset this PC's vault</strong> in Settings first, and a phone needs a fresh install.</p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Backup and restore ================= -->
+        <section class="faq-cat" id="cat-backup" data-faq-category="backup" aria-labelledby="h-backup">
+          <h2 id="h-backup">Backup and restore</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="make-backup">
+              <summary><span class="qa__q">How do I make a backup?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>You make backups on your Android phone. There are two kinds, and you can use both. Google Drive backup is off until you turn it on. We recommend it, especially if Nuvori is only on one phone.</p>
+                <p><strong>Google Drive backup (automatic):</strong></p>
+                <ol>
+                  <li>Open <strong>Settings &gt; Backup and import</strong>.</li>
+                  <li>Under <strong>Google Drive backup</strong>, choose how often in <strong>Back up every</strong>.</li>
+                  <li>Tap <strong>Turn on Google Drive backup</strong> and choose your Google account.</li>
+                  <li>Enter your master password and tap <strong>Turn on</strong>.</li>
+                </ol>
+                <p>Backups run while Nuvori is unlocked. <strong>Back up now</strong> makes one right away.</p>
+                <p><strong>Backup file (manual):</strong></p>
+                <ol>
+                  <li>Open <strong>Settings &gt; Backup and import</strong>.</li>
+                  <li>Under <strong>Encrypted backup</strong>, tap <strong>Export encrypted backup</strong>.</li>
+                  <li>Enter your master password and choose where to save the <strong>.pvault</strong> file.</li>
+                </ol>
+                <p>Both kinds include your items, photos and passkeys, and open only with your master password. Nuvori for Windows has no backup feature. It gets your vault by pairing with your phone.</p>
+                <!-- screenshot: android-backup -->
+              </div>
+            </details>
+
+            <details class="qa" id="where-keep-backup">
+              <summary><span class="qa__q">Where should I keep my backup? Isn't sync enough?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Sync is not a backup. If you delete an item on one device, sync deletes it on the others too. A backup is a copy from one moment.</p>
+                <p>Good places for a <strong>.pvault</strong> file:</p>
+                <ul>
+                  <li>A USB stick or external drive that you keep at home.</li>
+                  <li>A cloud folder you trust. The file is encrypted, but anyone with the file and your master password can open it.</li>
+                  <li>More than one place. Make a new file after big changes.</li>
+                </ul>
+                <p>Google Drive backup keeps itself up to date. Nuvori keeps this phone's newest backup and the one before it, in a hidden Nuvori folder.</p>
+                <p class="note">A backup always needs the master password from when it was made. If you change your master password later, older backup files still need the old one.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="restore-backup">
+              <summary><span class="qa__q">How do I restore a backup?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>A restore replaces the whole vault on this phone. Nuvori checks the backup and shows what it contains before it replaces anything.</p>
+                <ol>
+                  <li>Open <strong>Settings &gt; Backup and import</strong>. On a new phone, you can also choose <strong>Restore a backup</strong> during setup.</li>
+                  <li>For Google Drive, tap <strong>Find backups in Google Drive</strong> and pick a backup. For a file, tap <strong>Restore encrypted backup</strong> and choose the .pvault file.</li>
+                  <li>Enter the master password that was in use when the backup was made.</li>
+                  <li>Check the summary and confirm.</li>
+                  <li>Unlock Nuvori again with this phone's master password.</li>
+                </ol>
+                <p>Then set up fingerprint unlock again, and pair your other devices again if you use sync. Restore works only on Android.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="restore-on-paired-device">
+              <summary><span class="qa__q">Can I restore a backup on a device that is already in a sync group?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>You can, but it takes that device out of the group without telling the others. The restored vault becomes a separate vault and stops syncing. Your other devices keep their own copies, don't get the restored items, and still list the device until the managing phone removes it. If you restore on the managing phone, the old group has no managing device anymore.</p>
+                <p>On a synced device you usually don't need a restore:</p>
+                <ul>
+                  <li>To get back a deleted item, use <strong>Recently deleted</strong>. See <a href="#recover-deleted-item">I deleted an item by mistake</a>.</li>
+                  <li>To fix one device, remove it from the group and pair it again as an empty device. It gets a fresh copy from the others.</li>
+                </ul>
+                <p>If the whole group needs the backup's contents, restore it on one phone. Then start the group again from that phone: the other devices join it with empty vaults.</p>
+                <!-- verify: restore on a paired device (sync-lifecycle-report.md scenario 9, source-traced; proposal P6 may add a leave request or block restore on the manager). -->
+              </div>
+            </details>
+
+            <details class="qa" id="recover-deleted-item">
+              <summary><span class="qa__q">I deleted an item by mistake. Can I get it back?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Yes, for 30 days.</p>
+                <ol>
+                  <li>Open <strong>Settings &gt; Recently deleted</strong> on your phone or PC.</li>
+                  <li>Find the item and select <strong>Restore</strong>.</li>
+                </ol>
+                <p>On your phone, items deleted on another device show up here too. A restored item syncs to your other devices again. Photos and passkeys are not kept here.</p>
+                <p>Need an older password of a login? Open the login on your phone and look under <strong>Previous passwords</strong>. It keeps the last 10.</p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Autofill and passkeys ================= -->
+        <section class="faq-cat" id="cat-autofill" data-faq-category="autofill" aria-labelledby="h-autofill">
+          <h2 id="h-autofill">Autofill and passkeys</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="android-autofill-setup">
+              <summary><span class="qa__q">How do I turn on autofill on Android?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ol>
+                  <li>Open <strong>Settings &gt; Autofill and codes</strong>.</li>
+                  <li>If it says <strong>Nuvori is not your Autofill service</strong>, tap <strong>Choose Nuvori autofill</strong> and select Nuvori.</li>
+                  <li>On Android 14 or newer, also tap <strong>Enable passwords and passkeys</strong> and turn on Nuvori.</li>
+                  <li>For Chrome or Brave, tap <strong>Open browser autofill settings</strong>. Turn on autofill using another service, then restart the browser.</li>
+                </ol>
+                <p>Nuvori offers a login only on the website or app it is saved for, and fills websites only over HTTPS.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="keyboard-or-account-picker">
+              <summary><span class="qa__q">Can my logins show in the keyboard instead of a popup?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Yes, it's a setting. Open <strong>Settings &gt; Autofill and codes</strong> and find <strong>How logins appear</strong>:</p>
+                <ul>
+                  <li><strong>Account picker</strong> (the default): after you unlock, Nuvori shows the logins for this app or site right away. Tap one to fill it, or search all your logins.</li>
+                  <li><strong>Keyboard suggestions</strong>: after you unlock, your logins appear in the keyboard. Tap the field again if the keyboard closed. <strong>Choose another login</strong> opens the account picker.</li>
+                </ul>
+                <p>Codes and new passwords always use the picker. Keyboards without inline suggestions show Android's suggestion menu instead.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="quick-copy-tile">
+              <summary><span class="qa__q">What is the Quick copy tile?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>A Quick Settings tile on Android. It copies a password, code, card detail or security answer when autofill can't help. It works even if another app is your autofill service.</p>
+                <ol>
+                  <li>Open <strong>Settings &gt; Autofill and codes</strong> and tap <strong>Add Quick copy tile</strong>.</li>
+                  <li>Pull down Quick Settings, tap <strong>Quick copy</strong> and unlock.</li>
+                  <li>Choose <strong>Passwords</strong>, <strong>TOTP</strong>, <strong>Cards</strong> or <strong>Questions</strong>. Tap a field to copy it.</li>
+                </ol>
+                <p>The other fields of that item stay in your notifications for 2 minutes, so you can paste them one by one.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="browser-extension-fill">
+              <summary><span class="qa__q">How does the browser extension fill on my PC?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>The extension, Nuvori Password Fill, has no vault of its own. It asks Nuvori for Windows for the login you choose.</p>
+                <ol>
+                  <li>Install Nuvori for Windows and unlock it.</li>
+                  <li>Install the extension from the Chrome Web Store or Firefox Add-ons.</li>
+                  <li>Open a sign-in page. Pick your login under the field, or click the Nuvori icon in the browser toolbar.</li>
+                </ol>
+                <p>When you sign in with a new login, Nuvori offers to save it. Logins you save on the PC sync to your phone.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="passkey-manager">
+              <summary><span class="qa__q">What does the passkey manager show?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>On your phone, open <strong>Settings &gt; Passkeys</strong>. It has three parts:</p>
+                <ul>
+                  <li><strong>Saved passkeys</strong>: every passkey, with search. Tap one to see its site, account, when it was added, the app that created it, the last change, how often you used it, its public key fingerprint, and short IDs.</li>
+                  <li><strong>Passkey history</strong>: when passkeys were added, synced, used or deleted. <strong>Changes only</strong> hides sign-ins. The history stays on this phone.</li>
+                  <li><strong>Passkey requests</strong>: the recent apps and websites that asked Nuvori, and why Nuvori was not offered, if it wasn't.</li>
+                </ul>
+                <p>A passkey's private key is never shown. It stays encrypted in your vault.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="passkeys-sync">
+              <summary><span class="qa__q">Do my passkeys sync and get backed up?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Yes. Passkeys are stored encrypted in your vault. They sync to your other devices and are included in backups. Passkey history and the request list stay on each device.</p>
+                <ul>
+                  <li>On Android 14 or newer, Nuvori can create and use passkeys in apps and websites.</li>
+                  <li>On Windows 11, turn on <strong>Passkeys in Windows</strong> in Nuvori's settings.</li>
+                  <li>To sign in on a computer with a passkey from your phone, choose the computer's option to use a phone. Scan the QR code with your phone, tap <strong>Unlock Nuvori</strong> and pick the passkey.</li>
+                </ul>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Website icons ================= -->
+        <section class="faq-cat" id="cat-icons" data-faq-category="icons" aria-labelledby="h-icons">
+          <h2 id="h-icons">Website icons</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="where-website-icons-come-from">
+              <summary><span class="qa__q">Where do the website icons come from?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>From two places. Nuvori never asks an icon service, so no icon service learns which sites you use.</p>
+                <ul>
+                  <li><strong>Built-in logos:</strong> both apps include logos for about 800 popular sites.</li>
+                  <li><strong>Icons from your browser:</strong> when you use a site that already has a login or passkey in Nuvori, the browser extension on your PC takes that site's own icon and sends a small copy to Nuvori for Windows. The browser usually has the icon in its cache already. If not, the extension fetches it from the address the page gives, without cookies. Sync then shares it with your other devices.</li>
+                </ul>
+                <p>Sites without an icon show their first letter.</p>
+                <p>To turn icons off, use <strong>Settings &gt; Appearance &gt; Website icons</strong> on the phone, or <strong>Settings &gt; Website icons</strong> on the PC.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="icons-from-pc-on-phone">
+              <summary><span class="qa__q">Why doesn't my phone show the icons my PC shows?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your phone never saves icons from websites itself. It shows the built-in logos and the icons your PC shares through sync. Check these:</p>
+                <ul>
+                  <li>Both apps are up to date. The PC shares icons only when every device in your group has a version that supports them. Until then, it waits.</li>
+                  <li>The devices synced after you used the site on the PC.</li>
+                  <li><strong>Website icons</strong> is on in the phone's <strong>Appearance</strong> settings.</li>
+                </ul>
+                <!-- verify: icon sharing (site-icons-v1: site_icon_sync.rs, SiteIconSync.kt) is in the current source, not in the published release notes (Windows 2.3.0 says icons "are not synced"). Add the minimum versions here when it ships. -->
+              </div>
+            </details>
+
+            <details class="qa" id="site-changed-its-logo">
+              <summary><span class="qa__q">A website changed its logo. When does Nuvori update it?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Your PC asks the browser for a saved site's icon again after 30 days. The next time you use that site, the extension sends the new icon, and sync passes it on. The newest icon wins on every device.</p>
+                <p>Built-in logos change only with an app update.</p>
+                <p>To refresh all icons now, select <strong>Remove saved icons</strong> under <strong>Settings &gt; Website icons</strong> on the PC. Each site gets its icon again the next time you use it.</p>
+                <!-- verify: after "Remove saved icons", the phone keeps the icons it already received until a new icon for that site arrives (sync only sends new icons, never removals). -->
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Storage and logs ================= -->
+        <section class="faq-cat" id="cat-storage" data-faq-category="storage" aria-labelledby="h-storage">
+          <h2 id="h-storage">Storage and logs</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="sync-history-growth">
+              <summary><span class="qa__q">Does sync history keep growing forever?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Partly, yes. To sync safely, each device keeps a signed record of the changes in your vault. Nuvori doesn't clean up old records yet, so this record grows a little with each change.</p>
+                <p>Other lists have limits:</p>
+                <ul>
+                  <li><strong>Recently deleted:</strong> 30 days.</li>
+                  <li><strong>Previous passwords:</strong> the last 10 per login.</li>
+                  <li><strong>Passkey history:</strong> at most 3,000 entries. <strong>Passkey requests:</strong> the last 100.</li>
+                  <li><strong>Activity log</strong> on the PC: at most 500 events, kept only until Nuvori quits.</li>
+                  <li>Website icons saved on the PC: at most 2,000.</li>
+                </ul>
+                <p>Google Drive sync files also stay in your Drive. See <a href="#google-drive-space">How much Google Drive space does Nuvori use?</a></p>
+                <!-- verify: growth of the signed change history (sync_operations) and Drive files; no compaction found in card_app sync/ or src-tauri change_store.rs / cloud_sync.rs ("Verified checkpoints and cleanup: Pending" in PERSONAL-DEVICE-SYNC.md). Being investigated separately. -->
+              </div>
+            </details>
+
+            <details class="qa" id="clear-activity-log">
+              <summary><span class="qa__q">How do I clear recent activity and logs?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ul>
+                  <li><strong>Activity log on the PC:</strong> open <strong>Settings &gt; Activity log</strong>, select <strong>Clear</strong>, then <strong>Clear log</strong>.</li>
+                  <li><strong>Passkey history on the phone:</strong> open <strong>Settings &gt; Passkeys</strong> and tap <strong>Clear history</strong>. Your passkeys stay saved.</li>
+                  <li><strong>Passkey requests on the phone:</strong> tap <strong>Clear request history</strong> on the same page.</li>
+                  <li><strong>Recently deleted:</strong> select <strong>Empty Recently deleted</strong> on the phone or PC.</li>
+                  <li><strong>Previous passwords:</strong> open the login and select <strong>Clear</strong> under <strong>Previous passwords</strong>.</li>
+                </ul>
+                <p>These lists never contain your passwords. Clearing them doesn't change your items or your sync. The signed sync record can't be cleared by hand.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="google-drive-space">
+              <summary><span class="qa__q">How much Google Drive space does Nuvori use?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Nuvori uses a hidden app folder in your own Drive. It counts toward your Google storage.</p>
+                <ul>
+                  <li><strong>Sync:</strong> encrypted changes and photos. Nuvori doesn't delete old sync files yet, so the folder grows slowly.</li>
+                  <li><strong>Backup:</strong> each phone keeps its newest backup and the one before it.</li>
+                </ul>
+                <p>When your Drive is full, Nuvori says so on the Google Drive card. Free some space, then sync again.</p>
+                <p>To delete everything, open Google Drive in a web browser, go to its settings, then the page that manages apps. Find Nuvori and delete its hidden app data. Do this only when no device uses Google Drive sync or backup anymore. Otherwise, the next sync uploads the files again.</p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Troubleshooting ================= -->
+        <section class="faq-cat" id="cat-troubleshooting" data-faq-category="troubleshooting" aria-labelledby="h-troubleshooting">
+          <h2 id="h-troubleshooting">Troubleshooting</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="sync-stuck">
+              <summary><span class="qa__q">Sync seems stuck. What can I try?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ol>
+                  <li>Unlock Nuvori on both devices. A PC syncs only while it is unlocked.</li>
+                  <li>Put both devices on the same Wi-Fi. Guest networks and some routers stop devices from reaching each other. A phone hotspot often works.</li>
+                  <li>Tap <strong>Sync now</strong> on both.</li>
+                  <li>If a device isn't found, enter its address by hand. On the phone, tap <strong>Show connection details</strong>, then <strong>Connection help</strong> on the device card, and enter the other device's Wi-Fi IP address. On the PC, use <strong>Optional device address</strong> under <strong>Connection</strong>, then <strong>Save and sync</strong>.</li>
+                  <li>If Nuvori says changes <strong>could not be applied</strong> or <strong>could not be read</strong>, update Nuvori on every device. Then tap <strong>Retry changes</strong>.</li>
+                  <li>Check <strong>Conflicts to review</strong>. Nuvori waits for your choice on items changed on two devices.</li>
+                </ol>
+                <p>Still stuck? The PC's <strong>Activity log</strong> shows recent sync messages. <a href="#contact">Tell us what happened</a>.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="device-not-seen">
+              <summary><span class="qa__q">A device says “Not seen yet” or “Not checked yet”.</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>This device hasn't finished a sync with that device yet. The other device may be off, locked, or on another network.</p>
+                <ul>
+                  <li>Open Nuvori on that device and unlock it.</li>
+                  <li>Put both on the same Wi-Fi, or connect Google Drive sync on both with the same Google account.</li>
+                  <li>On Android, keep <strong>Automatic sync</strong> on and allow Nuvori's notifications. Without them, sync stops when Nuvori is closed.</li>
+                  <li>Tap <strong>Sync now</strong>.</li>
+                </ul>
+                <p>A phone that syncs only through Google Drive checks only while Nuvori is open on it. Open it now and then.</p>
+                <p>If the device is gone for good, remove it. See <a href="#remove-lost-device">How do I stop a lost or stolen device from getting new data?</a></p>
+              </div>
+            </details>
+
+            <details class="qa" id="extension-not-filling">
+              <summary><span class="qa__q">The browser extension doesn't fill my login.</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ol>
+                  <li>Start Nuvori for Windows and unlock it. The extension can't fill while the vault is locked.</li>
+                  <li>Click the Nuvori icon in the toolbar. If it says <strong>Not connected</strong>, follow the steps it shows.</li>
+                  <li>In Nuvori, open <strong>Settings &gt; Browser extension</strong>. Make sure your browser is listed and <strong>Connected</strong>. If not, select <strong>Reconnect all</strong> and restart the browser.</li>
+                  <li>Check the address bar. Nuvori fills passwords only on HTTPS sites.</li>
+                  <li>Open the login in Nuvori and check that this site's address is saved in it.</li>
+                  <li>No suggestions under the field? In the extension, check <strong>Suggest logins in pages</strong>, and that the site is not under <strong>Don't suggest on</strong>.</li>
+                  <li>Still nothing? Select <strong>Test connection</strong> under <strong>Diagnostics</strong> in the extension.</li>
+                </ol>
+              </div>
+            </details>
+
+            <details class="qa" id="android-login-not-offered">
+              <summary><span class="qa__q">Nuvori doesn't offer my login in an Android app or website.</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <ul>
+                  <li>Check that Nuvori is your autofill service in <strong>Settings &gt; Autofill and codes</strong>.</li>
+                  <li>In Chrome or Brave, turn on autofill using another service, then restart the browser.</li>
+                  <li>Open the login and check its saved website. A different subdomain needs its own website.</li>
+                  <li>For an app, edit the login and add the app under <strong>Autofill apps</strong>.</li>
+                  <li>HTTP pages, unverified browsers and confusing forms are not filled. Some apps block autofill completely.</li>
+                  <li>When autofill can't help, copy from the <a href="#quick-copy-tile">Quick copy tile</a>.</li>
+                </ul>
+                <p><strong>Passkey requests</strong> under <strong>Settings &gt; Passkeys</strong> shows whether an app asked Nuvori at all.</p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ================= Privacy and security ================= -->
+        <section class="faq-cat" id="cat-privacy" data-faq-category="privacy" aria-labelledby="h-privacy">
+          <h2 id="h-privacy">Privacy and security</h2>
+          <div class="faq__list">
+
+            <details class="qa" id="can-nuvori-see-my-data">
+              <summary><span class="qa__q">Can Nuvori or the developer see my passwords?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>No. Your vault is encrypted on each of your devices. There is no Nuvori account and no Nuvori server, so there is nowhere to send it.</p>
+                <ul>
+                  <li>Wi-Fi sync goes straight between your devices, encrypted.</li>
+                  <li>Google Drive sync and backup store only encrypted files in your own Drive.</li>
+                  <li>The apps and the extension collect no analytics, crash reports or advertising IDs.</li>
+                </ul>
+                <p>Nuvori has not had an independent security audit. The <a href="../privacy/">privacy policy</a> has all the details.</p>
+              </div>
+            </details>
+
+            <details class="qa" id="what-google-can-see">
+              <summary><span class="qa__q">What can Google see when I use Google Drive?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+              <div class="faq__body">
+                <p>Google can't read your items. Every change and photo is encrypted on your device before it is uploaded. Nuvori asks only for its own hidden app folder, and can't see your other Drive files.</p>
+                <p>Google can see that your account uses Nuvori, how many files there are, their sizes, and when they were written. File names use short codes, not your device names or websites.</p>
+                <p>Google could delete or hold back files. That would delay sync, but it can't change your items: every device checks the signature on each change.</p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+      </div>
+
+      <div class="faq-empty" id="faq-empty" hidden>
+        <h2>No answers match “<span id="faq-empty-query"></span>”</h2>
+        <p>Try fewer words or another word, for example “backup” instead of “save copy”. Or ask us directly.</p>
+        <div class="faq-empty__actions">
+          <button class="btn btn--ghost btn--sm" type="button" data-faq-reset>Show all questions</button>
+          <a class="btn btn--primary btn--sm" href="#contact">Contact support</a>
+        </div>
+      </div>
+
+      <section class="help__contact" id="contact" aria-labelledby="h-contact">
+        <h2 id="h-contact">Still need help?</h2>
+        <p><a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Open an issue on GitHub</a>. Say which app and version you use, what you did, and what happened. Issues are public, so never include passwords, codes, card numbers or vault files.</p>
+        <p>For a private question or a security problem, write to <a href="mailto:santosh.kanumuri@hotmail.com">santosh.kanumuri@hotmail.com</a>.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div class="footer__brand">
+        <a class="brand" href="../"><img src="../assets/logo-192.png" alt="" width="30" height="30"><span>Nuvori</span></a>
+        <p>Yours, by design.</p>
+      </div>
+      <nav class="footer__links" aria-label="Footer">
+        <a href="./" aria-current="page">FAQ</a>
+        <a href="../privacy/">Privacy policy</a>
+        <a href="../terms/">Terms of service</a>
+        <a href="https://github.com/santoshkanumuri/vault_apk_windows">Windows on GitHub</a>
+        <a href="https://github.com/santoshkanumuri/vault_apk">Android on GitHub</a>
+        <a href="../#download">Download</a>
+        <a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a>
+        <a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a>
+      </nav>
+      <p class="footer__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS and the browser names on this site are trademarks of their owners.</p>
+    </div>
+  </footer>
+
+  <div class="snack" id="snack" role="status" aria-live="polite"></div>
+  <script src="../palette.js"></script>
+  <script src="../script.js?v=20261122"></script>
+  <script src="faq.js?v=20261121"></script>
+</body>
+</html>

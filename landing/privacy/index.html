@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="../styles.css?v=20261118">
+  <link rel="stylesheet" href="../styles.css?v=20261122">
   <link rel="stylesheet" href="../legal.css">
   <script>
     document.documentElement.classList.add("js");
@@ -39,6 +39,7 @@
       </a>
       <nav class="nav__links" aria-label="Pages">
         <a href="../">Home</a>
+        <a href="../faq/">FAQ</a>
         <a href="./" class="is-active" aria-current="page">Privacy</a>
         <a href="../terms/">Terms</a>
       </nav>
@@ -66,7 +67,7 @@
           <li><strong>No account, no developer server.</strong> You create a vault on your own device. There is no Nuvori account and no Nuvori server to send it to.</li>
           <li><strong>Encrypted on your devices.</strong> Your passwords, cards, codes, passkeys, notes and photos are encrypted on each of your devices. The developer cannot read them.</li>
           <li><strong>No ads, no analytics, no tracking.</strong> The apps and the extension collect no usage data, crash reports or advertising IDs.</li>
-          <li><strong>The network only for what you turn on.</strong> Sync over your Wi-Fi, sync and backup in a hidden folder of your own Google Drive, and codes for your watch. All of it is encrypted before it leaves your device.</li>
+          <li><strong>The network only for what you turn on, plus website icons.</strong> Sync over your Wi-Fi, sync and backup in a hidden folder of your own Google Drive, and codes for your watch. All of it is encrypted before it leaves your device. The browser extension may also fetch the icon of a website you have a login for, without cookies (see section 9).</li>
           <li><strong>Nothing is sold or shared.</strong> The developer does not sell, rent or share your data with anyone.</li>
         </ul>
       </div>
@@ -209,7 +210,7 @@
 
       <section id="extension">
         <h2>9. The browser extension</h2>
-        <p>Nuvori Password Fill for Chrome, Edge, Brave and Firefox works only together with Nuvori for Windows on the same PC.</p>
+        <p>Nuvori Password Fill for Chromium-based and Firefox-based browsers (such as Chrome, Edge, Brave and Firefox) works only together with Nuvori for Windows on the same PC.</p>
         <h3>What it reads</h3>
         <ul>
           <li>It runs on HTTPS pages, including frames inside them, to find sign-in, card, address and authenticator-code fields.</li>
@@ -232,7 +233,7 @@
         </ul>
         <h3>Other details</h3>
         <ul>
-          <li>The extension makes no network requests of its own.</li>
+          <li><strong>Website icons.</strong> When you use a website that already has a login or passkey in Nuvori, the extension may fetch that website's icon from the address the page gives for it. It sends no cookies and no referrer, and the browser usually answers from its cache. It does this at most once every 6 hours per website, and never in a private window. The extension turns the icon into a small image and gives only that image to Nuvori for Windows. Nothing about you or your vault is sent. Turn off <strong>Website icons</strong> in Nuvori for Windows to stop this. The extension makes no other network requests of its own.</li>
           <li><strong>Copy password</strong> puts the password on the clipboard, and the extension tries to clear it after about 30 seconds.</li>
           <li>If you turn on "Use Nuvori instead of the browser's password manager", the extension asks for the browser's privacy permission and turns off the browser's own password saving and, where the browser allows it, its address and card autofill.</li>
           <li>Removing the extension deletes everything it stored.</li>
@@ -341,6 +342,7 @@
         <p>Yours, by design.</p>
       </div>
       <nav class="footer__links" aria-label="Footer">
+        <a href="../faq/">FAQ</a>
         <a href="./" aria-current="page">Privacy policy</a>
         <a href="../terms/">Terms of service</a>
         <a href="https://github.com/santoshkanumuri/vault_apk_windows">Windows on GitHub</a>
@@ -349,12 +351,12 @@
         <a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a>
         <a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a>
       </nav>
-      <p class="footer__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS, Chrome, Edge, Brave and Firefox are trademarks of their owners.</p>
+      <p class="footer__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS and the browser names on this site are trademarks of their owners.</p>
     </div>
   </footer>
 
   <div class="snack" id="snack" role="status" aria-live="polite"></div>
   <script src="../palette.js"></script>
-  <script src="../script.js?v=20261118"></script>
+  <script src="../script.js?v=20261122"></script>
 </body>
 </html>
