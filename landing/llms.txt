@@ -1,0 +1,39 @@
+# Nuvori
+
+> Nuvori is a free, private password manager for Windows and Android. It keeps passwords, cards, authenticator codes, passkeys and notes in an encrypted vault on the user's own devices, outside any browser. A browser extension fills the same vault in any browser built on Chromium or Firefox on Windows. The tagline is "Switch browsers, not passwords."
+
+Key facts:
+
+- Price: free. No ads, no in-app purchases, no subscription.
+- Account: none. There is no Nuvori account and no Nuvori server. The developer receives no vault data.
+- Platforms: Windows 10 (version 2004) or newer, 64-bit; Android 10 or newer; Wear OS 3 or newer (authenticator codes, with the phone app). There is no Nuvori for Mac, iPhone, iPad or Linux, and Safari is not supported.
+- Browser extension: "Nuvori Password Fill", from the Chrome Web Store (browsers built on Chromium 127 or newer) or Firefox Add-ons (browsers built on Firefox 140 or newer; listing under review). It needs Nuvori for Windows on the same PC, has no vault of its own, and never receives the master password. It fills logins, cards, addresses and codes on HTTPS pages.
+- Browsers recognized by name on Windows: Zen, Helium, Comet, Arc, Brave, Vivaldi, Opera, Thorium, Chromium, Chrome, Edge, Firefox, LibreWolf, Waterfox, Floorp, Mullvad Browser and Tor Browser. Another browser built on Chromium or Firefox can be connected in Settings > Browser extension.
+- Sync (optional): end-to-end encrypted and signed, directly between the user's devices over Wi-Fi, or through a hidden app folder in the user's own Google Drive. Up to 6 phones or tablets and 2 Windows PCs per vault.
+- Android: an autofill service for apps and 13 verified browsers; a passkey provider on Android 14 or newer.
+- Windows: Windows Hello unlock; a passkey provider in Windows 11 (Microsoft Store version).
+- Import: Nuvori for Android imports CSV exports from browsers and password managers, and Bitwarden JSON. Nuvori for Windows imports KeePass databases (.kdbx).
+- Status (November 2026): the Windows app is under review in the Microsoft Store; the Android and Wear OS apps are in closed testing on Google Play; the Chrome Web Store extension is available.
+- Developer: Santosh Kanumuri. Releases and issue reports are on GitHub.
+
+## Pages
+
+- [Home](https://nuvori.santoshkanumuri.com/): what Nuvori is, features, devices, downloads
+- [Browsers](https://nuvori.santoshkanumuri.com/browsers/): using Nuvori in Zen, Helium, Arc, Comet, Brave, Firefox and others, with setup steps
+- [Import passwords](https://nuvori.santoshkanumuri.com/import-passwords/): moving passwords from Chrome, Edge, Brave or Firefox into Nuvori
+- [Android](https://nuvori.santoshkanumuri.com/android/): Android autofill, passkeys and Wear OS
+- [FAQ](https://nuvori.santoshkanumuri.com/faq/): about 50 questions on switching browsers, sync, backups, lost devices, autofill, passkeys and privacy
+- [Privacy policy](https://nuvori.santoshkanumuri.com/privacy/): what each app and the extension handle
+- [Terms of service](https://nuvori.santoshkanumuri.com/terms/)
+
+## Downloads
+
+- [Microsoft Store: Nuvori for Windows](https://apps.microsoft.com/detail/9MWN4TC0RWQK)
+- [Chrome Web Store: Nuvori Password Fill](https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil)
+- [Firefox Add-ons: Nuvori Password Fill](https://addons.mozilla.org/en-US/firefox/addon/nuvori-password-fill/)
+- [Google Play: Nuvori for Android and Wear OS](https://play.google.com/store/apps/details?id=com.application.private_vault)
+
+## Optional
+
+- [Nuvori for Windows on GitHub](https://github.com/santoshkanumuri/vault_apk_windows)
+- [Nuvori for Android on GitHub](https://github.com/santoshkanumuri/vault_apk)

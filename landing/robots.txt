@@ -1,0 +1,5 @@
+# Nuvori website. Every page may be crawled, by search engines and by AI answer engines.
+User-agent: *
+Allow: /
+
+Sitemap: https://nuvori.santoshkanumuri.com/sitemap.xml

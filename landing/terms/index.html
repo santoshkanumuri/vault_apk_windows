@@ -5,60 +5,61 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Terms of service · Nuvori</title>
   <meta name="description" content="The terms for using Nuvori for Android, Wear OS, Windows, the Nuvori Password Fill browser extension, and this website.">
-  <meta name="theme-color" content="#050705" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f8faf5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101b15" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f3f5f1" media="(prefers-color-scheme: light)">
   <meta property="og:type" content="article">
   <meta property="og:title" content="Nuvori terms of service">
   <meta property="og:description" content="The terms for using the Nuvori apps, the browser extension, and this website.">
   <meta property="og:url" content="https://nuvori.santoshkanumuri.com/terms/">
   <meta property="og:image" content="https://nuvori.santoshkanumuri.com/assets/og-image.jpg">
   <link rel="canonical" href="https://nuvori.santoshkanumuri.com/terms/">
+  <meta property="og:site_name" content="Nuvori">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Nuvori padlock logo and the words: Nuvori, your offline password vault for Windows.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Nuvori terms of service">
+  <meta name="twitter:description" content="The terms for using the Nuvori apps, the browser extension, and this website.">
+  <meta name="twitter:image" content="https://nuvori.santoshkanumuri.com/assets/og-image.jpg">
+  <meta name="twitter:image:alt" content="The Nuvori padlock logo and the words: Nuvori, your offline password vault for Windows.">
+  <link rel="icon" href="../favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
-  <link rel="icon" type="image/png" sizes="64x64" href="../assets/favicon-64.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="../assets/favicon-48.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="../assets/logo-192.png">
   <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="../styles.css?v=20261122">
-  <link rel="stylesheet" href="../legal.css">
+  <link rel="manifest" href="../site.webmanifest">
+  <link rel="preload" href="../assets/fonts/atkinson-hyperlegible-next.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../site.css?v=20261123">
   <script>
     document.documentElement.classList.add("js");
     try { var t = localStorage.getItem("nuvori.site.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
   </script>
+  <script type="application/ld+json">
+  {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Nuvori", "item": "https://nuvori.santoshkanumuri.com/"}, {"@type": "ListItem", "position": 2, "name": "Terms of service", "item": "https://nuvori.santoshkanumuri.com/terms/"}]}
+  </script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
-  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
-  <div class="grain" aria-hidden="true"></div>
-
-  <header class="nav" id="nav">
-    <div class="nav__inner wrap">
-      <a class="brand" href="../" aria-label="Nuvori home">
-        <img src="../assets/logo-192.png" alt="" width="34" height="34">
-        <span>Nuvori</span>
-      </a>
-      <nav class="nav__links" aria-label="Pages">
-        <a href="../">Home</a>
+  <header class="top">
+    <div class="wrap top__inner">
+      <a class="brand" href="../"><img src="../assets/logo-96.webp" alt="" width="30" height="30">Nuvori</a>
+      <nav class="top__nav" aria-label="Site">
+        <a href="../browsers/">Browsers</a>
+        <a href="../import-passwords/">Import</a>
+        <a href="../android/">Android</a>
         <a href="../faq/">FAQ</a>
-        <a href="../privacy/">Privacy</a>
-        <a href="./" class="is-active" aria-current="page">Terms</a>
       </nav>
-      <div class="nav__actions">
-        <button class="icon-btn" id="themeToggle" type="button" aria-label="Switch to light theme">
-          <svg class="i i--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-          <svg class="i i--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-        </button>
-        <a class="btn btn--primary btn--sm" href="../#download">Get Nuvori</a>
-      </div>
+      <button class="theme" id="theme" type="button" aria-label="Use dark theme"><svg class="i i--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="i i--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+      <a class="btn btn--sm" href="../#download">Get Nuvori</a>
     </div>
   </header>
 
   <main id="main">
     <article class="legal">
       <header class="legal__head">
-        <p class="eyebrow">Legal</p>
         <h1>Terms of service</h1>
-        <p class="legal__meta">Effective November 18, 2026 · Applies to Nuvori for Android, Nuvori for Wear OS, Nuvori for Windows, the Nuvori Password Fill browser extension, and this website.</p>
+        <p class="legal__meta">Effective November 18, 2026.<br>It applies to Nuvori for Android, Nuvori for Wear OS, Nuvori for Windows, the Nuvori Password Fill browser extension, and this website.</p>
       </header>
 
       <div class="legal__summary">
@@ -196,34 +197,51 @@
 
       <div class="legal__contact" id="contact">
         <h2>16. Contact</h2>
-        <p>Santosh Kanumuri · <a href="mailto:santosh.kanumuri@hotmail.com">santosh.kanumuri@hotmail.com</a></p>
+        <p>Santosh Kanumuri<br><a href="mailto:santosh.kanumuri@hotmail.com">santosh.kanumuri@hotmail.com</a></p>
         <p>See also the <a href="../privacy/">privacy policy</a>.</p>
       </div>
     </article>
   </main>
 
-  <footer class="footer">
-    <div class="wrap footer__inner">
-      <div class="footer__brand">
-        <a class="brand" href="../"><img src="../assets/logo-192.png" alt="" width="30" height="30"><span>Nuvori</span></a>
+  <footer class="foot">
+    <div class="wrap foot__inner">
+      <div class="foot__brand">
+        <a class="brand" href="../"><img src="../assets/logo-96.webp" alt="" width="30" height="30" loading="lazy" decoding="async">Nuvori</a>
         <p>Yours, by design.</p>
       </div>
-      <nav class="footer__links" aria-label="Footer">
-        <a href="../faq/">FAQ</a>
-        <a href="../privacy/">Privacy policy</a>
-        <a href="./" aria-current="page">Terms of service</a>
-        <a href="https://github.com/santoshkanumuri/vault_apk_windows">Windows on GitHub</a>
-        <a href="https://github.com/santoshkanumuri/vault_apk">Android on GitHub</a>
-        <a href="../#download">Download</a>
-        <a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a>
-        <a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a>
+      <nav class="foot__nav" aria-label="Footer">
+        <div>
+          <p class="foot__head">Guides</p>
+          <ul>
+            <li><a href="../browsers/">Browsers</a></li>
+            <li><a href="../import-passwords/">Import passwords</a></li>
+            <li><a href="../android/">Android</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="foot__head">Help</p>
+          <ul>
+            <li><a href="../faq/">FAQ</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a></li>
+            <li><a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="foot__head">Nuvori</p>
+          <ul>
+            <li><a href="../#download">Download</a></li>
+            <li><a href="../privacy/">Privacy policy</a></li>
+            <li><a href="../terms/" aria-current="page">Terms of service</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk_windows">Windows app on GitHub</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk">Android app on GitHub</a></li>
+          </ul>
+        </div>
       </nav>
-      <p class="footer__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS and the browser names on this site are trademarks of their owners.</p>
+      <p class="foot__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS and the browser names on this site are trademarks of their owners.</p>
     </div>
   </footer>
 
   <div class="snack" id="snack" role="status" aria-live="polite"></div>
-  <script src="../palette.js"></script>
-  <script src="../script.js?v=20261122"></script>
+  <script src="../site.js?v=20261123" defer></script>
 </body>
 </html>

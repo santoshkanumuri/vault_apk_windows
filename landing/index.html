@@ -3,26 +3,111 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Nuvori: switch browsers, not passwords</title>
-  <meta name="description" content="Nuvori keeps your passwords, cards, codes and passkeys in an encrypted vault on your own PC and phone, outside any browser. Add the extension to Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox or another Chromium- or Firefox-based browser on Windows, and the same vault fills. No account, no server, no ads.">
-  <meta name="theme-color" content="#050705" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f8faf5" media="(prefers-color-scheme: light)">
+  <title>Nuvori password manager: switch browsers, not passwords</title>
+  <meta name="description" content="A free, private password manager for Windows and Android. Logins, cards and codes fill in Zen, Helium, Arc, Comet, Brave, Firefox and more. No account, no server.">
+  <link rel="canonical" href="https://nuvori.santoshkanumuri.com/">
+  <meta name="theme-color" content="#101b15" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f3f5f1" media="(prefers-color-scheme: light)">
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Nuvori">
+  <meta property="og:locale" content="en_US">
   <meta property="og:title" content="Nuvori: switch browsers, not passwords">
   <meta property="og:description" content="One encrypted vault on your own PC and phone. The same logins, cards and codes fill in Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox and more. No account. No server.">
   <meta property="og:url" content="https://nuvori.santoshkanumuri.com/">
   <meta property="og:image" content="https://nuvori.santoshkanumuri.com/assets/og-image.jpg">
-  <link rel="canonical" href="https://nuvori.santoshkanumuri.com/">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Nuvori padlock logo and the words: Nuvori, your offline password vault for Windows.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Nuvori: switch browsers, not passwords">
   <meta name="twitter:description" content="One encrypted vault on your own PC and phone. The same logins, cards and codes fill in Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox and more.">
+  <meta name="twitter:image" content="https://nuvori.santoshkanumuri.com/assets/og-image.jpg">
+  <meta name="twitter:image:alt" content="The Nuvori padlock logo and the words: Nuvori, your offline password vault for Windows.">
+  <link rel="icon" href="favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
-  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="assets/favicon-48.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/logo-192.png">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="styles.css?v=20261122">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="preload" href="assets/fonts/atkinson-hyperlegible-next.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="site.css?v=20261123">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://nuvori.santoshkanumuri.com/#website",
+        "url": "https://nuvori.santoshkanumuri.com/",
+        "name": "Nuvori",
+        "description": "A free, private password manager for Windows and Android, with a browser extension for browsers built on Chromium or Firefox.",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://nuvori.santoshkanumuri.com/#organization" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://nuvori.santoshkanumuri.com/#organization",
+        "name": "Nuvori",
+        "url": "https://nuvori.santoshkanumuri.com/",
+        "logo": { "@type": "ImageObject", "url": "https://nuvori.santoshkanumuri.com/assets/logo-512.png", "width": 512, "height": 512 },
+        "founder": { "@type": "Person", "name": "Santosh Kanumuri" },
+        "sameAs": [
+          "https://github.com/santoshkanumuri/vault_apk_windows",
+          "https://github.com/santoshkanumuri/vault_apk"
+        ]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://nuvori.santoshkanumuri.com/#windows",
+        "name": "Nuvori for Windows",
+        "description": "A password manager for Windows that keeps passwords, cards, authenticator codes, passkeys and notes in an encrypted vault on the PC. Windows Hello unlock, a passkey provider for Windows 11, and encrypted sync with Nuvori for Android over Wi-Fi or your own Google Drive. No Nuvori account.",
+        "applicationCategory": "SecurityApplication",
+        "operatingSystem": "Windows 10 version 2004 or later (64-bit)",
+        "url": "https://nuvori.santoshkanumuri.com/",
+        "installUrl": "https://apps.microsoft.com/detail/9MWN4TC0RWQK",
+        "screenshot": "https://nuvori.santoshkanumuri.com/assets/desktop-home.webp",
+        "image": "https://nuvori.santoshkanumuri.com/assets/logo-512.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": { "@type": "Person", "name": "Santosh Kanumuri" },
+        "publisher": { "@id": "https://nuvori.santoshkanumuri.com/#organization" }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://nuvori.santoshkanumuri.com/#extension",
+        "name": "Nuvori Password Fill",
+        "description": "The Nuvori browser extension. It fills logins, cards, addresses and authenticator codes from Nuvori for Windows on HTTPS pages, in Zen, Helium, Comet, Arc, Brave, Vivaldi, Opera, Firefox, Chrome, Edge and other browsers built on Chromium or Firefox. It has no vault of its own and never receives the master password.",
+        "applicationCategory": "BrowserApplication",
+        "operatingSystem": "Windows",
+        "softwareRequirements": "Nuvori for Windows on the same PC, and a browser built on Chromium 127 or newer, or on Firefox 140 or newer",
+        "url": "https://nuvori.santoshkanumuri.com/browsers/",
+        "installUrl": [
+          "https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil",
+          "https://addons.mozilla.org/en-US/firefox/addon/nuvori-password-fill/"
+        ],
+        "screenshot": "https://nuvori.santoshkanumuri.com/assets/extension-fill.webp",
+        "image": "https://nuvori.santoshkanumuri.com/assets/logo-512.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": { "@type": "Person", "name": "Santosh Kanumuri" },
+        "publisher": { "@id": "https://nuvori.santoshkanumuri.com/#organization" }
+      },
+      {
+        "@type": "MobileApplication",
+        "@id": "https://nuvori.santoshkanumuri.com/#android",
+        "name": "Nuvori for Android",
+        "description": "A password manager for Android phones and tablets, with a Wear OS companion for authenticator codes. Nuvori is an Android autofill service and, on Android 14 or newer, a passkey provider. Encrypted sync with Nuvori for Windows over Wi-Fi or your own Google Drive. No Nuvori account.",
+        "applicationCategory": "SecurityApplication",
+        "operatingSystem": "Android 10 or later; Wear OS 3 or later for the watch app",
+        "url": "https://nuvori.santoshkanumuri.com/android/",
+        "installUrl": "https://play.google.com/store/apps/details?id=com.application.private_vault",
+        "screenshot": "https://nuvori.santoshkanumuri.com/assets/phone-home.webp",
+        "image": "https://nuvori.santoshkanumuri.com/assets/logo-512.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": { "@type": "Person", "name": "Santosh Kanumuri" },
+        "publisher": { "@id": "https://nuvori.santoshkanumuri.com/#organization" }
+      }
+    ]
+  }
+  </script>
   <script>
     /* Apply the saved theme before the first paint, so the page never flashes. */
     document.documentElement.classList.add("js");
@@ -31,821 +116,341 @@
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
-
-  <!-- Ambient background -->
-  <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
-  <div class="grain" aria-hidden="true"></div>
-
-  <header class="nav" id="nav">
-    <div class="nav__inner wrap">
-      <a class="brand" href="#top" aria-label="Nuvori home">
-        <img src="assets/logo-192.png" alt="" width="34" height="34">
-        <span>Nuvori</span>
-      </a>
-      <nav class="nav__links" aria-label="Sections">
-        <a href="#browsers">Browsers</a>
-        <a href="#sync">Sync</a>
-        <a href="#features">Features</a>
-        <a href="#devices">Devices</a>
-        <a href="#security">Security</a>
+  <header class="top">
+    <div class="wrap top__inner">
+      <a class="brand" href="./" aria-current="page"><img src="assets/logo-96.webp" alt="" width="30" height="30">Nuvori</a>
+      <nav class="top__nav" aria-label="Site">
+        <a href="browsers/">Browsers</a>
+        <a href="import-passwords/">Import</a>
+        <a href="android/">Android</a>
         <a href="faq/">FAQ</a>
       </nav>
-      <div class="nav__actions">
-        <button class="icon-btn" id="themeToggle" type="button" aria-label="Switch to light theme">
-          <svg class="i i--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-          <svg class="i i--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-        </button>
-        <a class="btn btn--primary btn--sm" href="#download">Get Nuvori</a>
-      </div>
+      <button class="theme" id="theme" type="button" aria-label="Use dark theme"><svg class="i i--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="i i--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+      <a class="btn btn--sm" href="#download">Get Nuvori</a>
     </div>
   </header>
 
   <main id="main">
-    <!-- HERO -->
-    <section class="hero wrap" id="top">
-      <div class="hero__copy">
-        <a class="pill pill--glow reveal" href="#browsers">
-          <span class="pill__dot"></span>
-          Zen, Helium, Comet, Arc and more
-          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
-        </a>
-        <h1 class="hero__title reveal">Switch browsers,<br><span class="gradient-text">not passwords.</span></h1>
-        <p class="hero__lead reveal">Zen today, Helium tomorrow, Comet next week. Your logins, cards and codes live in Nuvori, not in the browser, so they fill in whichever browser you open on your PC, and on your Android phone too.</p>
-        <div class="hero__cta reveal">
-          <a class="btn btn--primary btn--lg" href="#download">
-            Get Nuvori
-            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
-          </a>
-          <a class="btn btn--ghost btn--lg" href="#browsers">See it switch</a>
-        </div>
-        <ul class="platforms reveal" aria-label="Works on">
-          <li><svg class="i i--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8.5v8.5H3zm9.5 0H21v8.5h-8.5zM3 12.5h8.5V21H3zm9.5 0H21V21h-8.5z"/></svg>Windows</li>
-          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>Android</li>
-          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 10v2l1 1m3.13-5.34-.81-4.05a2 2 0 0 0-2-1.61h-2.68a2 2 0 0 0-2 1.61l-.78 4.05m.02 8.7.8 4a2 2 0 0 0 2 1.61h2.72a2 2 0 0 0 2-1.61l.81-4.05"/></svg>Wear OS</li>
-          <li><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></svg>Chromium- and Firefox-based browsers</li>
-        </ul>
-      </div>
-
-      <div class="stage reveal" id="stage" role="img" aria-label="Illustration: the same Nuvori login fills a sign-in form in Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox, Chrome and Edge, one browser after another, and on an Android phone.">
-        <div class="stage__glow" aria-hidden="true"></div>
-        <svg class="stage__lines" aria-hidden="true">
-          <path class="ln" data-line="window"/>
-          <path class="ln" data-line="phone"/>
-          <path class="ln ln--pulse" data-line="window"/>
-          <path class="ln ln--pulse" data-line="phone"/>
-        </svg>
-        <div class="stage__deck" data-depth="10">
-          <div class="bw-ghost bw-ghost--2" aria-hidden="true"><i></i><span data-ghost="2">Comet</span></div>
-          <div class="bw-ghost bw-ghost--1" aria-hidden="true"><i></i><span data-ghost="1">Helium</span></div>
-          <div class="bw is-filled" id="heroBw" data-bw data-layout="side" data-tint="sky">
-            <div class="bw__top">
-              <i class="bw__dots"><b></b><b></b><b></b></i>
-              <span class="bw__tab"><span class="bw__mono" data-bw-mono>Z</span><span data-bw-name>Zen</span></span>
-              <span class="bw__url"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>mail.northwind.example</span></span>
-              <img class="bw__ext" src="assets/favicon-32.png" alt="" width="16" height="16">
-            </div>
-            <div class="bw__main">
-              <span class="bw__side"><span class="bw__srow is-on"><span class="bw__mono" data-bw-mono>Z</span><span data-bw-name>Zen</span></span><span class="bw__srow"></span><span class="bw__srow"></span><span class="bw__srow"></span></span>
-              <div class="bw__page">
-                <div class="signin">
-                  <span class="signin__brand"><span class="signin__logo">N</span>Northwind Mail</span>
-                  <span class="signin__title">Sign in</span>
-                  <span class="fld"><small>Email</small><span class="fld__box"><span class="fld__val">jamie@northwind.example</span><span class="caret"></span></span></span>
-                  <span class="nvm"><span class="nvm__head"><img src="assets/favicon-32.png" alt="" width="14" height="14">Nuvori</span><span class="nvm__row"><span class="av av--accent">N</span><span><b>Northwind Mail</b><small>jamie@northwind.example</small></span><em>Fill</em></span></span>
-                  <span class="fld"><small>Password</small><span class="fld__box"><span class="fld__val fld__val--dots">••••••••••••</span></span></span>
-                  <span class="signin__btn">Sign in</span>
-                </div>
-              </div>
-            </div>
+    <section class="hero wrap" aria-labelledby="h-hero">
+      <h1 id="h-hero">Switch browsers, not passwords.</h1>
+      <div class="hero__body">
+        <div>
+          <p class="hero__lead">Nuvori keeps your passwords, cards, codes and passkeys in an encrypted vault on your own PC and phone, not inside a browser. Add the free extension to whichever browser you try next, and the same logins fill there.</p>
+          <div class="hero__cta">
+            <a class="btn btn--lg" href="#download">Get Nuvori</a>
+            <p class="hero__fine">Free. No account. Windows and Android.</p>
           </div>
         </div>
-        <div class="stage__phone" data-depth="22">
-          <div class="mphone is-filled" id="heroPhone">
-            <div class="mphone__screen">
-              <span class="mphone__status"><b>9:41</b><i></i></span>
-              <span class="mphone__app"><span class="signin__logo">N</span>Northwind</span>
-              <span class="mfld"><small>Email</small><span class="mfld__box"><span class="fld__val">jamie@northwind…</span></span></span>
-              <span class="mfld"><small>Password</small><span class="mfld__box"><span class="fld__val fld__val--dots">••••••••••</span></span></span>
-              <span class="mphone__btn">Sign in</span>
-              <span class="mphone__suggest"><svg class="i" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg><span><b>jamie@northwind.example</b><small>Nuvori</small></span></span>
-              <span class="mphone__kbd"></span>
-            </div>
-          </div>
-        </div>
-        <div class="vault-badge" data-depth="30">
-          <span class="vault-badge__ring" aria-hidden="true"></span>
-          <img src="assets/logo-192.png" alt="" width="40" height="40">
-          <span><b>Your Nuvori vault</b><small>On your PC and phone</small></span>
-        </div>
-        <div class="toast stage__toast is-on" data-depth="40">
-          <span class="toast__icon"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>
-          <span><b>Filled</b> in <span data-bw-name>Zen</span></span>
-        </div>
-      </div>
-    </section>
 
-    <!-- MARQUEE -->
-    <section class="marquee" aria-label="Some of the browsers Nuvori for Windows recognizes">
-      <div class="marquee__track">
-        <ul>
-          <li>Zen</li><li>Helium</li><li>Comet</li><li>Arc</li><li>Brave</li><li>Vivaldi</li><li>Firefox</li><li>Opera</li><li>LibreWolf</li><li>Waterfox</li><li>Floorp</li><li>Thorium</li><li>Mullvad Browser</li><li>Chrome</li><li>Edge</li>
-        </ul>
-        <ul aria-hidden="true">
-          <li>Zen</li><li>Helium</li><li>Comet</li><li>Arc</li><li>Brave</li><li>Vivaldi</li><li>Firefox</li><li>Opera</li><li>LibreWolf</li><li>Waterfox</li><li>Floorp</li><li>Thorium</li><li>Mullvad Browser</li><li>Chrome</li><li>Edge</li>
-        </ul>
-      </div>
-    </section>
+        <fieldset class="picker" data-picker>
+          <legend>Which browser do you use on your PC?</legend>
+          <ul class="roster">
+            <li><input type="radio" name="browser" id="b-zen" value="zen" data-engine="firefox" checked><label for="b-zen">Zen</label></li>
+            <li><input type="radio" name="browser" id="b-helium" value="helium" data-engine="chromium"><label for="b-helium">Helium</label></li>
+            <li><input type="radio" name="browser" id="b-comet" value="comet" data-engine="chromium"><label for="b-comet">Comet</label></li>
+            <li><input type="radio" name="browser" id="b-arc" value="arc" data-engine="chromium"><label for="b-arc">Arc</label></li>
+            <li><input type="radio" name="browser" id="b-brave" value="brave" data-engine="chromium"><label for="b-brave">Brave</label></li>
+            <li><input type="radio" name="browser" id="b-vivaldi" value="vivaldi" data-engine="chromium"><label for="b-vivaldi">Vivaldi</label></li>
+            <li><input type="radio" name="browser" id="b-firefox" value="firefox" data-engine="firefox"><label for="b-firefox">Firefox</label></li>
+            <li><input type="radio" name="browser" id="b-chrome" value="chrome" data-engine="chromium"><label for="b-chrome">Chrome</label></li>
+            <li><input type="radio" name="browser" id="b-edge" value="edge" data-engine="chromium"><label for="b-edge">Edge</label></li>
+            <li><input type="radio" name="browser" id="b-opera" value="opera" data-engine="chromium"><label for="b-opera">Opera</label></li>
+            <li><input type="radio" name="browser" id="b-librewolf" value="librewolf" data-engine="firefox"><label for="b-librewolf">LibreWolf</label></li>
+            <li><input type="radio" name="browser" id="b-floorp" value="floorp" data-engine="firefox"><label for="b-floorp">Floorp</label></li>
+            <li><input type="radio" name="browser" id="b-waterfox" value="waterfox" data-engine="firefox"><label for="b-waterfox">Waterfox</label></li>
+            <li><input type="radio" name="browser" id="b-thorium" value="thorium" data-engine="chromium"><label for="b-thorium">Thorium</label></li>
+            <li><input type="radio" name="browser" id="b-chromium" value="chromium" data-engine="chromium"><label for="b-chromium">Chromium</label></li>
+            <li><input type="radio" name="browser" id="b-mullvad" value="mullvad" data-engine="firefox"><label for="b-mullvad">Mullvad Browser</label></li>
+            <li><input type="radio" name="browser" id="b-tor" value="tor" data-engine="firefox"><label for="b-tor">Tor Browser</label></li>
+            <li class="roster__aside"><input type="radio" name="browser" id="b-safari" value="safari" data-engine="safari"><label for="b-safari">Safari</label></li>
+            <li class="roster__aside"><input type="radio" name="browser" id="b-other" value="other" data-engine="other"><label for="b-other">Another browser</label></li>
+          </ul>
 
-    <!-- BROWSERS: the switch -->
-    <section class="section wrap" id="browsers">
-      <header class="section__head reveal">
-        <p class="eyebrow">Switch freely</p>
-        <h2>Your vault lives outside the browser.<br><span class="muted">Change browsers any time.</span></h2>
-        <p class="section__lead">Nuvori for Windows holds your vault. The extension in each browser asks it only for the login you pick. Watch the same login fill in one browser after another.</p>
-      </header>
-
-      <div class="switcher">
-        <div class="switcher__grid">
-          <div class="switcher__stage reveal reveal--scale" role="img" aria-label="A sign-in form in one browser after another: Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox, Chrome and Edge. Each time the Nuvori list opens under the email field, and the same login fills.">
-            <div class="bw bw--lg is-filled" id="switchBw" data-bw data-layout="side" data-tint="sky">
-              <div class="bw__top">
-                <i class="bw__dots"><b></b><b></b><b></b></i>
-                <span class="bw__tab"><span class="bw__mono" data-bw-mono>Z</span><span data-bw-name>Zen</span></span>
-                <span class="bw__url"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>mail.northwind.example</span></span>
-                <img class="bw__ext" src="assets/favicon-32.png" alt="" width="16" height="16">
-              </div>
-              <div class="bw__main">
-                <span class="bw__side"><span class="bw__srow is-on"><span class="bw__mono" data-bw-mono>Z</span><span data-bw-name>Zen</span></span><span class="bw__srow"></span><span class="bw__srow"></span><span class="bw__srow"></span></span>
-                <div class="bw__page">
-                  <div class="signin">
-                    <span class="signin__brand"><span class="signin__logo">N</span>Northwind Mail</span>
-                    <span class="signin__title">Sign in</span>
-                    <span class="fld"><small>Email</small><span class="fld__box"><span class="fld__val">jamie@northwind.example</span><span class="caret"></span></span></span>
-                    <span class="nvm"><span class="nvm__head"><img src="assets/favicon-32.png" alt="" width="14" height="14">Nuvori</span><span class="nvm__row"><span class="av av--accent">N</span><span><b>Northwind Mail</b><small>jamie@northwind.example</small></span><em>Fill</em></span></span>
-                    <span class="fld"><small>Password</small><span class="fld__box"><span class="fld__val fld__val--dots">••••••••••••</span></span></span>
-                    <span class="signin__btn">Sign in</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <p class="switcher__caption" aria-hidden="true"><span class="bw__mono" data-cap-mono data-tint="sky">Z</span><span>Filled in <b data-cap-name>Zen</b></span><span class="tag tag--green" data-cap-family>Built on Firefox</span></p>
-          </div>
-
-          <article class="switcher__info reveal">
-            <div class="switcher__name">
-              <h3>Any of them, in three steps</h3>
-            </div>
-            <ol class="steps">
-              <li>Install <strong>Nuvori for Windows</strong> and unlock your vault.</li>
-              <li>Add <strong>Nuvori Password Fill</strong> to your browser: from the Chrome Web Store for browsers built on Chromium, or from Firefox Add-ons for browsers built on Firefox (that listing is under review).</li>
-              <li>Nuvori finds the browser and connects it. Restart the browser once. Logins, cards, addresses and codes then fill on HTTPS pages.</li>
+          <div class="answer" data-for="firefox" aria-live="polite">
+            <p class="answer__title"><span data-name>This browser</span> is built on Firefox.</p>
+            <ol>
+              <li>Install Nuvori for Windows and unlock your vault.</li>
+              <li>Add Nuvori Password Fill from Firefox Add-ons. The listing is under review.</li>
+              <li>Nuvori finds the browser and connects it. Restart <span data-name>the browser</span> once.</li>
             </ol>
-            <p class="switcher__note">Trying a new browser tomorrow? Add the extension there too. Your vault doesn't move.</p>
-          </article>
-        </div>
+            <p class="answer__note">Logins and codes show in the list under the field. Cards and addresses fill from the Nuvori button in the toolbar.</p>
+            <p class="answer__need">Needs version 140 or newer, and Nuvori for Windows on the same PC.</p>
+            <div class="answer__actions">
+              <a class="btn" href="https://addons.mozilla.org/en-US/firefox/addon/nuvori-password-fill/" target="_blank" rel="noopener">Open Firefox Add-ons</a>
+              <a href="browsers/">Setup for each browser</a>
+            </div>
+          </div>
 
-        <div class="support reveal">
-          <div>
-            <h3>Built on Chromium</h3>
-            <p>Helium, Comet, Arc, Brave, Vivaldi, Opera, Thorium, Chromium, Chrome and Edge. Version 127 or newer. Get the extension from the Chrome Web Store.</p>
+          <div class="answer" data-for="chromium" aria-live="polite">
+            <p class="answer__title"><span data-name>This browser</span> is built on Chromium.</p>
+            <ol>
+              <li>Install Nuvori for Windows and unlock your vault.</li>
+              <li>Add Nuvori Password Fill from the Chrome Web Store.</li>
+              <li>Nuvori finds the browser and connects it. Restart <span data-name>the browser</span> once.</li>
+            </ol>
+            <p class="answer__note" data-note></p>
+            <p class="answer__need">Needs version 127 or newer, and Nuvori for Windows on the same PC.</p>
+            <div class="answer__actions">
+              <a class="btn" href="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil" target="_blank" rel="noopener">Open the Chrome Web Store</a>
+              <a href="browsers/">Setup for each browser</a>
+            </div>
           </div>
-          <div>
-            <h3>Built on Firefox</h3>
-            <p>Zen, Firefox, LibreWolf, Waterfox, Floorp, Mullvad Browser and Tor Browser. Version 140 or newer. Get the add-on from Firefox Add-ons.</p>
+
+          <div class="answer" data-for="other" aria-live="polite">
+            <p class="answer__title">Built on Chromium or Firefox? It can still work.</p>
+            <ol>
+              <li>Add Nuvori Password Fill from the matching store.</li>
+              <li>In Nuvori for Windows, open <strong>Settings &gt; Browser extension</strong>.</li>
+              <li>Next to the browser, choose <strong>Built on: Chromium</strong> or <strong>Built on: Firefox</strong>, and turn on its switch.</li>
+              <li>Restart the browser.</li>
+            </ol>
+            <p class="answer__need">This works for most browsers built on Chromium or Firefox. A browser that reads its own, different connection key can't be connected this way.</p>
+            <div class="answer__actions">
+              <a href="browsers/#other-browsers">A browser that isn't on the list</a>
+            </div>
           </div>
-          <div>
-            <h3>Something newer?</h3>
-            <p>Nuvori for Windows recognizes the browsers above by name. For another browser built on Chromium or Firefox, choose its engine in <strong>Settings &gt; Browser extension</strong>, and connect it.</p>
+
+          <div class="answer" data-for="safari" aria-live="polite">
+            <p class="answer__title">Nuvori doesn't work in Safari.</p>
+            <p class="answer__note">There is no Nuvori for Mac, iPhone or iPad. On a Windows PC, any browser built on Chromium or Firefox works.</p>
           </div>
-          <p class="support__fine">The extension needs Nuvori for Windows on the same PC. It does not work in Safari, or on a Mac, iPhone, iPad or Linux.</p>
-        </div>
+        </fieldset>
       </div>
     </section>
 
-    <!-- SWITCH: before and after -->
-    <section class="section wrap" id="switch">
-      <header class="section__head reveal">
-        <p class="eyebrow">Switching, simplified</p>
-        <h2>Try every browser.<br><span class="muted">Import nothing.</span></h2>
-        <p class="section__lead">Move your passwords into Nuvori once. After that, no browser needs an import.</p>
-      </header>
-
-      <div class="compare">
-        <article class="compare__card compare__card--old reveal">
-          <h3>Passwords saved in a browser</h3>
-          <ul>
-            <li>Export them to a file, import them into the next browser, then delete the file.</li>
-            <li>Type your cards in again.</li>
-            <li>Check which passkeys came with you.</li>
-            <li>Do it all again for the next browser.</li>
-          </ul>
-        </article>
-        <div class="compare__arrow reveal" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14m-7-7 7 7-7 7"/></svg></div>
-        <article class="compare__card compare__card--new reveal">
-          <h3>Passwords saved in Nuvori</h3>
-          <ul>
-            <li>Add the extension. Nuvori connects the browser.</li>
-            <li>The same logins, cards, addresses and codes fill.</li>
-            <li>Passkeys stay in your vault. Android 14 or newer and Windows 11 (Microsoft Store version) offer them in the system passkey prompt.</li>
-            <li>Your phone fills from the same vault, in apps and browsers.</li>
-          </ul>
-        </article>
-      </div>
-
-      <ul class="mini-facts">
-        <li class="reveal">
-          <span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 21h14"/></svg></span>
-          <h3>Bring them in once</h3>
-          <p>Nuvori for Android imports a browser's password export (CSV from Chrome, Edge, Brave, Firefox, Safari and others) and Bitwarden JSON. Nuvori for Windows opens KeePass databases. Sync takes them to your other devices.</p>
-        </li>
-        <li class="reveal">
-          <span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>
-          <h3>One “Save password?”</h3>
-          <p>Optional: the extension can turn off the browser's own offer to save passwords, so only Nuvori asks.</p>
-        </li>
-        <li class="reveal">
-          <span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg></span>
-          <h3>Your phone too</h3>
-          <p>Nuvori is Android's autofill service. It fills in apps and in 13 verified Android browsers. In other browsers, it fills after you confirm the page.</p>
-        </li>
-      </ul>
-    </section>
-
-    <!-- SYNC: phone and PC -->
-    <section class="section wrap" id="sync">
-      <div class="sync2">
-        <header class="sync2__copy">
-          <p class="eyebrow reveal">Phone and PC</p>
-          <h2 class="reveal">Save it in Zen.<br><span class="muted">Fill it on your phone.</span></h2>
-          <p class="section__lead reveal">Change browsers on your PC as often as you like. Your Android phone keeps the same vault, and a login you save in any browser is ready to fill on the phone, in apps and in browsers.</p>
-          <ol class="steps sync2__steps reveal">
-            <li><strong>Pair once, on the same Wi-Fi.</strong> On the phone, open <strong>Devices &amp; sync</strong> and tap <strong>Create QR</strong>. On the PC, choose <strong>Pair with your phone</strong>.</li>
-            <li><strong>Changes follow you.</strong> They go straight between your devices over Wi-Fi. When you are apart, they go through a hidden folder in your own Google Drive, if you turn it on.</li>
-            <li><strong>Encrypted before it leaves.</strong> Each device encrypts and signs every change. There is no Nuvori server and no account.</li>
-          </ol>
-          <p class="sync2__links reveal">
-            <a href="faq/#add-phone-or-tablet">How to pair a phone<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-7-7 7 7-7 7"/></svg></a>
-            <a href="faq/#wifi-or-google-drive">Wi-Fi or Google Drive?<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-7-7 7 7-7 7"/></svg></a>
-          </p>
+    <section class="band" id="how" aria-labelledby="h-how">
+      <div class="wrap">
+        <header class="band__head">
+          <h2 id="h-how">Your vault lives in Nuvori, not in a browser</h2>
+          <p class="band__lead">The extension has no vault of its own. It asks Nuvori for Windows for the one login you pick, and your master password never reaches the browser. So a new browser needs only the extension.</p>
         </header>
 
-        <div class="sync2__scene reveal reveal--scale is-saved is-arrived" id="syncScene" data-route="wifi" role="img" aria-label="Illustration: a login saved in Zen on a PC travels, encrypted, to an Android phone, over Wi-Fi or through Google Drive. It appears in the phone's vault and fills in an app.">
-          <svg class="sc-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <path class="sc-ln sc-ln--wifi" d="M49 58 L 69 58"/>
-            <path class="sc-ln sc-ln--drive" d="M44 30 C 46 12, 54 9, 59 9 C 64 9, 70 12, 73 22"/>
-          </svg>
-          <span class="sc-node sc-node--wifi"><svg class="i" viewBox="0 0 24 24"><path d="M12 20h.01M2 8.82a15 15 0 0 1 20 0M5 12.86a10 10 0 0 1 14 0m-10.5 3.57a5 5 0 0 1 7 0"/></svg>Same Wi-Fi</span>
-          <span class="sc-node sc-node--drive"><svg class="i" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>Your Google Drive</span>
-          <span class="sc-packet"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-
-          <div class="sc-pc">
-            <div class="bw sc-bw" data-layout="side" data-tint="sky">
-              <div class="bw__top">
-                <i class="bw__dots"><b></b><b></b><b></b></i>
-                <span class="bw__url"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span>mail.northwind.example</span></span>
-              </div>
-              <div class="bw__main">
-                <span class="bw__side"><span class="bw__srow is-on"><span class="bw__mono">Z</span><span>Zen</span></span><span class="bw__srow"></span><span class="bw__srow"></span></span>
-                <div class="bw__page sc-page">
-                  <div class="sc-save">
-                    <span class="sc-save__head"><img src="assets/favicon-32.png" alt="" width="14" height="14">Nuvori</span>
-                    <b class="sc-save__title">Save login for mail.northwind.example?</b>
-                    <span class="sc-save__user">jamie@northwind.example</span>
-                    <span class="sc-save__actions"><em class="sc-save__btn">Save</em><i>Not now</i></span>
-                    <span class="sc-save__done"><svg class="i" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>Saved in Nuvori</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <span class="sc-pc__base"></span>
+        <figure class="map" aria-label="Where your vault lives">
+          <div class="map__pc">
+            <p class="map__place">Your PC</p>
+            <div class="map__vault"><strong>Nuvori for Windows</strong><span>Your vault, encrypted with your master password</span></div>
+            <ul class="map__browsers" aria-label="Browsers with the extension">
+              <li>Zen</li><li>Helium</li><li>Edge</li><li class="map__more">any other</li>
+            </ul>
+            <p class="map__note">The extension in each browser asks for one login at a time.</p>
           </div>
-
-          <div class="sc-phone">
-            <div class="mphone">
-              <div class="mphone__screen">
-                <span class="mphone__status"><b>9:41</b><i></i></span>
-                <div class="sc-list">
-                  <span class="sc-list__title">Passwords</span>
-                  <span class="sc-row sc-row--new"><span class="av av--accent">N</span><span><b>Northwind Mail</b><small>Just now</small></span></span>
-                  <span class="sc-row"><span class="av av--violet">G</span><span><b>GitHub</b><small>dev@example.com</small></span></span>
-                  <span class="sc-row"><span class="av av--indigo">B</span><span><b>Bank of Example</b><small>jdoe</small></span></span>
-                  <span class="sc-row"><span class="av av--teal">C</span><span><b>Contoso Cloud</b><small>jamie@contoso…</small></span></span>
-                </div>
-                <div class="sc-app">
-                  <span class="mphone__app"><span class="signin__logo">N</span>Northwind</span>
-                  <span class="mfld"><small>Email</small><span class="mfld__box"><span class="fld__val">jamie@northwind…</span></span></span>
-                  <span class="mfld"><small>Password</small><span class="mfld__box"><span class="fld__val fld__val--dots">••••••••••</span></span></span>
-                  <span class="mphone__btn">Sign in</span>
-                  <span class="mphone__suggest"><svg class="i" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg><span><b>jamie@northwind.example</b><small>Nuvori</small></span></span>
-                </div>
-              </div>
-            </div>
+          <div class="map__link">
+            <p>Changes travel over <b class="nowrap">your Wi-Fi</b>, or through <b>your own Google Drive</b> when you're apart. Encrypted and signed.</p>
           </div>
-          <span class="sc-caption"><span data-route-text="wifi">Together: straight over your Wi-Fi</span><span data-route-text="drive">Apart: through your own Google Drive</span></span>
-        </div>
-      </div>
-
-      <div class="sync2__more">
-        <figure class="devlist reveal">
-          <div class="devlist__card" aria-hidden="true">
-            <span class="devlist__title">Devices &amp; sync</span>
-            <span class="devlist__row"><span class="devlist__icon"><svg class="i" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg></span><span><b>Phone</b><small>Manages the group</small></span><em>In sync</em></span>
-            <span class="devlist__row"><span class="devlist__icon"><svg class="i i--fill" viewBox="0 0 24 24"><path d="M3 3h8.5v8.5H3zm9.5 0H21v8.5h-8.5zM3 12.5h8.5V21H3zm9.5 0H21V21h-8.5z"/></svg></span><span><b>Desktop PC</b><small>Windows</small></span><em>In sync</em></span>
-            <span class="devlist__row"><span class="devlist__icon"><svg class="i i--fill" viewBox="0 0 24 24"><path d="M3 3h8.5v8.5H3zm9.5 0H21v8.5h-8.5zM3 12.5h8.5V21H3zm9.5 0H21V21h-8.5z"/></svg></span><span><b>Laptop</b><small>Windows</small></span><em>In sync</em></span>
-            <span class="devlist__row"><span class="devlist__icon"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><path d="M12 10v2l1 1m3.13-5.34-.81-4.05a2 2 0 0 0-2-1.61h-2.68a2 2 0 0 0-2 1.61l-.78 4.05m.02 8.7.8 4a2 2 0 0 0 2 1.61h2.72a2 2 0 0 0 2-1.61l.81-4.05"/></svg></span><span><b>Watch</b><small>Through your phone</small></span><em>Codes</em></span>
+          <div class="map__phone">
+            <p class="map__place">Your phone</p>
+            <div class="map__vault"><strong>Nuvori for Android</strong><span>A full copy of the same vault</span></div>
+            <p class="map__note">Fills in apps and browsers through Android autofill. A Wear OS watch shows your codes.</p>
           </div>
-          <figcaption>Up to 6 phones or tablets and 2 Windows PCs share one vault, and a Wear OS watch shows your codes. Your phone manages the group: it adds devices, and it can remove one you lost.</figcaption>
+          <p class="map__none"><strong>Nuvori server</strong>There isn't one. You don't create an account, and the developer never receives your vault.</p>
         </figure>
-        <ul class="sync2__facts">
-          <li class="reveal"><span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4m4 4H4"/></svg></span><div><h3>Changed on two devices?</h3><p>If two devices change the same item before they sync, Nuvori keeps both versions and asks you to choose. It doesn't quietly throw one away.</p></div></li>
-          <li class="reveal"><span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h.01M8.5 16.43a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M5 12.86a10 10 0 0 1 5.17-2.69M2 2l20 20"/></svg></span><div><h3>Offline is fine</h3><p>Each device keeps its own full copy. It works without a connection and catches up the next time it reaches another device.</p></div></li>
+
+        <ul class="facts">
+          <li><h3>Encrypted on each device</h3><p>The vault opens with your master password, or with Windows Hello or your fingerprint once you turn them on.</p></li>
+          <li><h3>Sync is optional</h3><p>Up to 6 phones or tablets and 2 Windows PCs share one vault. If two devices change the same item, Nuvori keeps both versions and asks you to choose.</p></li>
+          <li><h3>Google Drive sees only encrypted files</h3><p>Nuvori uses its own hidden app folder in your Drive, and can't see your other files.</p></li>
+          <li><h3>No ads, no analytics</h3><p>The apps and the extension send no usage data, crash reports or advertising IDs.</p></li>
         </ul>
       </div>
     </section>
 
-    <!-- FEATURES -->
-    <section class="section wrap" id="features">
-      <header class="section__head reveal">
-        <p class="eyebrow">Features</p>
-        <h2>Everything you would put in a safe.<br><span class="muted">Ready wherever you sign in.</span></h2>
-      </header>
+    <section class="band" id="apps" aria-labelledby="h-apps">
+      <div class="wrap">
+        <header class="band__head">
+          <h2 id="h-apps">The same vault on your PC, in the browser and on your phone</h2>
+          <p class="band__lead">Each device keeps its own full copy of the vault and works offline. Change an item on one, and the others catch up the next time they connect. Every screenshot here uses sample data.</p>
+        </header>
 
-      <div class="bento">
-        <!-- Autofill -->
-        <article class="tile tile--wide reveal" data-spot>
-          <div class="tile__text">
-            <span class="tile__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
-            <h3>Autofill that checks where it is</h3>
-            <p>On your PC and your phone, Nuvori offers a login only for the exact app or HTTPS site you saved. Search right in the picker, and the next code screen already knows which account you just used.</p>
-          </div>
-          <div class="picker" aria-hidden="true">
-            <div class="picker__site"><span class="picker__lock"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span data-site>github.com</span> asks for a login</div>
-            <div class="picker__search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span data-query></span><span class="caret"></span></div>
-            <ul class="picker__list" data-list>
-              <li data-key="github"><span class="av av--violet">G</span><span><b>GitHub</b><small>dev@example.com</small></span><em>Fill</em></li>
-              <li data-key="bank"><span class="av av--indigo">B</span><span><b>Bank of Example</b><small>jdoe</small></span><em>Fill</em></li>
-              <li data-key="contoso"><span class="av av--green">C</span><span><b>Contoso Cloud</b><small>jamie@contoso.example</small></span><em>Fill</em></li>
-              <li data-key="gmail"><span class="av av--teal">G</span><span><b>Gmail</b><small>someone@gmail.com</small></span><em>Fill</em></li>
-            </ul>
-          </div>
-        </article>
-
-        <!-- Codes -->
-        <article class="tile reveal" data-spot>
-          <div class="tile__text">
-            <span class="tile__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>
-            <h3>Codes without a second app</h3>
-            <p>Built-in authenticator, offline. Link a code to its login and see both together.</p>
-          </div>
-          <div class="codes" aria-hidden="true">
-            <div class="code-row">
-              <div><small>AWS root</small><span class="mono" data-code="aws" data-split>000 000</span></div>
-              <svg class="ring ring--sm" viewBox="0 0 120 120"><circle class="ring__track" cx="60" cy="60" r="54"/><circle class="ring__bar" cx="60" cy="60" r="54" data-ring/></svg>
-            </div>
-            <div class="code-row">
-              <div><small>Contoso Cloud</small><span class="mono" data-code="contoso" data-split>000 000</span></div>
-              <svg class="ring ring--sm" viewBox="0 0 120 120"><circle class="ring__track" cx="60" cy="60" r="54"/><circle class="ring__bar" cx="60" cy="60" r="54" data-ring/></svg>
-            </div>
-          </div>
-        </article>
-
-        <!-- Sync -->
-        <article class="tile tile--half reveal" data-spot>
-          <div class="tile__text">
-            <span class="tile__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h.01M2 8.82a15 15 0 0 1 20 0M5 12.86a10 10 0 0 1 14 0m-10.5 3.57a5 5 0 0 1 7 0"/></svg></span>
-            <h3>Sync with no server in the middle</h3>
-            <p>Paired devices swap signed, encrypted changes over your own Wi-Fi. Apart? They meet in your own Google Drive, which only ever stores encrypted files.</p>
-          </div>
-          <svg class="sync" id="syncArt" viewBox="0 0 360 170" aria-hidden="true">
-            <defs>
-              <path id="p1" d="M70 112 C 130 112, 230 112, 290 112"/>
-              <path id="p2" d="M290 112 C 230 112, 130 112, 70 112"/>
-              <path id="p3" d="M70 100 C 110 40, 150 30, 180 30"/>
-              <path id="p4" d="M180 30 C 210 30, 250 40, 290 100"/>
-            </defs>
-            <use href="#p1" class="sync__line"/>
-            <use href="#p3" class="sync__line sync__line--dash"/>
-            <use href="#p4" class="sync__line sync__line--dash"/>
-            <circle r="4" class="sync__dot"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#p1"/></animateMotion></circle>
-            <circle r="4" class="sync__dot"><animateMotion dur="2.6s" begin="1.3s" repeatCount="indefinite"><mpath href="#p2"/></animateMotion></circle>
-            <circle r="3" class="sync__dot sync__dot--soft"><animateMotion dur="3.4s" repeatCount="indefinite"><mpath href="#p3"/></animateMotion></circle>
-            <circle r="3" class="sync__dot sync__dot--soft"><animateMotion dur="3.4s" begin="1.7s" repeatCount="indefinite"><mpath href="#p4"/></animateMotion></circle>
-            <g class="sync__node" transform="translate(70 112)"><circle r="26"/><rect x="-7" y="-12" width="14" height="24" rx="3"/></g>
-            <g class="sync__node" transform="translate(290 112)"><circle r="26"/><rect x="-12" y="-9" width="24" height="15" rx="2"/><path d="M-5 11h10M0 6v5"/></g>
-            <g class="sync__node sync__node--cloud" transform="translate(180 30)"><circle r="22"/><path d="M7 5H-2a6 6 0 1 1 5.7-7.7H5a4 4 0 1 1 2 7.7Z"/></g>
-            <text x="70" y="160" text-anchor="middle">Phone</text>
-            <text x="290" y="160" text-anchor="middle">PC</text>
-            <text x="180" y="134" text-anchor="middle" class="sync__caption">Wi-Fi · signed + encrypted</text>
-          </svg>
-        </article>
-
-        <!-- Cards -->
-        <article class="tile tile--half reveal" data-spot>
-          <div class="tile__text">
-            <span class="tile__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></svg></span>
-            <h3>Your cards, beautifully kept</h3>
-            <p>A wallet in 34 colors. Copy any field with one tap. The CVV stays hidden until your fingerprint says so.</p>
-          </div>
-          <div class="wallet" aria-hidden="true">
-            <div class="ccard ccard--green"><b>Everyday</b><span>CREDIT</span><i>•••• 1111</i></div>
-            <div class="ccard ccard--blue"><b>Travel</b><span>CREDIT</span><i>•••• 4242</i></div>
-            <div class="ccard ccard--cream"><b>Shared</b><span>CREDIT</span><i>•••• 1840</i><small>CVV ••• <svg class="i" viewBox="0 0 24 24"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88m4.29-.98c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01m19.79 0c.2-2 .13-5.35 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2m2.31 12c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2"/></svg></small></div>
-          </div>
-        </article>
-
-        <!-- Passkeys -->
-        <article class="tile reveal" data-spot>
-          <div class="tile__text">
-            <span class="tile__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.59 17.41A2 2 0 0 0 2 18.83V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.17a2 2 0 0 0 1.42-.59l.81-.81a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5"/></svg></span>
-            <h3>Passkeys, saved where you are</h3>
-            <p>Save and use passkeys from apps and browsers on Android 14 or newer, and in Windows 11.</p>
-          </div>
-          <div class="pulse" aria-hidden="true">
-            <span></span><span></span><span></span>
-            <svg class="i" viewBox="0 0 24 24"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4M14 13.12c0 2.38 0 6.38-1 8.88m4.29-.98c.12-.6.43-2.3.5-3.02M2 12a10 10 0 0 1 18-6M2 16h.01m19.79 0c.2-2 .13-5.35 0-6M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2m2.31 12c.21-.66.45-1.32.57-2M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>
-          </div>
-        </article>
-
-        <!-- Watch -->
-        <article class="tile reveal" data-spot>
-          <div class="tile__text">
-            <span class="tile__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 10v2l1 1m3.13-5.34-.81-4.05a2 2 0 0 0-2-1.61h-2.68a2 2 0 0 0-2 1.61l-.78 4.05m.02 8.7.8 4a2 2 0 0 0 2 1.61h2.72a2 2 0 0 0 2-1.61l.81-4.05"/></svg></span>
-            <h3>Codes on your wrist</h3>
-            <p>Your Wear OS watch shows codes in your accent color, and keeps working offline after setup.</p>
-          </div>
-          <div class="mini-watch" aria-hidden="true">
-            <div class="mini-watch__face">
-              <small>Contoso</small>
-              <span class="mono" data-code="contoso" data-split>000 000</span>
-              <svg class="ring" viewBox="0 0 120 120"><circle class="ring__track" cx="60" cy="60" r="54"/><circle class="ring__bar" cx="60" cy="60" r="54" data-ring/></svg>
-            </div>
-          </div>
-        </article>
-
-        <!-- Extension -->
-        <article class="tile reveal" data-spot>
-          <div class="tile__text">
-            <span class="tile__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15.39 4.39a1 1 0 0 0 1.68-.47 2.5 2.5 0 1 1 3.01 3.01 1 1 0 0 0-.47 1.68l1.68 1.68a2.41 2.41 0 0 1 0 3.42l-1.68 1.68a1 1 0 0 1-1.68-.47 2.5 2.5 0 1 0-3.01 3.01 1 1 0 0 1 .47 1.68l-1.68 1.68a2.41 2.41 0 0 1-3.42 0l-1.68-1.68a1 1 0 0 0-1.68.47 2.5 2.5 0 1 1-3.01-3.01 1 1 0 0 0 .47-1.68l-1.68-1.68a2.41 2.41 0 0 1 0-3.42L4.39 8.61a1 1 0 0 1 1.68.47 2.5 2.5 0 1 0 3.01-3.01 1 1 0 0 1-.47-1.68l1.68-1.68a2.41 2.41 0 0 1 3.42 0z"/></svg></span>
-            <h3>One extension, any browser you pick</h3>
-            <p>Logins, cards, addresses and codes fill on the page, in browsers built on Chromium or Firefox. Your master password never touches the browser.</p>
-          </div>
-          <div class="ext" aria-hidden="true">
-            <div class="ext__field">Email or username<span class="caret"></span></div>
-            <div class="ext__menu">
-              <div class="ext__head"><img src="assets/favicon-32.png" alt="" width="14" height="14"> Nuvori</div>
-              <div class="ext__row"><span class="av av--violet">G</span><span><b>GitHub</b><small>dev@example.com</small></span><em>Fill</em></div>
-            </div>
-          </div>
-        </article>
-      </div>
-
-      <!-- Stats -->
-      <dl class="stats reveal">
-        <div><dt>No Nuvori servers</dt><dd data-count="0">0</dd></div>
-        <div><dt>Verified Android browsers</dt><dd data-count="13">0</dd></div>
-        <div><dt>Phones and PCs in one vault</dt><dd><span data-count="6">0</span><span class="plus">+</span><span data-count="2">0</span></dd></div>
-        <div><dt>Color pairs, all contrast-checked</dt><dd data-count="128">0</dd></div>
-      </dl>
-    </section>
-
-    <!-- DEVICES -->
-    <section class="section wrap" id="devices">
-      <header class="section__head reveal">
-        <p class="eyebrow">Devices</p>
-        <h2>One vault. Every screen you use.</h2>
-        <p class="section__lead">Each device keeps its own encrypted copy. Change something on one, and the others follow.</p>
-      </header>
-
-      <div class="tabs reveal">
-        <div class="tabs__list" role="tablist" aria-label="Devices">
-          <button class="tab" role="tab" id="tab-win" aria-controls="panel-win" aria-selected="true" tabindex="0" type="button">
-            <svg class="i i--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8.5v8.5H3zm9.5 0H21v8.5h-8.5zM3 12.5h8.5V21H3zm9.5 0H21V21h-8.5z"/></svg>Windows
-          </button>
-          <button class="tab" role="tab" id="tab-android" aria-controls="panel-android" aria-selected="false" tabindex="-1" type="button">
-            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>Android
-          </button>
-          <button class="tab" role="tab" id="tab-browser" aria-controls="panel-browser" aria-selected="false" tabindex="-1" type="button">
-            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></svg>Browser
-          </button>
-          <span class="tabs__ink" aria-hidden="true"></span>
-        </div>
-
-        <div class="panel is-active" role="tabpanel" id="panel-win" aria-labelledby="tab-win" tabindex="0">
-          <div class="panel__grid">
-            <ul class="panel__points">
-              <li><b>Windows Hello unlock.</b> The vault key is sealed by Windows Hello, so other programs cannot open it without your face, fingerprint or PIN.</li>
-              <li><b>Quick search anywhere.</b> Press Ctrl+Shift+Space in any app to find a login.</li>
-              <li><b>Codes and passkeys.</b> The same codes as your phone, and a passkey provider for Windows 11.</li>
-            </ul>
-            <figure class="window window--lg">
-              <div class="window__bar"><img src="assets/favicon-32.png" alt="" width="14" height="14"><span>Nuvori</span><i class="window__ctl" aria-hidden="true"><b></b><b></b><b></b></i></div>
-              <div class="slides" data-slides>
-                <img class="is-active" src="assets/desktop-home.webp" width="1600" height="900" loading="lazy" alt="Home screen in dark mode">
-                <img src="assets/desktop-codes.webp" width="1600" height="900" loading="lazy" alt="Codes and passkeys screen">
-                <img src="assets/desktop-sync.webp" width="1600" height="900" loading="lazy" alt="Devices and sync screen in light mode">
-                <img src="assets/desktop-unlock.webp" width="1600" height="900" loading="lazy" alt="Unlock screen">
-              </div>
-              <div class="dots" data-dots aria-label="Choose a screenshot"></div>
-            </figure>
-          </div>
-        </div>
-
-        <div class="panel" role="tabpanel" id="panel-android" aria-labelledby="tab-android" tabindex="0" hidden>
-          <div class="phones">
-            <figure class="phone"><img src="assets/phone-home.webp" width="540" height="960" loading="lazy" alt="Home with favorites"><figcaption>Home</figcaption></figure>
-            <figure class="phone"><img src="assets/phone-codes.webp" width="540" height="960" loading="lazy" alt="Authenticator codes"><figcaption>Codes</figcaption></figure>
-            <figure class="phone"><img src="assets/phone-cards.webp" width="540" height="960" loading="lazy" alt="Card wallet"><figcaption>Cards</figcaption></figure>
-            <figure class="phone"><img src="assets/phone-passwords.webp" width="540" height="960" loading="lazy" alt="Password folders in light mode"><figcaption>Passwords</figcaption></figure>
-          </div>
-        </div>
-
-        <div class="panel" role="tabpanel" id="panel-browser" aria-labelledby="tab-browser" tabindex="0" hidden>
-          <figure class="browser">
-            <div class="browser__bar"><i aria-hidden="true"><b></b><b></b><b></b></i><span class="browser__url"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>mail.northwind.example</span></div>
-            <img src="assets/extension-fill.webp" width="1280" height="800" loading="lazy" alt="The Nuvori extension popup with saved logins and authenticator codes for the site">
+        <div class="shots">
+          <figure class="shot shot--pc">
+            <img class="only-light" src="assets/desktop-home-light.webp" width="1600" height="900" loading="lazy" decoding="async" alt="Nuvori for Windows, Home: quick access to logins and cards, categories, and two authenticator codes.">
+            <img class="only-dark" src="assets/desktop-home.webp" width="1600" height="900" loading="lazy" decoding="async" alt="Nuvori for Windows, Home, in dark mode: quick access to logins and cards, categories, and two authenticator codes.">
+            <figcaption><strong>Nuvori for Windows.</strong> Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> in any app to search your vault.</figcaption>
+          </figure>
+          <figure class="shot shot--ext">
+            <img class="only-light" src="assets/extension-popup-light.webp" width="720" height="1004" loading="lazy" decoding="async" alt="The Nuvori Password Fill popup on mail.northwind.example: connected and unlocked, two saved logins with Fill buttons, and one authenticator code.">
+            <img class="only-dark" src="assets/extension-popup-dark.webp" width="720" height="1004" loading="lazy" decoding="async" alt="The Nuvori Password Fill popup in dark mode on mail.northwind.example: two saved logins with Fill buttons, and one authenticator code.">
+            <figcaption><strong>Nuvori Password Fill</strong> on mail.northwind.example: the logins and the code saved for this site.</figcaption>
           </figure>
         </div>
+
+        <div class="apps">
+          <section aria-labelledby="h-app-win">
+            <h3 id="h-app-win">Nuvori for Windows</h3>
+            <p class="apps__need">Windows 10 (version 2004) or newer, 64-bit.</p>
+            <ul>
+              <li>Holds the vault for every browser on the PC.</li>
+              <li>Unlocks with Windows Hello, once you turn it on.</li>
+              <li>Searches your vault from any app with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>.</li>
+              <li>Offers your passkeys in the Windows 11 passkey prompt (Microsoft Store version).</li>
+              <li>Imports a KeePass or KeePassXC database.</li>
+            </ul>
+          </section>
+          <section aria-labelledby="h-app-ext">
+            <h3 id="h-app-ext">Nuvori Password Fill</h3>
+            <p class="apps__need">The browser extension. Chromium 127 or Firefox 140 and newer, on Windows.</p>
+            <ul>
+              <li>Fills logins, cards, addresses and codes on HTTPS pages.</li>
+              <li>Offers a login only on the exact site you saved it for.</li>
+              <li>Offers to save a new login after you sign in.</li>
+              <li>Can turn off the browser's own &ldquo;Save password?&rdquo; prompt.</li>
+              <li>Never receives your master password or your vault.</li>
+            </ul>
+          </section>
+          <section aria-labelledby="h-app-android">
+            <h3 id="h-app-android">Nuvori for Android and Wear OS</h3>
+            <p class="apps__need">Android 10 or newer. Wear OS 3 or newer for the watch.</p>
+            <ul>
+              <li>Fills in apps, and on websites in 13 verified browsers, as Android's autofill service.</li>
+              <li>Saves and uses passkeys on Android 14 or newer.</li>
+              <li>The <strong>Quick copy</strong> tile in Quick Settings copies a password, code or card detail.</li>
+              <li>Imports password exports from browsers and other password managers. <a href="import-passwords/">How to import</a></li>
+              <li>Shows your codes on a Wear OS watch, offline after setup.</li>
+            </ul>
+            <figure class="shot shot--phones">
+              <img src="assets/phone-home.webp" width="540" height="960" loading="lazy" decoding="async" alt="Nuvori for Android, Home: counts of cards, passwords, questions and notes, favorites, and recently opened items.">
+              <img src="assets/phone-codes.webp" width="540" height="960" loading="lazy" decoding="async" alt="Nuvori for Android: three authenticator codes, each with its account and the seconds until the next code.">
+              <figcaption><strong>Nuvori for Android.</strong> Home and authenticator codes.</figcaption>
+            </figure>
+          </section>
+        </div>
       </div>
     </section>
 
-    <!-- SECURITY -->
-    <section class="section wrap" id="security">
-      <div class="security">
-        <header class="security__copy reveal">
-          <p class="eyebrow">Security</p>
-          <h2>Private by architecture,<br><span class="muted">not by promise.</span></h2>
-          <p class="section__lead">Nuvori has no developer server, no Nuvori account, no advertising and no analytics. There is nowhere for your vault to leak from but your own devices.</p>
-          <div class="shield" aria-hidden="true">
-            <img src="assets/logo-512.png" alt="" width="512" height="512">
-            <span></span><span></span>
-          </div>
+    <section class="band" id="limits" aria-labelledby="h-limits">
+      <div class="wrap">
+        <header class="band__head">
+          <h2 id="h-limits">What Nuvori doesn't do</h2>
+          <p class="band__lead">Read this before you move your passwords.</p>
         </header>
-        <ul class="facts">
-          <li class="reveal"><span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><div><h3>Encrypted on every device</h3><p>Each vault is an encrypted database that opens with your master password, or with your fingerprint or Windows Hello once you turn them on.</p></div></li>
-          <li class="reveal"><span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><div><h3>Signed, encrypted sync</h3><p>Devices exchange signed, encrypted changes. Edits made on two devices at once are kept side by side, never silently overwritten.</p></div></li>
-          <li class="reveal"><span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg></span><div><h3>Your Drive, sealed</h3><p>Google Drive sync is optional. Nuvori encrypts every change and photo before upload, and uses only its own hidden app folder.</p></div></li>
-          <li class="reveal"><span class="facts__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></svg></span><div><h3>Exact-site filling</h3><p>Logins are offered only for the app or the exact HTTPS site you saved. Filling one anywhere else always asks you first. The browser extension never receives your master password or vault.</p></div></li>
+        <ul class="limits">
+          <li><strong>No Mac, iPhone, iPad or Linux</strong><span>And no Safari. The extension works only on Windows, next to Nuvori for Windows.</span></li>
+          <li><strong>No master password reset</strong><span>Nobody can reset a forgotten master password, including the developer. Keep a copy somewhere safe, for example on paper at home.</span></li>
+          <li><strong>No independent audit yet</strong><span>Nuvori has not had an independent security audit.</span></li>
+          <li><strong>No filling on plain HTTP</strong><span>The extension fills only on HTTPS pages.</span></li>
+          <li><strong>No passkeys in the extension</strong><span>On Windows 11, the Microsoft Store version offers your passkeys in the Windows passkey prompt instead.</span></li>
+          <li><strong>Not in every store yet</strong><span>The Windows app is under review in the Microsoft Store. The Android and Wear OS apps are in closed testing.</span></li>
         </ul>
       </div>
     </section>
 
-    <!-- COLORS -->
-    <section class="section wrap" id="colors">
-      <div class="colors">
-        <header class="colors__copy reveal">
-          <p class="eyebrow">Make it yours</p>
-          <h2>16 accents. 8 backgrounds.<br><span class="muted">Try them on this page.</span></h2>
-          <p class="section__lead">Every pair passes contrast checks in light and dark mode. Pick a look on one device, and your phone, PC, watch and browser follow.</p>
-          <p class="colors__now" aria-live="polite">Now showing <b data-now>Green on Sage</b></p>
-          <button class="btn btn--ghost btn--sm" type="button" id="resetColors">Back to Nuvori green</button>
+    <section class="band" id="download" aria-labelledby="h-download">
+      <div class="wrap">
+        <header class="band__head">
+          <h2 id="h-download">Get Nuvori</h2>
+          <p class="band__lead">Free, with no ads, no in-app purchases and no subscription. Start with Nuvori for Windows, add the extension to each browser you use, and pair your phone when you're ready.</p>
         </header>
-        <div class="picker-card reveal">
-          <fieldset>
-            <legend>Accent</legend>
-            <div class="swatches" id="accentSwatches"></div>
-          </fieldset>
-          <fieldset>
-            <legend>Background</legend>
-            <div class="swatches swatches--surface" id="surfaceSwatches"></div>
-          </fieldset>
-          <div class="preview" aria-hidden="true">
-            <div class="preview__bar"><span class="preview__logo"></span><b>Good morning</b><span class="preview__btn">+ Add</span></div>
-            <div class="preview__row"><span class="av av--accent">G</span><span><b>GitHub</b><small>dev@example.com</small></span><span class="preview__chip">Fill</span></div>
-            <div class="preview__row"><span class="av av--accent">A</span><span><b>AWS root</b><small class="mono" data-code="aws" data-split>000 000</small></span><svg class="ring ring--xs" viewBox="0 0 120 120"><circle class="ring__track" cx="60" cy="60" r="54"/><circle class="ring__bar" cx="60" cy="60" r="54" data-ring/></svg></div>
-          </div>
-        </div>
+        <ul class="get">
+          <li class="get__row">
+            <div><h3>Nuvori for Windows</h3><p class="get__need">Windows 10 (version 2004) or newer, 64-bit.</p></div>
+            <p class="get__status">Under review in the Microsoft Store</p>
+            <div class="get__actions">
+              <a class="btn" href="https://apps.microsoft.com/detail/9MWN4TC0RWQK" target="_blank" rel="noopener">Open the Microsoft Store</a>
+              <button class="get__link no-js-hide" type="button" data-copy="https://apps.microsoft.com/detail/9MWN4TC0RWQK">Copy link</button>
+              <details class="qr"><summary>QR code</summary><img src="assets/qr-microsoft-store.svg" width="240" height="240" loading="lazy" decoding="async" alt="QR code for the Nuvori listing in the Microsoft Store"></details>
+            </div>
+          </li>
+          <li class="get__row">
+            <div><h3>Nuvori Password Fill</h3><p class="get__need">The browser extension, for browsers built on Chromium or Firefox. Needs Nuvori for Windows on the same PC. In Edge, allow extensions from other stores first.</p></div>
+            <div class="get__statuses"><p class="get__status get__status--ok">Available in the Chrome Web Store</p><p class="get__status">Under review on Firefox Add-ons</p></div>
+            <div class="get__actions">
+              <a class="btn" href="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil" target="_blank" rel="noopener">Open the Chrome Web Store</a>
+              <a class="btn btn--quiet" href="https://addons.mozilla.org/en-US/firefox/addon/nuvori-password-fill/" target="_blank" rel="noopener">Open Firefox Add-ons</a>
+              <button class="get__link no-js-hide" type="button" data-copy="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil">Copy link</button>
+              <details class="qr"><summary>QR codes</summary><img src="assets/qr-chrome-web-store.svg" width="240" height="240" loading="lazy" decoding="async" alt="QR code for Nuvori Password Fill in the Chrome Web Store"><p>Chrome Web Store</p><img src="assets/qr-firefox-add-ons.svg" width="240" height="240" loading="lazy" decoding="async" alt="QR code for Nuvori Password Fill on Firefox Add-ons"><p>Firefox Add-ons</p></details>
+            </div>
+          </li>
+          <li class="get__row">
+            <div><h3>Nuvori for Android</h3><p class="get__need">Android 10 or newer. The Google Play link opens for invited testers.</p></div>
+            <p class="get__status">Closed testing on Google Play</p>
+            <div class="get__actions">
+              <a class="btn" id="join-testing" href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a>
+              <a class="btn btn--quiet" href="https://play.google.com/store/apps/details?id=com.application.private_vault" target="_blank" rel="noopener">Open Google Play</a>
+              <button class="get__link no-js-hide" type="button" data-copy="https://play.google.com/store/apps/details?id=com.application.private_vault">Copy link</button>
+              <details class="qr"><summary>QR code</summary><img src="assets/qr-google-play.svg" width="240" height="240" loading="lazy" decoding="async" alt="QR code for the Nuvori listing on Google Play"></details>
+            </div>
+          </li>
+          <li class="get__row">
+            <div><h3>Nuvori for Wear OS</h3><p class="get__need">Wear OS 3 or newer, with the phone app. Install it on your watch from the same Google Play listing.</p></div>
+            <p class="get__status">Closed testing on Google Play</p>
+            <div class="get__actions">
+              <a class="btn btn--quiet" href="https://play.google.com/store/apps/details?id=com.application.private_vault" target="_blank" rel="noopener">Open Google Play</a>
+            </div>
+          </li>
+        </ul>
+        <p class="get__tester">The Android and Wear OS apps are in closed testing. Fill in the short form with your Gmail address, and you'll be added as a tester.</p>
       </div>
     </section>
 
-    <!-- DOWNLOAD -->
-    <section class="section wrap" id="download">
-      <header class="section__head reveal">
-        <p class="eyebrow">Download</p>
-        <h2>Get Nuvori on your devices.</h2>
-        <p class="section__lead">Start with Nuvori for Windows, then add the extension to every browser you use. Pair your phone when you are ready.</p>
-      </header>
-
-      <div class="downloads">
-        <!-- Windows -->
-        <article class="dl reveal" data-spot>
-          <div class="dl__inner">
-            <div class="dl__face dl__front">
-              <div class="dl__top">
-                <span class="dl__icon"><svg class="i i--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8.5v8.5H3zm9.5 0H21v8.5h-8.5zM3 12.5h8.5V21H3zm9.5 0H21V21h-8.5z"/></svg></span>
-                <span class="tag tag--amber"><span class="tag__dot"></span>Under review</span>
-              </div>
-              <h3>Windows</h3>
-              <p>Windows 10 (2004) or newer, 64-bit. Microsoft is reviewing the listing now.</p>
-              <div class="dl__actions">
-                <a class="store store--ms" href="https://apps.microsoft.com/detail/9MWN4TC0RWQK" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#F25022" d="M2 2h9.5v9.5H2z"/><path fill="#7FBA00" d="M12.5 2H22v9.5h-9.5z"/><path fill="#00A4EF" d="M2 12.5h9.5V22H2z"/><path fill="#FFB900" d="M12.5 12.5H22V22h-9.5z"/></svg>
-                  <span><small>Get it from</small>Microsoft Store</span>
-                </a>
-                <div class="dl__tools">
-                  <button class="chip" type="button" data-copy="https://apps.microsoft.com/detail/9MWN4TC0RWQK"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>Copy link</span></button>
-                  <button class="chip" type="button" data-flip aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3m5 0v.01M12 7v3a2 2 0 0 1-2 2H7m-4 0h.01M12 3h.01M12 16v.01M16 12h1m4 0v.01M12 21v-1"/></svg><span>QR code</span></button>
-                </div>
-              </div>
-            </div>
-            <div class="dl__face dl__back" aria-hidden="true">
-              <img class="qr" src="assets/qr-microsoft-store.svg" width="240" height="240" alt="QR code for the Nuvori Microsoft Store listing">
-              <p>Scan to open the Microsoft Store listing</p>
-              <button class="chip" type="button" data-unflip tabindex="-1">Done</button>
-            </div>
-          </div>
-        </article>
-
-        <!-- Extension -->
-        <article class="dl dl--stores reveal" data-spot>
-          <div class="dl__inner">
-            <div class="dl__face dl__front">
-              <div class="dl__top">
-                <span class="dl__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15.39 4.39a1 1 0 0 0 1.68-.47 2.5 2.5 0 1 1 3.01 3.01 1 1 0 0 0-.47 1.68l1.68 1.68a2.41 2.41 0 0 1 0 3.42l-1.68 1.68a1 1 0 0 1-1.68-.47 2.5 2.5 0 1 0-3.01 3.01 1 1 0 0 1 .47 1.68l-1.68 1.68a2.41 2.41 0 0 1-3.42 0l-1.68-1.68a1 1 0 0 0-1.68.47 2.5 2.5 0 1 1-3.01-3.01 1 1 0 0 0 .47-1.68l-1.68-1.68a2.41 2.41 0 0 1 0-3.42L4.39 8.61a1 1 0 0 1 1.68.47 2.5 2.5 0 1 0 3.01-3.01 1 1 0 0 1-.47-1.68l1.68-1.68a2.41 2.41 0 0 1 3.42 0z"/></svg></span>
-                <span class="tag tag--green"><span class="tag__dot"></span>Available</span>
-              </div>
-              <h3>Browser extension</h3>
-              <p>For Zen, Helium, Comet, Arc, Brave, Vivaldi, Firefox, Chrome, Edge and other browsers built on Chromium or Firefox, with Nuvori for Windows. In Edge, allow extensions from other stores first.</p>
-              <p class="dl__detected" data-detected hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span></span></p>
-              <div class="dl__actions">
-                <a class="store store--chrome" href="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#EA4335" d="M12 12 3.34 7A10 10 0 0 1 20.66 7Z"/><path fill="#FBBC04" d="M12 12 20.66 7A10 10 0 0 1 12 22Z"/><path fill="#34A853" d="M12 12 12 22A10 10 0 0 1 3.34 7Z"/><circle cx="12" cy="12" r="4.6" fill="#fff"/><circle cx="12" cy="12" r="3.6" fill="#4285F4"/></svg>
-                  <span><small>Available in the</small>Chrome Web Store</span>
-                </a>
-                <a class="store store--firefox" href="https://addons.mozilla.org/en-US/firefox/addon/nuvori-password-fill/" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ff-flame" x1="18" y1="3" x2="5" y2="21" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFE226"/><stop offset=".45" stop-color="#FF7139"/><stop offset="1" stop-color="#E31587"/></linearGradient><linearGradient id="ff-globe" x1="16" y1="8" x2="8" y2="19" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#9059FF"/><stop offset="1" stop-color="#592ACB"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#ff-flame)"/><circle cx="12.6" cy="13.2" r="6" fill="url(#ff-globe)"/><path fill="url(#ff-flame)" d="M6.4 10.2c1.3-3 4.3-4.6 7.4-3.9-1.9.4-3.1 1.6-3.4 3 .9-.6 2.2-.7 3.2-.2-1.8.2-3 1.4-3 2.9 0 1 .5 1.9 1.4 2.5-2.9.2-5.6-1.6-5.6-4.3Z"/></svg>
-                  <span><small>Under review on</small>Firefox Add-ons</span>
-                </a>
-                <div class="dl__tools">
-                  <button class="chip" type="button" data-copy="https://chromewebstore.google.com/detail/lpohaakdindhljdhpofnfmggbfllgdil"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>Copy link</span></button>
-                  <button class="chip" type="button" data-flip aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3m5 0v.01M12 7v3a2 2 0 0 1-2 2H7m-4 0h.01M12 3h.01M12 16v.01M16 12h1m4 0v.01M12 21v-1"/></svg><span>QR code</span></button>
-                </div>
-              </div>
-            </div>
-            <div class="dl__face dl__back" aria-hidden="true">
-              <div class="qr-tabs" role="tablist" aria-label="Browser store">
-                <button class="qr-tab" type="button" role="tab" id="qr-tab-chrome" aria-controls="qr-panel-chrome" aria-selected="true" tabindex="-1">Chrome</button>
-                <button class="qr-tab" type="button" role="tab" id="qr-tab-firefox" aria-controls="qr-panel-firefox" aria-selected="false" tabindex="-1">Firefox</button>
-              </div>
-              <div class="qr-panel" role="tabpanel" id="qr-panel-chrome" aria-labelledby="qr-tab-chrome">
-                <img class="qr" src="assets/qr-chrome-web-store.svg" width="240" height="240" alt="QR code for the Nuvori Password Fill listing in the Chrome Web Store">
-                <p>Scan to open the Chrome Web Store listing</p>
-              </div>
-              <div class="qr-panel" role="tabpanel" id="qr-panel-firefox" aria-labelledby="qr-tab-firefox" hidden>
-                <img class="qr" src="assets/qr-firefox-add-ons.svg" width="240" height="240" alt="QR code for the Nuvori Password Fill listing on Firefox Add-ons" loading="lazy">
-                <p>Scan to open the Firefox Add-ons listing</p>
-              </div>
-              <button class="chip" type="button" data-unflip tabindex="-1">Done</button>
-            </div>
-          </div>
-        </article>
-        <!-- Android -->
-        <article class="dl reveal" data-spot>
-          <div class="dl__inner">
-            <div class="dl__face dl__front">
-              <div class="dl__top">
-                <span class="dl__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg></span>
-                <span class="tag tag--violet"><span class="tag__dot"></span>Closed testing</span>
-              </div>
-              <h3>Android phone</h3>
-              <p>Android 10 or newer. In closed testing, the link opens for invited testers.</p>
-              <div class="dl__actions">
-                <a class="store store--play" href="https://play.google.com/store/apps/details?id=com.application.private_vault" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#00D7FE" d="M3.6 1.8 13.4 12l-9.8 10.2a1.3 1.3 0 0 1-.6-1.1V2.9c0-.5.2-.9.6-1.1Z"/><path fill="#00F076" d="M3.6 1.8c.4-.2.8-.2 1.2 0l11.4 6.6-2.8 3.6Z"/><path fill="#FF3A44" d="m13.4 12 2.8 3.6-11.4 6.6c-.4.2-.8.2-1.2 0Z"/><path fill="#FFD500" d="m16.2 8.4 3.4 2a1.5 1.5 0 0 1 0 2.6l-3.4 2.6-2.8-3.6Z"/></svg>
-                  <span><small>Get it on</small>Google Play</span>
-                </a>
-                <div class="dl__tools">
-                  <button class="chip" type="button" data-copy="https://play.google.com/store/apps/details?id=com.application.private_vault"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>Copy link</span></button>
-                  <button class="chip" type="button" data-flip aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3m5 0v.01M12 7v3a2 2 0 0 1-2 2H7m-4 0h.01M12 3h.01M12 16v.01M16 12h1m4 0v.01M12 21v-1"/></svg><span>QR code</span></button>
-                </div>
-              </div>
-            </div>
-            <div class="dl__face dl__back" aria-hidden="true">
-              <img class="qr" src="assets/qr-google-play.svg" width="240" height="240" alt="QR code for the Nuvori Google Play listing">
-              <p>Scan with your phone to open Google Play</p>
-              <button class="chip" type="button" data-unflip tabindex="-1">Done</button>
-            </div>
-          </div>
-        </article>
-
-        <!-- Wear OS -->
-        <article class="dl reveal" data-spot>
-          <div class="dl__inner">
-            <div class="dl__face dl__front">
-              <div class="dl__top">
-                <span class="dl__icon"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 10v2l1 1m3.13-5.34-.81-4.05a2 2 0 0 0-2-1.61h-2.68a2 2 0 0 0-2 1.61l-.78 4.05m.02 8.7.8 4a2 2 0 0 0 2 1.61h2.72a2 2 0 0 0 2-1.61l.81-4.05"/></svg></span>
-                <span class="tag tag--violet"><span class="tag__dot"></span>Closed testing</span>
-              </div>
-              <h3>Wear OS watch</h3>
-              <p>Wear OS 3 or newer, paired with the phone app. Same Google Play listing: install it on your watch from there.</p>
-              <div class="dl__actions">
-                <a class="store store--play" href="https://play.google.com/store/apps/details?id=com.application.private_vault" target="_blank" rel="noopener">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#00D7FE" d="M3.6 1.8 13.4 12l-9.8 10.2a1.3 1.3 0 0 1-.6-1.1V2.9c0-.5.2-.9.6-1.1Z"/><path fill="#00F076" d="M3.6 1.8c.4-.2.8-.2 1.2 0l11.4 6.6-2.8 3.6Z"/><path fill="#FF3A44" d="m13.4 12 2.8 3.6-11.4 6.6c-.4.2-.8.2-1.2 0Z"/><path fill="#FFD500" d="m16.2 8.4 3.4 2a1.5 1.5 0 0 1 0 2.6l-3.4 2.6-2.8-3.6Z"/></svg>
-                  <span><small>Get it on</small>Google Play</span>
-                </a>
-                <div class="dl__tools">
-                  <button class="chip" type="button" data-copy="https://play.google.com/store/apps/details?id=com.application.private_vault"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>Copy link</span></button>
-                  <button class="chip" type="button" data-flip aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3m5 0v.01M12 7v3a2 2 0 0 1-2 2H7m-4 0h.01M12 3h.01M12 16v.01M16 12h1m4 0v.01M12 21v-1"/></svg><span>QR code</span></button>
-                </div>
-              </div>
-            </div>
-            <div class="dl__face dl__back" aria-hidden="true">
-              <img class="qr" src="assets/qr-google-play.svg" width="240" height="240" alt="QR code for the Nuvori Google Play listing">
-              <p>Scan with your phone, then install on your watch</p>
-              <button class="chip" type="button" data-unflip tabindex="-1">Done</button>
-            </div>
-          </div>
-        </article>
-
-      </div>
-    </section>
-
-    <!-- FAQ -->
-    <section class="section wrap" id="faq">
-      <div class="faq">
-        <header class="section__head section__head--left reveal">
-          <p class="eyebrow">FAQ</p>
-          <h2>Good questions.</h2>
-          <p style="margin-top: 24px"><a class="btn btn--ghost btn--sm" href="faq/">All questions and answers
-            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-7-7 7 7-7 7"/></svg></a></p>
+    <section class="band" id="questions" aria-labelledby="h-questions">
+      <div class="wrap questions">
+        <header class="band__head">
+          <h2 id="h-questions">Common questions</h2>
         </header>
-        <div class="faq__list">
-          <details class="reveal">
-            <summary>Do I need to create an account?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>No. You create a vault with a master password on your device. There is no sign-up and no Nuvori account, because there is no Nuvori server.</p></div>
-          </details>
-          <details class="reveal">
-            <summary>I'm switching browsers. What happens to my passwords?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>Nothing. They stay in Nuvori for Windows, not in the browser. Add Nuvori Password Fill to the new browser. Nuvori connects it, and the same logins, cards, addresses and codes fill there. <a href="faq/#switching-browsers">More about switching</a>.</p></div>
-          </details>
-          <details class="reveal">
-            <summary>Which browsers work?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>Browsers built on Chromium (version 127 or newer) or Firefox (version 140 or newer), on Windows, with Nuvori for Windows on the same PC. Nuvori recognizes Zen, Helium, Comet, Arc, Brave, Vivaldi, Opera, Firefox, LibreWolf, Waterfox, Floorp, Chrome, Edge and more by name. Another one can be connected in <strong>Settings &gt; Browser extension</strong>. Safari, Mac, iPhone, iPad and Linux are not supported. <a href="faq/#which-browsers">Full list</a>.</p></div>
-          </details>
-          <details class="reveal">
-            <summary>Where is my data stored?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>In an encrypted vault on each of your devices. Sync goes straight between your devices over your Wi-Fi, or through your own Google Drive as encrypted files.</p></div>
-          </details>
-          <details class="reveal">
-            <summary>Can I bring my passwords from another app?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>Yes. Nuvori for Android imports CSV exports from Chrome, Brave, Edge, Firefox, Safari, 1Password, LastPass, Dashlane and Bitwarden, and Bitwarden JSON exports. Delete the export file after the import.</p></div>
-          </details>
-          <details class="reveal">
-            <summary>Which devices does it run on?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>Android 10 or newer, Wear OS 3 or newer with the phone app, and Windows 10 (version 2004) or newer, 64-bit. The browser extension works with browsers built on Chromium or Firefox, through the Windows app. Passkeys need Android 14 or newer, or Windows 11.</p></div>
-          </details>
-          <details class="reveal">
-            <summary>I found a problem. Where do I report it?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p><a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Open an issue on GitHub</a>. Say which app and version you use, what you did, and what happened. Issues are public, so never include passwords, codes, card numbers or vault files.</p></div>
-          </details>
-          <details class="reveal">
-            <summary>How many devices can share one vault?<span class="faq__plus" aria-hidden="true"></span></summary>
-            <div class="faq__body"><p>Up to six phones or tablets and two Windows PCs. A watch connects through your phone.</p></div>
-          </details>
-        </div>
-      </div>
-    </section>
-
-    <!-- CTA -->
-    <section class="wrap">
-      <div class="cta reveal">
-        <img src="assets/logo-192.png" alt="" width="72" height="72">
-        <h2>Switch browsers, not passwords.</h2>
-        <p>Nuvori for Windows, Android, Wear OS, and the browsers you choose.</p>
-        <div class="cta__actions">
-          <a class="btn btn--primary btn--lg" href="#download">Get Nuvori</a>
-          <a class="btn btn--ghost btn--lg" id="join-testing" href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">
-            Join testing
-            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-          </a>
-        </div>
-        <p class="cta__note">The Android and Wear OS apps are in closed testing on Google Play. Fill in the short form and we will add you as a tester.</p>
+        <details class="qa">
+          <summary><span class="qa__q">Is Nuvori free?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+          <div class="faq__body"><p>Yes. The Windows, Android and Wear OS apps and the browser extension are all free. There are no ads, no in-app purchases and no subscription. Optional Google Drive sync uses storage in your own Google account.</p></div>
+        </details>
+        <details class="qa">
+          <summary><span class="qa__q">Do I need to create an account?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+          <div class="faq__body"><p>No. You create a vault with a master password on your device. There is no sign-up and no Nuvori account, because there is no Nuvori server.</p></div>
+        </details>
+        <details class="qa">
+          <summary><span class="qa__q">I'm switching browsers. What happens to my passwords?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+          <div class="faq__body"><p>Nothing. They stay in Nuvori for Windows, not in the browser. Add Nuvori Password Fill to the new browser. Nuvori connects it, and the same logins, cards, addresses and codes fill there. <a href="faq/#switching-browsers">More about switching</a></p></div>
+        </details>
+        <details class="qa">
+          <summary><span class="qa__q">Can I bring my passwords from another app?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+          <div class="faq__body"><p>Yes. Nuvori for Android imports CSV exports from Chrome, Brave, Edge, Firefox, Safari, 1Password, LastPass, Dashlane and Bitwarden, and Bitwarden JSON exports. Nuvori for Windows imports KeePass databases. Delete the export file after the import. <a href="import-passwords/">Step by step</a></p></div>
+        </details>
+        <details class="qa">
+          <summary><span class="qa__q">How many devices can share one vault?</span><span class="faq__plus" aria-hidden="true"></span></summary>
+          <div class="faq__body"><p>Up to six phones or tablets and two Windows PCs. A watch connects through your phone.</p></div>
+        </details>
+        <p class="questions__more"><a href="faq/">All questions and answers</a></p>
       </div>
     </section>
   </main>
 
-  <footer class="footer">
-    <div class="wrap footer__inner">
-      <div class="footer__brand">
-        <a class="brand" href="#top"><img src="assets/logo-192.png" alt="" width="30" height="30"><span>Nuvori</span></a>
+  <footer class="foot">
+    <div class="wrap foot__inner">
+      <div class="foot__brand">
+        <a class="brand" href="./"><img src="assets/logo-96.webp" alt="" width="30" height="30" loading="lazy" decoding="async">Nuvori</a>
         <p>Yours, by design.</p>
       </div>
-      <nav class="footer__links" aria-label="Footer">
-        <a href="faq/">FAQ</a>
-        <a href="privacy/">Privacy policy</a>
-        <a href="terms/">Terms of service</a>
-        <a href="https://github.com/santoshkanumuri/vault_apk_windows">Windows on GitHub</a>
-        <a href="https://github.com/santoshkanumuri/vault_apk">Android on GitHub</a>
-        <a href="#download">Download</a>
-        <a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a>
-        <a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a>
+      <nav class="foot__nav" aria-label="Footer">
+        <div>
+          <p class="foot__head">Guides</p>
+          <ul>
+            <li><a href="browsers/">Browsers</a></li>
+            <li><a href="import-passwords/">Import passwords</a></li>
+            <li><a href="android/">Android</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="foot__head">Help</p>
+          <ul>
+            <li><a href="faq/">FAQ</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a></li>
+            <li><a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="foot__head">Nuvori</p>
+          <ul>
+            <li><a href="#download">Download</a></li>
+            <li><a href="privacy/">Privacy policy</a></li>
+            <li><a href="terms/">Terms of service</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk_windows">Windows app on GitHub</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk">Android app on GitHub</a></li>
+          </ul>
+        </div>
       </nav>
-      <p class="footer__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS and the browser names on this site are trademarks of their owners.</p>
+      <p class="foot__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS and the browser names on this site are trademarks of their owners.</p>
     </div>
   </footer>
 
   <div class="snack" id="snack" role="status" aria-live="polite"></div>
-
-  <script src="palette.js"></script>
-  <script src="script.js?v=20261122"></script>
+  <script src="site.js?v=20261123" defer></script>
 </body>
 </html>

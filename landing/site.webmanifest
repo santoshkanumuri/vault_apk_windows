@@ -1,0 +1,14 @@
+{
+  "name": "Nuvori",
+  "short_name": "Nuvori",
+  "description": "A free, private password manager for Windows and Android. Switch browsers, not passwords.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "browser",
+  "background_color": "#050705",
+  "theme_color": "#050705",
+  "icons": [
+    { "src": "/assets/logo-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/assets/logo-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

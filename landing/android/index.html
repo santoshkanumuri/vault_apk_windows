@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Android password manager with autofill and passkeys · Nuvori</title>
+  <meta name="description" content="Nuvori for Android fills logins in apps and 13 verified browsers, saves passkeys on Android 14 or newer, and shows codes on Wear OS. Free, with no account.">
+  <link rel="canonical" href="https://nuvori.santoshkanumuri.com/android/">
+  <meta name="theme-color" content="#101b15" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f3f5f1" media="(prefers-color-scheme: light)">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Nuvori">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="Android autofill and passkeys with Nuvori">
+  <meta property="og:description" content="Autofill in apps and browsers, passkeys on Android 14 or newer, and codes on your Wear OS watch. Encrypted on your phone, no account.">
+  <meta property="og:url" content="https://nuvori.santoshkanumuri.com/android/">
+  <meta property="og:image" content="https://nuvori.santoshkanumuri.com/assets/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The Nuvori padlock logo and the words: Nuvori, your offline password vault for Windows.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Android autofill and passkeys with Nuvori">
+  <meta name="twitter:description" content="Autofill in apps and browsers, passkeys on Android 14 or newer, and codes on your Wear OS watch. Encrypted on your phone, no account.">
+  <meta name="twitter:image" content="https://nuvori.santoshkanumuri.com/assets/og-image.jpg">
+  <meta name="twitter:image:alt" content="The Nuvori padlock logo and the words: Nuvori, your offline password vault for Windows.">
+  <link rel="icon" href="../favicon.ico" sizes="48x48">
+  <link rel="icon" type="image/png" sizes="32x32" href="../assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="../assets/favicon-48.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="../assets/logo-192.png">
+  <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+  <link rel="manifest" href="../site.webmanifest">
+  <link rel="preload" href="../assets/fonts/atkinson-hyperlegible-next.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../site.css?v=20261123">
+  <script>
+    document.documentElement.classList.add("js");
+    try { var t = localStorage.getItem("nuvori.site.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "WebPage",
+   "@id": "https://nuvori.santoshkanumuri.com/android/#webpage",
+   "url": "https://nuvori.santoshkanumuri.com/android/",
+   "name": "Android password manager with autofill and passkeys · Nuvori",
+   "description": "Nuvori for Android fills logins in apps and 13 verified browsers, saves passkeys on Android 14 or newer, and shows codes on Wear OS. Free, with no account.",
+   "inLanguage": "en",
+   "isPartOf": {
+    "@id": "https://nuvori.santoshkanumuri.com/#website"
+   },
+   "breadcrumb": {
+    "@id": "https://nuvori.santoshkanumuri.com/android/#breadcrumb"
+   },
+   "about": [
+    {
+     "@id": "https://nuvori.santoshkanumuri.com/#android"
+    }
+   ]
+  },
+  {
+   "@type": "BreadcrumbList",
+   "@id": "https://nuvori.santoshkanumuri.com/android/#breadcrumb",
+   "itemListElement": [
+    {
+     "@type": "ListItem",
+     "position": 1,
+     "name": "Nuvori",
+     "item": "https://nuvori.santoshkanumuri.com/"
+    },
+    {
+     "@type": "ListItem",
+     "position": 2,
+     "name": "Android",
+     "item": "https://nuvori.santoshkanumuri.com/android/"
+    }
+   ]
+  }
+ ]
+}
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <div class="wrap top__inner">
+      <a class="brand" href="../"><img src="../assets/logo-96.webp" alt="" width="30" height="30">Nuvori</a>
+      <nav class="top__nav" aria-label="Site">
+        <a href="../browsers/">Browsers</a>
+        <a href="../import-passwords/">Import</a>
+        <a href="../android/" aria-current="page">Android</a>
+        <a href="../faq/">FAQ</a>
+      </nav>
+      <button class="theme" id="theme" type="button" aria-label="Use dark theme"><svg class="i i--sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><svg class="i i--moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+      <a class="btn btn--sm" href="../#download">Get Nuvori</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <article class="legal guide">
+      <header class="legal__head">
+        <ol class="crumbs" aria-label="Breadcrumb">
+          <li><a href="../">Nuvori</a></li>
+          <li aria-current="page">Android</li>
+        </ol>
+        <h1>Android autofill and passkeys, from your own vault</h1>
+        <p class="guide__lead">Nuvori for Android fills logins in apps and browsers, saves and uses passkeys on Android 14 or newer, and shows your codes on a Wear OS watch. Your vault stays encrypted on your phone, with no Nuvori account.</p>
+        <ul class="guide__facts" aria-label="At a glance">
+          <li>Android 10 or newer</li>
+          <li>Passkeys on Android 14+</li>
+          <li>Wear OS 3+</li>
+          <li>Free</li>
+        </ul>
+      </header>
+
+      <section id="autofill" aria-labelledby="h-autofill">
+        <h2 id="h-autofill">Turn on autofill</h2>
+        <ol class="steps">
+          <li>In Nuvori, open <strong>Settings &gt; Autofill and codes</strong>.</li>
+          <li>If it says <strong>Nuvori is not your Autofill service</strong>, tap <strong>Choose Nuvori autofill</strong> and select Nuvori.</li>
+          <li>On Android 14 or newer, also tap <strong>Enable passwords and passkeys</strong> and turn on Nuvori.</li>
+          <li>For Chrome or Brave, tap <strong>Open browser autofill settings</strong>. Turn on autofill using another service, then restart the browser.</li>
+        </ol>
+        <figure class="guide__shot guide__shot--phone">
+          <img src="../assets/faq/android-autofill.webp" alt="The Autofill and codes screen on Android, with How logins appear set to Account picker. Keyboard suggestions is the other choice." width="540" height="1200" loading="lazy" decoding="async">
+          <figcaption>Settings &gt; Autofill and codes.</figcaption>
+        </figure>
+      </section>
+
+      <section id="where" aria-labelledby="h-where">
+        <h2 id="h-where">Where Nuvori fills</h2>
+        <ul>
+          <li><strong>In apps:</strong> the logins you saved for that app.</li>
+          <li><strong>On websites:</strong> only the logins for the exact HTTPS site, in 13 verified browsers:</li>
+        </ul>
+        <ul class="names" aria-label="Verified Android browsers">
+          <li>Chrome</li><li>Brave</li><li>Edge</li><li>Firefox</li><li>Firefox Focus</li><li>Firefox Klar</li><li>Samsung Internet</li><li>Vivaldi</li><li>Opera</li><li>Opera Mini</li><li>DuckDuckGo</li><li>Naver Whale</li><li>Yandex Browser</li>
+        </ul>
+        <p>In another browser, Nuvori can't verify which site is open, so it doesn't suggest logins by site. You can still pick a login and fill it after you confirm.</p>
+        <h3>Popup or keyboard</h3>
+        <p>In <strong>Settings &gt; Autofill and codes &gt; How logins appear</strong>, choose <strong>Account picker</strong> (the default) or <strong>Keyboard suggestions</strong>. Codes and new passwords always use the picker.</p>
+        <h3>When autofill can't help</h3>
+        <p>Add the <strong>Quick copy</strong> tile to Quick Settings. It copies a password, code, card detail or security answer, even if another app is your autofill service.</p>
+      </section>
+
+      <section id="passkeys" aria-labelledby="h-passkeys">
+        <h2 id="h-passkeys">Passkeys on Android</h2>
+        <p>On Android 14 or newer, Nuvori creates and uses passkeys in apps and websites. Passkeys are encrypted in your vault, sync to your other devices, and are included in backups.</p>
+        <ol class="steps">
+          <li>Open <strong>Settings &gt; Passkeys</strong> and tap <strong>Enable Nuvori for passwords and passkeys</strong>.</li>
+          <li>Create a passkey on a supported website in Chrome or Brave, or in an app that uses Android Credential Manager, and choose Nuvori.</li>
+          <li>To sign in on a computer with a passkey from your phone, choose the computer's option to use a phone. Scan the QR code, tap <strong>Unlock Nuvori</strong> and pick the passkey.</li>
+        </ol>
+        <p><strong>Settings &gt; Passkeys</strong> also lists your saved passkeys, a passkey history, and the recent apps and sites that asked for one. A passkey's private key is never shown. To move passkeys from another manager, tap <strong>Import passkeys from another manager</strong>.</p>
+        <figure class="guide__shot guide__shot--phone">
+          <img src="../assets/faq/android-passkeys.webp" alt="The Passkeys screen on Android: set up passkeys, import from another manager, saved passkeys, and passkey history." width="540" height="1200" loading="lazy" decoding="async">
+          <figcaption>Settings &gt; Passkeys.</figcaption>
+        </figure>
+      </section>
+
+      <section id="wear-os" aria-labelledby="h-wear">
+        <h2 id="h-wear">Codes on your Wear OS watch</h2>
+        <p>With Wear OS 3 or newer and the phone app, your watch shows your authenticator codes in your accent color. It keeps working offline after setup. Install it on the watch from the same Google Play listing.</p>
+      </section>
+
+      <section id="pc" aria-labelledby="h-pc">
+        <h2 id="h-pc">Your phone and your PC</h2>
+        <p>Pair the phone with Nuvori for Windows once, on the same Wi-Fi. Changes then go straight between your devices, or through a hidden folder in your own Google Drive when you are apart. Each change is encrypted and signed before it leaves the device. A login you save in Zen on your PC is ready to fill on your phone.</p>
+        <ul>
+          <li><a href="../faq/#add-phone-or-tablet">How to pair a phone</a></li>
+          <li><a href="../faq/#wifi-or-google-drive">Wi-Fi or Google Drive?</a></li>
+        </ul>
+      </section>
+
+      <section id="get" aria-labelledby="h-get">
+        <h2 id="h-get">Get Nuvori for Android</h2>
+        <p>Nuvori for Android and Wear OS are in closed testing on Google Play. The <a href="https://play.google.com/store/apps/details?id=com.application.private_vault" target="_blank" rel="noopener">Google Play link</a> opens for invited testers. <a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Fill in the short form</a> to be added as a tester.</p>
+          <ul class="guide__next">
+            <li><a href="../faq/#android-login-not-offered">My login isn't offered on Android<small>Troubleshooting</small></a></li>
+            <li><a href="../faq/#passkeys-sync">Do my passkeys sync and get backed up?<small>FAQ</small></a></li>
+            <li><a href="../import-passwords/">Import your passwords<small>From Chrome, Edge, Brave or Firefox</small></a></li>
+            <li><a href="../privacy/#android">What autofill and passkeys handle<small>Privacy policy</small></a></li>
+          </ul>
+          <div class="guide__cta">
+            <a class="btn btn--lg" href="../#download">Get Nuvori</a>
+            <a class="btn btn--quiet btn--lg" href="../faq/">All questions and answers</a>
+          </div>
+      </section>
+    </article>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot__inner">
+      <div class="foot__brand">
+        <a class="brand" href="../"><img src="../assets/logo-96.webp" alt="" width="30" height="30" loading="lazy" decoding="async">Nuvori</a>
+        <p>Yours, by design.</p>
+      </div>
+      <nav class="foot__nav" aria-label="Footer">
+        <div>
+          <p class="foot__head">Guides</p>
+          <ul>
+            <li><a href="../browsers/">Browsers</a></li>
+            <li><a href="../import-passwords/">Import passwords</a></li>
+            <li><a href="../android/" aria-current="page">Android</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="foot__head">Help</p>
+          <ul>
+            <li><a href="../faq/">FAQ</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk_windows/issues" target="_blank" rel="noopener">Report an issue</a></li>
+            <li><a href="https://docs.google.com/forms/d/e/1FAIpQLSeRYpiuXKW2HwlzFx-wK_J8wFL1630JriA-IfdmaA2KCeuSaw/viewform" target="_blank" rel="noopener">Join testing</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="foot__head">Nuvori</p>
+          <ul>
+            <li><a href="../#download">Download</a></li>
+            <li><a href="../privacy/">Privacy policy</a></li>
+            <li><a href="../terms/">Terms of service</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk_windows">Windows app on GitHub</a></li>
+            <li><a href="https://github.com/santoshkanumuri/vault_apk">Android app on GitHub</a></li>
+          </ul>
+        </div>
+      </nav>
+      <p class="foot__fine">© <span data-year>2026</span> Nuvori. Microsoft Store, Google Play, Wear OS and the browser names on this site are trademarks of their owners.</p>
+    </div>
+  </footer>
+
+  <div class="snack" id="snack" role="status" aria-live="polite"></div>
+  <script src="../site.js?v=20261123" defer></script>
+</body>
+</html>
