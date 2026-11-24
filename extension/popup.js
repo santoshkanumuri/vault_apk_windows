@@ -30,6 +30,14 @@ const SWITCHES = { "#fill-cards-toggle": "fillCards", "#fill-profiles-toggle": "
 const unlockButton = $("#unlock-app");
 const saveNameRow = $("#save-name-row");
 const saveName = $("#save-name");
+const searchSection = $("#search-section");
+const searchInput = $("#login-search");
+const searchStatus = $("#search-status");
+const searchResults = $("#search-results");
+const searchConfirm = $("#search-confirm");
+const searchConfirmText = $("#search-confirm-text");
+const searchConfirmFill = $("#search-confirm-fill");
+const searchConfirmCancel = $("#search-confirm-cancel");
 
 const ICON = {
   key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>',
@@ -57,6 +65,7 @@ async function loadFeatures() {
     const result = await chrome.runtime.sendMessage({ action: "host_features" });
     features = Array.isArray(result?.features) ? result.features : [];
   } catch { features = []; }
+  showSearch();
   return features;
 }
 
@@ -125,7 +134,7 @@ async function checkConnection() {
   setConnection("checking");
   let result;
   try { result = await chrome.runtime.sendMessage({ action: "connection_status" }); } catch { result = { status: "offline" }; }
-  if (Array.isArray(result?.features)) features = result.features;
+  if (Array.isArray(result?.features)) { features = result.features; showSearch(); }
   if (result?.status === "ok") { setConnection("ready"); return "ready"; }
   if (result?.status === "locked") { setConnection("locked"); return "locked"; }
   setConnection("offline", CONNECTION_TEXT.offline, result?.status === "host_missing" ? "host" : "app");
@@ -148,6 +157,8 @@ function setBusy(value) {
   showPassword.disabled = value;
   retryPendingButton.disabled = value;
   for (const button of choices.querySelectorAll("button")) button.disabled = value;
+  if (searchResults) for (const button of searchResults.querySelectorAll("button")) button.disabled = value;
+  if (searchConfirmFill) searchConfirmFill.disabled = value;
 }
 
 function selectView(name) {
@@ -489,7 +500,8 @@ async function releaseCredential(choice) {
     selectionToken: choice.selectionToken,
   }));
   if (response?.status === "selection_expired") {
-    const refreshed = await callHost(makeRequest("query_credentials", origin));
+    // A login found by search comes from the listing of every login, so it is refreshed from that.
+    const refreshed = await callHost(makeRequest("query_credentials", origin, choice.searched ? { all: true } : {}));
     const replacement = refreshed?.credentials?.find((item) => item.id === choice.id);
     if (!replacement?.selectionToken) {
       throw new Error("This account is no longer available for this site. Refresh and try again.");
@@ -630,7 +642,7 @@ function fillLoginForm(credentials, expectedOrigin) {
   return { filled: true };
 }
 
-function accountRow(choice) {
+function accountRow(choice, fill = fillSelected) {
   const item = document.createElement("li");
   item.className = "row";
   const text = document.createElement("span");
@@ -640,14 +652,16 @@ function accountRow(choice) {
   title.textContent = choice.title || choice.username || "Saved login";
   const username = document.createElement("span");
   username.className = "username";
-  username.textContent = choice.username || "No username";
+  username.textContent = choice.searched
+    ? [choice.username || "No username", choice.site || "No website saved"].join(" · ")
+    : choice.username || "No username";
   text.append(title, username);
   const actions = document.createElement("span");
   actions.className = "row-actions";
   actions.append(
     iconButton("user", "Copy username", () => copyUsername(choice)),
     iconButton("copy", "Copy password", () => copyPassword(choice)),
-    textButton("Fill", "btn primary small", () => fillSelected(choice)),
+    textButton("Fill", "btn primary small", () => fill(choice)),
   );
   item.append(iconNode("key", "avatar"), text);
   if (choice.passkey === true) {
@@ -661,6 +675,109 @@ function accountRow(choice) {
   item.append(actions);
   return item;
 }
+
+// ---------------------------------------------------------------------------
+// Search all logins ("all_logins"), here in the popup only: pages never see this list (M-06).
+// The app sends names, usernames and saved sites with one-use tokens for this tab's site, never a
+// password; filling a login saved for another site needs a second, explicit confirmation.
+
+const Search = typeof NuvoriLoginSearch === "object" ? NuvoriLoginSearch : null;
+let searchListing = null;
+let searchListingFor = "";
+let searchLoading = null;
+let searchTimer;
+let searchPending = null;
+
+function showSearch() {
+  if (!searchSection) return;
+  searchSection.hidden = !(Search && origin && supports("all_logins"));
+}
+
+function clearSearchConfirm() {
+  searchPending = null;
+  if (searchConfirm) searchConfirm.hidden = true;
+  if (searchConfirmText) searchConfirmText.textContent = "";
+}
+
+function forgetSearch() {
+  searchListing = null;
+  searchListingFor = "";
+  clearSearchConfirm();
+  searchResults?.replaceChildren();
+  if (searchResults) searchResults.hidden = true;
+}
+
+/** Every saved login for this tab's site to choose from: asked once per popup, kept in memory only. */
+async function loadSearchListing() {
+  if (searchListing && searchListingFor === origin) return searchListing;
+  searchLoading ||= (async () => {
+    const forOrigin = origin;
+    const response = await callHost(makeRequest("query_credentials", forOrigin, { all: true }));
+    if (response?.status !== "ok" || !Array.isArray(response.credentials)) {
+      throw new Error(response?.status === "locked" ? "Unlock Nuvori on Windows to search your logins."
+        : response?.message || "Could not search your logins.");
+    }
+    searchListing = response.credentials
+      .filter((choice) => typeof choice?.id === "string" && typeof choice.selectionToken === "string")
+      .map((choice) => ({ id: choice.id, title: String(choice.title || ""), username: String(choice.username || ""),
+        site: typeof choice.site === "string" ? choice.site : "", selectionToken: choice.selectionToken, searched: true }));
+    searchListingFor = forOrigin;
+    return searchListing;
+  })().finally(() => { searchLoading = null; });
+  return searchLoading;
+}
+
+async function runSearch() {
+  if (!Search || !searchInput || !origin) return;
+  const query = searchInput.value;
+  clearSearchConfirm();
+  if (!Search.queryWords(query).length) {
+    searchResults.replaceChildren();
+    searchResults.hidden = true;
+    searchStatus.textContent = "";
+    return;
+  }
+  let listing;
+  try {
+    await sameTabStillOpen();
+    listing = await loadSearchListing();
+  } catch (error) {
+    searchResults.replaceChildren();
+    searchResults.hidden = true;
+    searchStatus.textContent = error instanceof Error ? error.message : "Could not search your logins.";
+    return;
+  }
+  if (searchInput.value !== query) return; // A newer search runs next.
+  const { results, total } = Search.search(listing, query);
+  searchResults.replaceChildren(...results.map((choice) => accountRow(choice, fillSearched)));
+  searchResults.hidden = results.length === 0;
+  searchStatus.textContent = total === 0 ? "No saved login matches."
+    : total > results.length ? `Showing ${results.length} of ${total}. Type more to narrow the list.` : "";
+}
+
+/** Fills a login found by search: straight away on its own site, after a warning anywhere else. */
+async function fillSearched(choice) {
+  if (busy) return;
+  if (Search?.sameSite(choice.site, origin)) { clearSearchConfirm(); await fillSelected(choice); return; }
+  searchPending = choice;
+  const page = Search?.hostOf(origin) || "this site";
+  searchConfirmText.textContent = choice.site
+    ? `This login is saved for ${Search.hostOf(`https://${choice.site}`) || choice.site}, not ${page}. Fill it only if you trust this page.`
+    : `This login has no website saved, and this page is ${page}. Fill it only if you trust this page.`;
+  searchConfirm.hidden = false;
+  searchConfirmFill.focus?.();
+}
+
+searchInput?.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, Search?.DEBOUNCE_MS ?? 150);
+});
+searchConfirmCancel?.addEventListener("click", clearSearchConfirm);
+searchConfirmFill?.addEventListener("click", async () => {
+  const choice = searchPending;
+  clearSearchConfirm();
+  if (choice) await fillSelected(choice);
+});
 
 // ---------------------------------------------------------------------------
 // Sign-in methods for this site ("sign_in_methods"): "Last time: GitHub · octocat". "Show" points at
@@ -842,6 +959,7 @@ async function findAccounts() {
         : response?.message || "Could not find matching accounts.");
     }
     retryDelay = 2000;
+    showSearch();
     void loadSignIns();
     void loadCodes();
     void loadItems();
@@ -856,6 +974,8 @@ async function findAccounts() {
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "Could not reach Nuvori for Windows.");
     if (["locked", "offline"].includes(connection.dataset.state)) {
+      if (searchSection) searchSection.hidden = true;
+      forgetSearch();
       retryTimer = setTimeout(findAccounts, retryDelay);
       retryDelay = Math.min(retryDelay * 2, 15000);
     }

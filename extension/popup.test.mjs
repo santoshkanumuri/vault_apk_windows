@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 const source = readFileSync(fileURLToPath(new URL("./popup.js", import.meta.url)), "utf8");
+const searchSource = readFileSync(fileURLToPath(new URL("./loginsearch.js", import.meta.url)), "utf8");
 
 class FakeElement {
   constructor(name, events) {
@@ -34,7 +35,7 @@ class FakeElement {
   allText() { return [this.textContent, ...this.children.map((child) => child.allText?.() ?? "")].join(" "); }
 }
 
-async function popup(frameResults, hostReply, url = "https://www.seedr.cc/", { local = {}, session = {}, messageReply = () => undefined, chromeExtra = {}, navigatorExtra = {} } = {}) {
+async function popup(frameResults, hostReply, url = "https://www.seedr.cc/", { local = {}, session = {}, messageReply = () => undefined, chromeExtra = {}, navigatorExtra = {}, search = false } = {}) {
   const timers = [];
   const events = {};
   const requests = [];
@@ -80,6 +81,7 @@ async function popup(frameResults, hostReply, url = "https://www.seedr.cc/", { l
       } },
     },
   });
+  if (search) vm.runInContext(searchSource, context);
   vm.runInContext(source, context);
   await new Promise(setImmediate);
   return { context, elements, requests, injections, timers, events, messages, clipboard, local, session };
@@ -469,4 +471,129 @@ test("the password-export hint opens Chrome's page only on Chrome and shows the 
   await settle();
   assert.equal(brave.elements["#browser-pm-path"].textContent, "brave://password-manager/settings");
   assert.equal(brave.elements["#open-password-settings"].hidden, true);
+});
+
+// ---------------------------------------------------------------------------
+// Search all logins (popup only)
+
+const LISTING = [
+  { id: "mail", title: "Example Mail", username: "alice@example.com", site: "mail.example.com", selectionToken: "t-mail" },
+  { id: "bank", title: "My Bank", username: "alice", site: "bank.test", selectionToken: "t-bank" },
+  { id: "seedr", title: "Seedr", username: "alice2", site: "seedr.cc", selectionToken: "t-seedr" },
+  { id: "nosite", title: "Router", username: "admin", site: "", selectionToken: "t-router" },
+];
+
+async function searchPopup({ features = ["all_logins"], listing = LISTING, extraReply } = {}) {
+  const state = await popup(
+    [{ frameId: 0, documentId: "doc", result: { fillable: true } }],
+    (request) => {
+      const extra = extraReply?.(request);
+      if (extra) return extra;
+      if (request.action === "query_credentials") return { status: "ok", credentials: request.all ? listing : [] };
+      if (request.action === "fill_credential") {
+        const chosen = listing.find((item) => item.id === request.credentialId);
+        return { status: "ok", credential: { id: chosen.id, username: chosen.username, password: "pw-" + chosen.id } };
+      }
+      return { status: "ok" };
+    },
+    "https://www.seedr.cc/login",
+    { search: true, messageReply: (message) => message.action === "host_features" || message.action === "connection_status" ? { status: "ok", features } : undefined },
+  );
+  const type = async (text) => {
+    state.elements["#login-search"].value = text;
+    state.events["#login-search:input"]();
+    await state.timers.at(-1).callback();
+  };
+  return { ...state, type };
+}
+
+test("search: shown only when the app lists every login, and asks for the listing once", async () => {
+  const hidden = await searchPopup({ features: [] });
+  assert.equal(hidden.elements["#search-section"].hidden, true);
+
+  const state = await searchPopup();
+  assert.equal(state.elements["#search-section"].hidden, false);
+  assert.equal(state.requests.filter((request) => request.all).length, 0, "nothing is listed before the user types");
+  await state.type("bank");
+  await state.type("alice");
+  const listings = state.requests.filter((request) => request.action === "query_credentials" && request.all === true);
+  assert.equal(listings.length, 1);
+  assert.equal(listings[0].origin, "https://www.seedr.cc");
+  const text = state.elements["#search-results"].allText();
+  assert.match(text, /Example Mail/);
+  assert.match(text, /bank\.test/);
+  assert.doesNotMatch(text, /pw-/);
+});
+
+test("search: a login for this site fills straight away", async () => {
+  const state = await searchPopup();
+  await state.type("seedr");
+  await button(state.elements["#search-results"].children[0], "Fill").own.click();
+  assert.equal(state.elements["#search-confirm"].hidden, true);
+  const fill = state.requests.find((request) => request.action === "fill_credential");
+  assert.equal(fill.credentialId, "seedr");
+  assert.equal(fill.selectionToken, "t-seedr");
+  assert.equal(state.injections.at(-1).args[0].password, "pw-seedr");
+});
+
+test("search: a login for another site needs Fill anyway, and Cancel fills nothing", async () => {
+  const state = await searchPopup();
+  await state.type("bank");
+  await button(state.elements["#search-results"].children[0], "Fill").own.click();
+  assert.equal(state.elements["#search-confirm"].hidden, false);
+  assert.match(state.elements["#search-confirm-text"].textContent, /saved for bank\.test, not seedr\.cc/);
+  assert.equal(state.requests.some((request) => request.action === "fill_credential"), false, "no password before the second confirm");
+  assert.equal(state.injections.length, 0);
+
+  state.events["#search-confirm-cancel:click"]();
+  assert.equal(state.elements["#search-confirm"].hidden, true);
+  await state.events["#search-confirm-fill:click"]();
+  assert.equal(state.requests.some((request) => request.action === "fill_credential"), false, "Cancel forgot the choice");
+
+  await button(state.elements["#search-results"].children[0], "Fill").own.click();
+  await state.events["#search-confirm-fill:click"]();
+  const fill = state.requests.filter((request) => request.action === "fill_credential");
+  assert.equal(fill.length, 1);
+  assert.equal(fill[0].credentialId, "bank");
+  assert.equal(fill[0].origin, "https://www.seedr.cc", "the token is for this tab's site only");
+  assert.equal(state.injections.at(-1).args[1], "https://www.seedr.cc");
+});
+
+test("search: a login with no website saved also needs the second confirm", async () => {
+  const state = await searchPopup();
+  await state.type("router");
+  await button(state.elements["#search-results"].children[0], "Fill").own.click();
+  assert.equal(state.elements["#search-confirm"].hidden, false);
+  assert.match(state.elements["#search-confirm-text"].textContent, /no website saved/);
+});
+
+test("search: an expired token is refreshed from the full listing, and copy needs no confirm", async () => {
+  let expired = true;
+  const state = await searchPopup({ extraReply: (request) => {
+    if (request.action === "fill_credential" && expired) { expired = false; return { status: "selection_expired" }; }
+    return undefined;
+  } });
+  await state.type("bank");
+  await button(state.elements["#search-results"].children[0], "Copy password").own.click();
+  const listings = state.requests.filter((request) => request.action === "query_credentials" && request.all === true);
+  assert.equal(listings.length, 2, "the refresh asked for every login again");
+  assert.deepEqual(state.clipboard, ["pw-bank"]);
+  assert.ok(state.messages.some((message) => message.action === "clipboard_clear_later"));
+});
+
+test("search: a refused or locked listing shows why and lists nothing", async () => {
+  const state = await searchPopup({ extraReply: (request) => request.all ? { status: "invalid", message: "Too many requests. Try again in a minute." } : undefined });
+  await state.type("bank");
+  assert.equal(state.elements["#search-results"].hidden, true);
+  assert.match(state.elements["#search-status"].textContent, /Too many requests/);
+});
+
+test("search: the popup loads it, and no content script does", () => {
+  const html = readFileSync(fileURLToPath(new URL("./popup.html", import.meta.url)), "utf8");
+  assert.ok(html.indexOf('<script src="loginsearch.js">') > 0);
+  assert.ok(html.indexOf('<script src="loginsearch.js">') < html.indexOf('<script src="popup.js">'));
+  const manifest = JSON.parse(readFileSync(fileURLToPath(new URL("./manifest.json", import.meta.url)), "utf8"));
+  const scripts = (manifest.content_scripts || []).flatMap((entry) => entry.js || []);
+  assert.equal(scripts.includes("loginsearch.js"), false);
+  assert.equal(JSON.stringify(manifest.web_accessible_resources || []).includes("loginsearch"), false);
 });

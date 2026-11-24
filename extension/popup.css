@@ -197,3 +197,9 @@ input[role="switch"]:checked::after { transform: translateX(16px); background: v
 
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } * { transition: none !important; } }
 @media (forced-colors: active) { .btn, .tabs, .chip, .card, .icon-btn { border: 1px solid ButtonText; } .tabs [aria-selected="true"] { outline: 2px solid Highlight; } }
+
+/* Search all logins (popup only) */
+.search-status { margin: -6px 0 8px; color: var(--muted); font-size: 12px; }
+.search-status:empty { display: none; }
+#search-confirm { margin: 0 0 8px; }
+#search-confirm .actions { margin-top: 8px; }
