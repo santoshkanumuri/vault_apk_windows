@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { StatusIcon } from "../components/Status";
 import { humanError } from "../lib/errors";
 import { cx } from "../lib/format";
+import { strings } from "../strings";
 
 export type ToastKind = "success" | "info" | "progress" | "warning" | "error";
 export type ToastAction = { label: string; run: () => void | Promise<void> };
@@ -135,7 +136,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <StatusIcon kind={toast.kind} size={18} />
             <span className="toast-message">{toast.message}</span>
             {toast.action && <button type="button" className="toast-action" onClick={() => { const action = toast.action!; remove(toast.id); void action.run(); }}>{toast.action.label}</button>}
-            {toast.kind !== "progress" && <button type="button" className="toast-close" aria-label="Dismiss notification" onClick={() => remove(toast.id)}><X aria-hidden="true" /></button>}
+            {toast.kind !== "progress" && <button type="button" className="toast-close" aria-label={strings.dismissNotification} onClick={() => remove(toast.id)}><X aria-hidden="true" /></button>}
           </div>
         ))}
       </div>, host ?? document.body)}

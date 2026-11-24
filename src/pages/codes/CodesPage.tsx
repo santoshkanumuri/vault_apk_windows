@@ -15,6 +15,7 @@ import { buildIndex, matchesFilter } from "../../lib/search";
 import { totpAt } from "../../lib/totp";
 import { FilterInput } from "../items/Toolbar";
 import { useTotpCodes, type LiveCode } from "./useTotp";
+import { strings } from "../../strings";
 
 export function CodesPage() {
   const { entries, unlocked } = useVault();
@@ -35,18 +36,18 @@ export function CodesPage() {
   return (
     <div className="page">
       <div className="toolbar">
-        <FilterInput value={filter} onChange={setFilter} placeholder="Filter codes" />
+        <FilterInput value={filter} onChange={setFilter} placeholder={strings.filterCodes} />
         <div className="toolbar-group">
-          <Button variant="primary" icon={Plus} onClick={add} className="toolbar-add">Add code</Button>
+          <Button variant="primary" icon={Plus} onClick={add} className="toolbar-add">{strings.addCode}</Button>
         </div>
       </div>
 
       {codes.length === 0 ? (
-        <div className="card"><EmptyState icon={Clock3} title="No codes yet" body="Add the setup key from a site's two-step sign-in to get codes here." action={<Button variant="primary" icon={Plus} onClick={add}>Add code</Button>} /></div>
+        <div className="card"><EmptyState icon={Clock3} title={strings.noCodesYet} body="Add the setup key from a site's two-step sign-in to get codes here." action={<Button variant="primary" icon={Plus} onClick={add}>{strings.addCode}</Button>} /></div>
       ) : visible.length === 0 ? (
-        <div className="card"><EmptyState icon={SearchX} title="No matches" action={<Button onClick={() => setFilter("")}>Clear filter</Button>} /></div>
+        <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} action={<Button onClick={() => setFilter("")}>{strings.clearFilter}</Button>} /></div>
       ) : (
-        <ul className="code-grid" aria-label="Authenticator codes">
+        <ul className="code-grid" aria-label={strings.authenticatorCodes}>
           {visible.map((entry) => <CodeTile key={entry.id} entry={entry} hints={iconHints(entry, entries)} code={live.get(entry.id)} highlighted={router.highlight === entry.id} onOpen={() => void router.navigate({ page: "item", id: entry.id })} />)}
         </ul>
       )}
@@ -73,7 +74,7 @@ function CodeTile({ entry, hints, code, onOpen, highlighted }: { entry: VaultEnt
       </button>
       <div className="code-side">
         {code && <CountdownRing seconds={code.seconds} period={code.period} />}
-        <IconButton label="Copy code" icon={Copy} size="sm" tabIndex={-1} onClick={copyCode} />
+        <IconButton label={strings.copyCode} icon={Copy} size="sm" tabIndex={-1} onClick={copyCode} />
         <IconButton label={`Open ${entry.title}`} icon={ChevronRight} size="sm" onClick={onOpen} />
       </div>
     </li>
@@ -103,9 +104,9 @@ function Passkeys({ list, error, reload }: { list: PasskeySummary[] | null; erro
         <h2 id="passkeys-title" className="with-icon"><Fingerprint aria-hidden="true" />Passkeys</h2>
         {list && list.length > 0 && <span className="muted small">{plural(list.length, "passkey")}</span>}
       </div>
-      {error ? <div className="card card-padded muted small">Passkeys are unavailable right now.</div>
+      {error ? <div className="card card-padded muted small">{strings.passkeysAreUnavailableRightNow}</div>
         : !list ? null
-        : list.length === 0 ? <div className="card card-padded muted small">No passkeys yet. Passkeys you save on your phone show up here after sync.</div>
+        : list.length === 0 ? <div className="card card-padded muted small">{strings.noPasskeysYetPasskeysYouSave}</div>
         : (
           <ul className="card list">
             {list.map((passkey) => (

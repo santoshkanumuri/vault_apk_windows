@@ -6,6 +6,7 @@ import { StatusBanner } from "../components/Status";
 import { api, type AppSnapshot } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { BrandMark } from "./Unlock";
+import { strings } from "../strings";
 
 /**
  * The small window the browser extension asks for when the vault is locked. Nuvori closes it
@@ -80,29 +81,29 @@ export function UnlockPrompt() {
       <div className="auth-brand">
         <BrandMark />
         <div>
-          <strong id="prompt-title">Unlock Nuvori</strong>
-          <span>For filling and saving in your browser</span>
+          <strong id="prompt-title">{strings.unlockNuvori}</strong>
+          <span>{strings.forFillingAndSavingInYour}</span>
         </div>
       </div>
 
       {!configured ? (
         <>
-          <StatusBanner kind="info">Set up your vault in Nuvori first.</StatusBanner>
-          <Button variant="primary" size="lg" block icon={AppWindow} onClick={openApp}>Open Nuvori</Button>
+          <StatusBanner kind="info">{strings.setUpYourVaultInNuvori}</StatusBanner>
+          <Button variant="primary" size="lg" block icon={AppWindow} onClick={openApp}>{strings.openNuvori}</Button>
         </>
       ) : (
         <>
           {error && <StatusBanner kind="error">{error}</StatusBanner>}
           {helloReady && (
             <>
-              <Button ref={helloRef} variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void unlockHello()}>Unlock with Windows Hello</Button>
-              <div className="auth-divider"><span>or use your master password</span></div>
+              <Button ref={helloRef} variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void unlockHello()}>{strings.unlockWithWindowsHello}</Button>
+              <div className="auth-divider"><span>{strings.orUseYourMasterPassword}</span></div>
             </>
           )}
           <form className="auth-form" onSubmit={(event) => void submit(event)} noValidate>
             <PasswordField
               ref={passwordRef}
-              label="Master password"
+              label={strings.masterPassword}
               name="masterPassword"
               autoComplete="current-password"
               value={password}
@@ -111,18 +112,16 @@ export function UnlockPrompt() {
               capsLockWarning
               required
             />
-            <Button type="submit" variant={helloReady ? "secondary" : "primary"} size="lg" block icon={LockKeyhole} busy={busy === "password"} disabled={busy !== "" || !snapshot}>
-              Unlock
-            </Button>
+            <Button type="submit" variant={helloReady ? "secondary" : "primary"} size="lg" block icon={LockKeyhole} busy={busy === "password"} disabled={busy !== "" || !snapshot}>{strings.unlock}</Button>
           </form>
         </>
       )}
 
       <div className="prompt-actions">
-        <Button variant="ghost" size="sm" disabled={busy !== ""} onClick={() => void api.closeUnlockPrompt()}>Not now</Button>
-        <Button variant="ghost" size="sm" icon={AppWindow} disabled={busy !== ""} onClick={openApp}>Open Nuvori</Button>
+        <Button variant="ghost" size="sm" disabled={busy !== ""} onClick={() => void api.closeUnlockPrompt()}>{strings.notNow}</Button>
+        <Button variant="ghost" size="sm" icon={AppWindow} disabled={busy !== ""} onClick={openApp}>{strings.openNuvori}</Button>
       </div>
-      <p className="auth-footnote">Nuvori keeps running in the tray after you close it. Use the tray icon to open, lock, or quit.</p>
+      <p className="auth-footnote">{strings.nuvoriKeepsRunningInTheTray}</p>
     </main>
   );
 }

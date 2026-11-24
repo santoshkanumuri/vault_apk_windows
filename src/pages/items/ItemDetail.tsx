@@ -19,6 +19,7 @@ import { totpAt } from "../../lib/totp";
 import { useTotpCodes } from "../codes/useTotp";
 import { markUsed } from "../../app/recent";
 import { LoginSignIns } from "../signins/SignInsPage";
+import { strings } from "../../strings";
 
 export function ItemDetailPage({ id }: { id: string }) {
   const { entries, groups, loaded, upsertEntry, removeEntry, refresh } = useVault();
@@ -30,7 +31,7 @@ export function ItemDetailPage({ id }: { id: string }) {
   useEffect(() => { if (entry) markUsed(entry.id); }, [entry?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!entry) {
-    return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title="This item isn't here anymore" body="It may have been deleted on another device." action={<Button onClick={() => void router.back()}>Go back</Button>} /></div> : <div className="card card-padded center"><Spinner label="Loading" /></div>}</div>;
+    return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title={strings.thisItemIsnTHereAnymore} body="It may have been deleted on another device." action={<Button onClick={() => void router.back()}>{strings.goBack}</Button>} /></div> : <div className="card card-padded center"><Spinner label={strings.loading} /></div>}</div>;
   }
 
   const category = categoryForType(entry.type);
@@ -96,8 +97,8 @@ export function ItemDetailPage({ id }: { id: string }) {
         </div>
         <div className="detail-hero-actions">
           <IconButton label={entry.favorite ? "Remove from favorites" : "Add to favorites"} icon={Star} className={entry.favorite ? "is-favorite" : undefined} aria-pressed={entry.favorite} onClick={() => void toggleFavorite()} disabled={busy} />
-          <Button icon={Pencil} onClick={() => void router.navigate({ page: "edit", id: entry.id, category })}>Edit</Button>
-          <IconButton label="Delete" icon={Trash2} variant="ghost" className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
+          <Button icon={Pencil} onClick={() => void router.navigate({ page: "edit", id: entry.id, category })}>{strings.edit}</Button>
+          <IconButton label={strings.delete} icon={Trash2} variant="ghost" className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
         </div>
       </section>
 
@@ -107,17 +108,17 @@ export function ItemDetailPage({ id }: { id: string }) {
 
       {(entry.notes || entry.tags || folderNames.length > 0) && (
         <div className="card fields">
-          {entry.notes && <DetailField label="Notes" value={entry.notes} multiline />}
+          {entry.notes && <DetailField label={strings.notes} value={entry.notes} multiline />}
           {entry.tags && (
             <div className="detail-field">
-              <div className="detail-field-text"><span className="detail-label">Tags</span>
+              <div className="detail-field-text"><span className="detail-label">{strings.tags}</span>
                 <span className="tag-list">{entry.tags.split(",").map((tag) => tag.trim()).filter(Boolean).map((tag) => <span className="tag" key={tag}>{tag}</span>)}</span>
               </div>
             </div>
           )}
           {folderNames.length > 0 && (
             <div className="detail-field">
-              <div className="detail-field-text"><span className="detail-label">Folders</span>
+              <div className="detail-field-text"><span className="detail-label">{strings.folders}</span>
                 <span className="tag-list">{folderNames.map((name) => <span className="tag" key={name}><Folder aria-hidden="true" />{name}</span>)}</span>
               </div>
             </div>
@@ -167,7 +168,7 @@ function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt:
     <div className="card fields previous-passwords">
       <button type="button" className="previous-passwords-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <History aria-hidden="true" />
-        <span>Previous passwords</span>
+        <span>{strings.previousPasswords}</span>
         <span className="previous-passwords-count">{list.length}</span>
       </button>
       {open && <>
@@ -175,8 +176,8 @@ function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt:
           <DetailField key={`${item.replacedAt}-${index}`} label={`Replaced ${relativeTime(item.replacedAt, now)}`} value={item.password} secret mono />
         ))}
         <div className="previous-passwords-footer">
-          <span className="detail-meta">Kept on this PC only, up to 10.</span>
-          <Button variant="ghost" size="sm" icon={Trash2} onClick={() => void clear()}>Clear</Button>
+          <span className="detail-meta">{strings.keptOnThisPcOnlyUp}</span>
+          <Button variant="ghost" size="sm" icon={Trash2} onClick={() => void clear()}>{strings.clear}</Button>
         </div>
       </>}
     </div>
@@ -186,31 +187,31 @@ function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt:
 function EntryFields({ entry }: { entry: VaultEntry }) {
   switch (entry.type) {
     case "PASSWORD": return <>
-      <DetailField label="Username" value={entry.primaryValue} />
-      <DetailField label="Password" value={entry.secondaryValue} secret mono />
-      <DetailField label="Website" value={entry.tertiaryValue} />
+      <DetailField label={strings.username} value={entry.primaryValue} />
+      <DetailField label={strings.password} value={entry.secondaryValue} secret mono />
+      <DetailField label={strings.website} value={entry.tertiaryValue} />
     </>;
     case "CARD": return <>
-      <DetailField label="Card number" value={entry.primaryValue} secret mono masked={maskCard(entry.primaryValue) || "••••"} display={groupCardNumber(entry.primaryValue)} copyValue={entry.primaryValue.replace(/\D/g, "")} />
-      <DetailField label="Name on card" value={entry.secondaryValue} />
-      <DetailField label="Expiry" value={entry.tertiaryValue} mono />
-      <DetailField label="Security code" value={entry.fourthValue} secret mono masked="•••" />
-      <DetailField label="Type" value={`${entry.cardKind === "DEBIT" ? "Debit" : "Credit"}${entry.network ? ` · ${entry.network}` : ""}`} copy={false} />
+      <DetailField label={strings.cardNumber} value={entry.primaryValue} secret mono masked={maskCard(entry.primaryValue) || "••••"} display={groupCardNumber(entry.primaryValue)} copyValue={entry.primaryValue.replace(/\D/g, "")} />
+      <DetailField label={strings.nameOnCard} value={entry.secondaryValue} />
+      <DetailField label={strings.expiry} value={entry.tertiaryValue} mono />
+      <DetailField label={strings.securityCode} value={entry.fourthValue} secret mono masked="•••" />
+      <DetailField label={strings.type} value={`${entry.cardKind === "DEBIT" ? "Debit" : "Credit"}${entry.network ? ` · ${entry.network}` : ""}`} copy={false} />
     </>;
     case "AUTHENTICATOR": return <>
       <LiveCodeField entry={entry} />
-      <DetailField label="Account" value={entry.primaryValue} />
-      <DetailField label="Setup key" value={entry.secondaryValue} secret mono />
-      <DetailField label="Settings" value={`${entry.totpAlgorithm} · ${entry.totpDigits} digits · every ${entry.totpPeriod}s`} copy={false} />
+      <DetailField label={strings.account} value={entry.primaryValue} />
+      <DetailField label={strings.setupKey} value={entry.secondaryValue} secret mono />
+      <DetailField label={strings.settings} value={`${entry.totpAlgorithm} · ${entry.totpDigits} digits · every ${entry.totpPeriod}s`} copy={false} />
     </>;
     case "QUESTION": return <>
-      <DetailField label="Question" value={entry.primaryValue} />
-      <DetailField label="Answer" value={entry.secondaryValue} secret />
+      <DetailField label={strings.question} value={entry.primaryValue} />
+      <DetailField label={strings.answer} value={entry.secondaryValue} secret />
     </>;
     case "AUTOFILL": {
       const profile = profileFrom(entry.primaryValue);
       const filled = profileFields.filter(([key]) => profile[key].trim());
-      return filled.length ? <>{filled.map(([key, label]) => <DetailField key={key} label={label} value={profile[key]} />)}</> : <DetailField label="Details" value="" copy={false} />;
+      return filled.length ? <>{filled.map(([key, label]) => <DetailField key={key} label={label} value={profile[key]} />)}</> : <DetailField label={strings.details} value="" copy={false} />;
     }
   }
 }
@@ -221,13 +222,13 @@ function LiveCodeField({ entry }: { entry: VaultEntry }) {
   return (
     <div className="detail-field detail-code">
       <div className="detail-field-text">
-        <span className="detail-label">Code</span>
+        <span className="detail-label">{strings.code}</span>
         <span className="code-value">{code?.value ? groupCode(code.value) : "••• •••"}</span>
         {code?.next && code.seconds <= 5 && <span className="code-next">Next {groupCode(code.next)}</span>}
       </div>
       <div className="detail-actions">
         {code && <CountdownRing seconds={code.seconds} period={code.period} />}
-        <CopyButton label="Code" message="Code copied" secret value={async () => (await totpAt(entry))?.value ?? null} />
+        <CopyButton label={strings.code} message={strings.codeCopied} secret value={async () => (await totpAt(entry))?.value ?? null} />
       </div>
     </div>
   );
@@ -291,19 +292,19 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
   return (
     <section className="card card-padded" aria-labelledby="photos-title">
       <header className="card-header compact">
-        <div className="card-heading"><h2 id="photos-title">Photos</h2></div>
+        <div className="card-heading"><h2 id="photos-title">{strings.photos}</h2></div>
         <div className="card-actions">
           <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(event) => void add(event.target.files?.[0])} />
-          <Button size="sm" icon={ImagePlus} busy={busy} disabled={photos === null || photos.length >= 20} onClick={() => input.current?.click()}>Add photo</Button>
+          <Button size="sm" icon={ImagePlus} busy={busy} disabled={photos === null || photos.length >= 20} onClick={() => input.current?.click()}>{strings.addPhoto}</Button>
         </div>
       </header>
-      {photos === null ? <Spinner label="Loading photos" /> : photos.length === 0 ? <p className="muted small">No photos. {entryType === "CARD" ? "Add a card scan or receipt" : "Add a photo or screenshot"}, up to 10 MB each.</p> : (
+      {photos === null ? <Spinner label={strings.loadingPhotos} /> : photos.length === 0 ? <p className="muted small">No photos. {entryType === "CARD" ? "Add a card scan or receipt" : "Add a photo or screenshot"}, up to 10 MB each.</p> : (
         <div className="photo-grid">
           {photos.map((photo) => (
             <figure key={photo.id} className="photo">
               <button type="button" className="photo-open" onClick={() => setViewing(photo)} aria-label={photo.isCover ? "View cover photo" : "View photo"}><img src={photo.dataUrl} alt="" /></button>
-              {photo.isCover && <span className="photo-badge">Cover</span>}
-              <IconButton label="Delete photo" icon={Trash2} size="sm" variant="secondary" className="photo-delete" onClick={() => void remove(photo)} disabled={busy} />
+              {photo.isCover && <span className="photo-badge">{strings.cover}</span>}
+              <IconButton label={strings.deletePhoto} icon={Trash2} size="sm" variant="secondary" className="photo-delete" onClick={() => void remove(photo)} disabled={busy} />
             </figure>
           ))}
         </div>
@@ -317,9 +318,9 @@ function PhotoViewer({ photo, onClose }: { photo: EntryPhoto; onClose: () => voi
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
   return (
-    <dialog ref={ref} className="photo-viewer" aria-label="Photo" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={onClose}>
-      <img src={photo.dataUrl} alt="Photo attached to this item" />
-      <IconButton label="Close photo" icon={X} variant="secondary" className="photo-viewer-close" onClick={onClose} />
+    <dialog ref={ref} className="photo-viewer" aria-label={strings.photo} onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={onClose}>
+      <img src={photo.dataUrl} alt={strings.photoAttachedToThisItem} />
+      <IconButton label={strings.closePhoto} icon={X} variant="secondary" className="photo-viewer-close" onClick={onClose} />
     </dialog>
   );
 }

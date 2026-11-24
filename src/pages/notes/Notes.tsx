@@ -23,12 +23,13 @@ import { load, NoteTooLargeError, plainText, sameDocument, storageFields, type L
 import { toggleChecked } from "../../lib/richNoteEdit";
 import { RichNoteEditor } from "./RichNoteEditor";
 import { RichNoteView } from "./RichNoteView";
+import { strings } from "../../strings";
 
 const loadNote = (note: LocalNote): Loaded => load(note.body, note.rich ?? "");
 
 /** Why a note shows as plain text, when it has formatting this app can't use. */
 function FormattingNotice({ source, editing }: { source: Loaded["source"]; editing?: boolean }) {
-  if (source === "diverged") return <StatusBanner kind="info">This note's text was changed in an app without formatting, so it shows as plain text.</StatusBanner>;
+  if (source === "diverged") return <StatusBanner kind="info">{strings.thisNoteSTextWasChanged}</StatusBanner>;
   if (source === "newer") return <StatusBanner kind="warning">{editing ? "This note has formatting from a newer version of Nuvori. Saving it here keeps the text but removes that formatting." : "This note has formatting from a newer version of Nuvori, so it shows as plain text here."}</StatusBanner>;
   return null;
 }
@@ -52,19 +53,19 @@ export function NotesListPage() {
   return (
     <div className="page">
       <div className="toolbar">
-        <FilterInput value={filter} onChange={setFilter} placeholder="Filter notes" />
+        <FilterInput value={filter} onChange={setFilter} placeholder={strings.filterNotes} />
         <div className="toolbar-group">
           <FolderPicker folders={folders} value={folderId} onChange={setFolderId} allLabel="All folders" onNew={() => setFolderDialog({ folder: null })} onEdit={() => setFolderDialog({ folder: folders.find((folder) => folder.id === folderId) ?? null })} />
           <SortPicker value={sort} onChange={setSort} withFavorites={false} />
-          <Button variant="primary" icon={Plus} onClick={add} className="toolbar-add">Add note</Button>
+          <Button variant="primary" icon={Plus} onClick={add} className="toolbar-add">{strings.addNote}</Button>
         </div>
       </div>
-      {!loaded ? <div className="card card-padded center"><Spinner label="Loading" /></div>
-        : notes.length === 0 ? <div className="card"><EmptyState icon={FileText} title="No notes yet" body="Keep private notes like Wi-Fi details or recovery steps here." action={<Button variant="primary" icon={Plus} onClick={add}>Add note</Button>} /></div>
-        : visible.length === 0 ? <div className="card"><EmptyState icon={SearchX} title="No matches" action={<Button onClick={() => { setFilter(""); setFolderId(""); }}>Clear filters</Button>} /></div>
+      {!loaded ? <div className="card card-padded center"><Spinner label={strings.loading} /></div>
+        : notes.length === 0 ? <div className="card"><EmptyState icon={FileText} title={strings.noNotesYet} body="Keep private notes like Wi-Fi details or recovery steps here." action={<Button variant="primary" icon={Plus} onClick={add}>{strings.addNote}</Button>} /></div>
+        : visible.length === 0 ? <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} action={<Button onClick={() => { setFilter(""); setFolderId(""); }}>{strings.clearFilters}</Button>} /></div>
         : <>
           <p className="list-count">{plural(visible.length, "note")}</p>
-          <ul className="card list" aria-label="Notes">
+          <ul className="card list" aria-label={strings.notes}>
             {visible.map((note) => (
               <ListRow key={note.id} id={note.id} title={note.title || "Untitled"} subtitle={`${relativeTime(note.updatedAt)} · ${firstLine(note.body)}`}
                 leading={<Avatar title={note.title || "Note"} icon={FileText} />} highlighted={router.highlight === note.id} entering={fresh.has(note.id)}
@@ -90,7 +91,7 @@ export function NoteDetailPage({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const note = notes.find((item) => item.id === id);
   const shown = useMemo(() => (note ? loadNote(note) : null), [note]);
-  if (!note || !shown) return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title="This note isn't here anymore" action={<Button onClick={() => void router.back()}>Go back</Button>} /></div> : <Spinner label="Loading" />}</div>;
+  if (!note || !shown) return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title={strings.thisNoteIsnTHereAnymore} action={<Button onClick={() => void router.back()}>{strings.goBack}</Button>} /></div> : <Spinner label={strings.loading} />}</div>;
   const folderNames = groups.filter((group) => note.groupIds?.includes(group.id)).map((group) => group.name);
 
   const toggle = async (index: number) => {
@@ -140,9 +141,9 @@ export function NoteDetailPage({ id }: { id: string }) {
           <p>Note · updated {relativeTime(note.updatedAt)}</p>
         </div>
         <div className="detail-hero-actions">
-          <CopyButton value={note.body} label="Note" />
-          <Button icon={Pencil} onClick={() => void router.navigate({ page: "note-edit", id: note.id })}>Edit</Button>
-          <IconButton label="Delete" icon={Trash2} className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
+          <CopyButton value={note.body} label={strings.note} />
+          <Button icon={Pencil} onClick={() => void router.navigate({ page: "note-edit", id: note.id })}>{strings.edit}</Button>
+          <IconButton label={strings.delete} icon={Trash2} className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
         </div>
       </section>
       <FormattingNotice source={shown.source} />
@@ -203,18 +204,18 @@ export function NoteEditorPage({ id }: { id?: string }) {
     }
   };
 
-  if (id && !existing) return <div className="page page-narrow"><StatusBanner kind="warning" title="This note isn't available">It may have been deleted on another device.</StatusBanner></div>;
+  if (id && !existing) return <div className="page page-narrow"><StatusBanner kind="warning" title={strings.thisNoteIsnTAvailable}>{strings.itMayHaveBeenDeletedOn}</StatusBanner></div>;
 
   return (
     <div className="page page-narrow">
       <form ref={form} className="card card-padded form-stack" onSubmit={(event) => void save(event)} noValidate>
         {error && <StatusBanner kind="error">{error}</StatusBanner>}
-        <TextField label="Title" value={draft.title} onValue={(title) => setDraft((current) => ({ ...current, title }))} maxLength={500} autoFocus={!existing} required />
+        <TextField label={strings.title} value={draft.title} onValue={(title) => setDraft((current) => ({ ...current, title }))} maxLength={500} autoFocus={!existing} required />
         <FormattingNotice source={opened.source} editing />
-        <RichNoteEditor label="Note" initial={opened.document} onChange={setNoteDoc} />
+        <RichNoteEditor label={strings.note} initial={opened.document} onChange={setNoteDoc} />
         {folders.length > 0 && (
           <fieldset className="fieldset">
-            <legend>Folders</legend>
+            <legend>{strings.folders}</legend>
             <div className="check-grid">
               {folders.map((folder) => <Checkbox key={folder.id} label={folder.name} checked={draft.groupIds.includes(folder.id)}
                 onChange={(checked) => setDraft((current) => ({ ...current, groupIds: checked ? [...current.groupIds, folder.id] : current.groupIds.filter((value) => value !== folder.id) }))} />)}
@@ -222,8 +223,8 @@ export function NoteEditorPage({ id }: { id?: string }) {
           </fieldset>
         )}
         <div className="form-actions">
-          <Button variant="ghost" onClick={() => void router.back()} disabled={busy}>Cancel</Button>
-          <Button variant="primary" type="submit" icon={Save} busy={busy}>Save note</Button>
+          <Button variant="ghost" onClick={() => void router.back()} disabled={busy}>{strings.cancel}</Button>
+          <Button variant="primary" type="submit" icon={Save} busy={busy}>{strings.saveNote}</Button>
         </div>
       </form>
     </div>

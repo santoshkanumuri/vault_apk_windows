@@ -9,6 +9,7 @@ import { usePolling } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import { api, type CloudStatus } from "../../lib/api";
 import { formatDateTime, relativeTime } from "../../lib/format";
+import { strings } from "../../strings";
 
 const DRIVE_CHECK_LABELS: Record<string, string> = { "15": "15 seconds", "60": "minute", "300": "5 minutes" };
 const DRIVE_CHECK_OPTIONS = [{ value: "15", label: "15 s" }, { value: "60", label: "1 min" }, { value: "300", label: "5 min" }, { value: "0", label: "Sync now only" }];
@@ -99,30 +100,28 @@ export function CloudCard() {
       </div>
 
       {!status.available && !status.connected && (
-        <p className="muted small">Google Drive sync is not set up in this build of Nuvori. Sync over Wi-Fi works as usual.</p>
+        <p className="muted small">{strings.googleDriveSyncIsNotSet}</p>
       )}
 
       {status.available && !status.connected && !waiting && (
         <>
           <ul className="how-list">
-            <li><strong>Works anywhere.</strong> Your phone and this PC sync through your Drive when they are not on the same Wi-Fi.</li>
-            <li><strong>Google can't read it.</strong> Every change is encrypted on this PC before it is uploaded.</li>
-            <li><strong>Only a hidden Nuvori folder.</strong> Nuvori can't see or change your other Drive files.</li>
-            <li><strong>One account for all devices.</strong> Sign in to the same Google account on each device.</li>
+            <li><strong>{strings.worksAnywhere}</strong> Your phone and this PC sync through your Drive when they are not on the same Wi-Fi.</li>
+            <li><strong>{strings.googleCanTReadIt}</strong> Every change is encrypted on this PC before it is uploaded.</li>
+            <li><strong>{strings.onlyAHiddenNuvoriFolder}</strong> Nuvori can't see or change your other Drive files.</li>
+            <li><strong>{strings.oneAccountForAllDevices}</strong> Sign in to the same Google account on each device.</li>
           </ul>
           <div className="button-row">
-            <Button variant="primary" icon={Cloud} onClick={() => void connect()}>Connect Google Drive</Button>
+            <Button variant="primary" icon={Cloud} onClick={() => void connect()}>{strings.connectGoogleDrive}</Button>
           </div>
         </>
       )}
 
       {waiting && !status.connected && (
         <>
-          <StatusBanner kind="info" title="Finish signing in in your browser">
-            Choose your Google account and allow Nuvori to use its own app folder. This card updates by itself.
-          </StatusBanner>
+          <StatusBanner kind="info" title={strings.finishSigningInInYourBrowser}>{strings.chooseYourGoogleAccountAndAllow}</StatusBanner>
           <div className="button-row">
-            <Button variant="ghost" onClick={() => void cancel()}>Cancel</Button>
+            <Button variant="ghost" onClick={() => void cancel()}>{strings.cancel}</Button>
           </div>
         </>
       )}
@@ -130,27 +129,25 @@ export function CloudCard() {
       {status.connected && (
         <>
           {status.needsSignIn ? (
-            <StatusBanner kind="warning" title="Google needs you to sign in again"
-              action={<Button size="sm" busy={waiting} onClick={() => void connect()}>Sign in</Button>}>
-              Access was removed or expired. Nothing is lost. Sync over Wi-Fi keeps working.
-            </StatusBanner>
+            <StatusBanner kind="warning" title={strings.googleNeedsYouToSignIn}
+              action={<Button size="sm" busy={waiting} onClick={() => void connect()}>{strings.signIn}</Button>}>{strings.accessWasRemovedOrExpiredNothing}</StatusBanner>
           ) : status.lastError ? (
-            <StatusBanner kind="warning" title="Last Drive sync didn't finish">{status.lastError}</StatusBanner>
+            <StatusBanner kind="warning" title={strings.lastDriveSyncDidnTFinish}>{status.lastError}</StatusBanner>
           ) : null}
           <dl className="connection-facts">
-            <div><dt>Last Drive sync</dt><dd title={status.lastSync ? formatDateTime(status.lastSync) : undefined}>{status.lastSync ? relativeTime(status.lastSync) : "Not yet"}</dd></div>
-            <div><dt>Stored in your Drive</dt><dd>Encrypted changes only</dd></div>
+            <div><dt>{strings.lastDriveSync}</dt><dd title={status.lastSync ? formatDateTime(status.lastSync) : undefined}>{status.lastSync ? relativeTime(status.lastSync) : "Not yet"}</dd></div>
+            <div><dt>{strings.storedInYourDrive}</dt><dd>{strings.encryptedChangesOnly}</dd></div>
           </dl>
           {status.checkSeconds !== undefined && (
-            <SettingsRow icon={Timer} title="Check Google Drive every" description={status.checkSeconds === 0
+            <SettingsRow icon={Timer} title={strings.checkGoogleDriveEvery} description={status.checkSeconds === 0
               ? "Only when this PC unlocks and when you select Sync now. Your own changes still upload about 2 seconds after you save them."
               : "While this PC is unlocked. Shorter means other devices' changes arrive sooner. Your own changes upload about 2 seconds after you save them."}
-              control={<Segmented label="Check Google Drive every" size="sm" value={String(status.checkSeconds)} onChange={(value) => void changeInterval(value)}
+              control={<Segmented label={strings.checkGoogleDriveEvery} size="sm" value={String(status.checkSeconds)} onChange={(value) => void changeInterval(value)}
                 options={DRIVE_CHECK_OPTIONS} />} />
           )}
           <p className="muted small">On your phone, open Settings &gt; Devices &amp; sync and connect the same Google account. Changes then sync through Drive whenever a device is unlocked and online.</p>
           <div className="button-row">
-            <Button variant="ghost" icon={LogOut} busy={busy} onClick={() => void disconnect()}>Disconnect</Button>
+            <Button variant="ghost" icon={LogOut} busy={busy} onClick={() => void disconnect()}>{strings.disconnect}</Button>
           </div>
         </>
       )}

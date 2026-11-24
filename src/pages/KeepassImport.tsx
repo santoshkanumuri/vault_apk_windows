@@ -8,6 +8,7 @@ import { useToast } from "../app/toast";
 import { useVault } from "../app/vault";
 import { api, type KeepassSummary } from "../lib/api";
 import { cx, plural } from "../lib/format";
+import { strings } from "../strings";
 
 /** The largest KeePass file the import reads (keepass_import.rs MAX_FILE_BYTES). */
 const MAX_BYTES = 32 * 1024 * 1024;
@@ -102,22 +103,22 @@ export function KeepassImportDialog({ open, onClose }: { open: boolean; onClose:
   ].filter(Boolean) as string[] : [];
 
   return (
-    <Dialog open={open} onClose={close} locked={busy !== ""} size="md" title="Import from KeePass"
-      description="KeePassXC, KeePass 2, KeePassDX and Strongbox databases (.kdbx). The file is opened on this PC only and is not stored."
+    <Dialog open={open} onClose={close} locked={busy !== ""} size="md" title={strings.importFromKeepass}
+      description={strings.keepassxcKeepass2KeepassdxAndStrongbox}
       footer={preview ? <>
-        <Button variant="ghost" onClick={() => setPreview(null)} disabled={busy !== ""}>Back</Button>
-        <Button variant="primary" icon={Upload} busy={busy === "import"} onClick={() => void runImport()} disabled={preview.logins + preview.codes + preview.notes === 0}>Import</Button>
+        <Button variant="ghost" onClick={() => setPreview(null)} disabled={busy !== ""}>{strings.back}</Button>
+        <Button variant="primary" icon={Upload} busy={busy === "import"} onClick={() => void runImport()} disabled={preview.logins + preview.codes + preview.notes === 0}>{strings.import}</Button>
       </> : <>
-        <Button variant="ghost" onClick={close} disabled={busy !== ""}>Cancel</Button>
-        <Button variant="primary" type="submit" form="keepass-form" icon={FileKey} busy={busy === "open"} disabled={!file}>Open file</Button>
+        <Button variant="ghost" onClick={close} disabled={busy !== ""}>{strings.cancel}</Button>
+        <Button variant="primary" type="submit" form="keepass-form" icon={FileKey} busy={busy === "open"} disabled={!file}>{strings.openFile}</Button>
       </>}>
       {error && <StatusBanner kind="error">{error}</StatusBanner>}
       {!preview ? (
         <form id="keepass-form" className="form-stack" onSubmit={(event) => void openFile(event)}>
-          <FilePicker label="KeePass database" hint="A .kdbx file" accept=".kdbx" file={file} onFile={(next) => { setFile(next); setError(""); }} />
-          <PasswordField label="KeePass master password" value={password} onValue={setPassword} autoComplete="off" hint="The password of the KeePass file, not your Nuvori password." />
-          <FilePicker label="Key file (optional)" hint="Only if the database uses a key file" accept=".key,.keyx,*" file={keyFile} onFile={setKeyFile} />
-          <p className="field-hint">Opening the file can take a few seconds: KeePass protects it with a slow key derivation on purpose.</p>
+          <FilePicker label={strings.keepassDatabase} hint={strings.aKdbxFile} accept=".kdbx" file={file} onFile={(next) => { setFile(next); setError(""); }} />
+          <PasswordField label={strings.keepassMasterPassword} value={password} onValue={setPassword} autoComplete="off" hint={strings.thePasswordOfTheKeepassFile} />
+          <FilePicker label={strings.keyFileOptional} hint={strings.onlyIfTheDatabaseUsesA} accept=".key,.keyx,*" file={keyFile} onFile={setKeyFile} />
+          <p className="field-hint">{strings.openingTheFileCanTakeA}</p>
         </form>
       ) : (
         <div className="form-stack keepass-preview">
@@ -128,7 +129,7 @@ export function KeepassImportDialog({ open, onClose }: { open: boolean; onClose:
             <li><strong>{preview.notes}</strong> {preview.notes === 1 ? "note" : "notes"} (entries without a password)</li>
           </ul>
           {preview.groups.length > 0 && <p className="field-hint">Each item gets its KeePass group as a tag, for example "KeePass: {preview.groups[0]}".</p>}
-          <p className="field-hint">Logins already in Nuvori with the same website, username and password are skipped. Imported items sync to your paired devices.</p>
+          <p className="field-hint">{strings.loginsAlreadyInNuvoriWithThe}</p>
           {skipped.length > 0 && <p className="field-hint">Not imported: {skipped.join(", ")}.</p>}
         </div>
       )}

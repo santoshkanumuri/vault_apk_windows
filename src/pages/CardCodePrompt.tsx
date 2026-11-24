@@ -6,6 +6,7 @@ import { StatusBanner } from "../components/Status";
 import { api, type CardCodeRequest } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { BrandMark } from "./Unlock";
+import { strings } from "../strings";
 
 /**
  * Approves releasing one card's security code to the browser. Opened by the extension after a
@@ -69,13 +70,13 @@ export function CardCodePrompt() {
       <div className="auth-brand">
         <BrandMark />
         <div>
-          <strong id="code-title">Fill security code?</strong>
-          <span>Your browser asked for a card's security code</span>
+          <strong id="code-title">{strings.fillSecurityCode}</strong>
+          <span>{strings.yourBrowserAskedForACard}</span>
         </div>
       </div>
 
       {request === null ? (
-        <StatusBanner kind="info">This request expired. Choose the card in your browser again.</StatusBanner>
+        <StatusBanner kind="info">{strings.thisRequestExpiredChooseTheCard}</StatusBanner>
       ) : request && (
         <>
           <div className="prompt-summary">
@@ -89,14 +90,14 @@ export function CardCodePrompt() {
           {error && <StatusBanner kind="error">{error}</StatusBanner>}
           {request.helloAvailable && (
             <>
-              <Button variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void approveHello(request)}>Approve with Windows Hello</Button>
-              <div className="auth-divider"><span>or use your master password</span></div>
+              <Button variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void approveHello(request)}>{strings.approveWithWindowsHello}</Button>
+              <div className="auth-divider"><span>{strings.orUseYourMasterPassword}</span></div>
             </>
           )}
           <form className="auth-form" onSubmit={(event) => void submit(event)} noValidate>
             <PasswordField
               ref={passwordRef}
-              label="Master password"
+              label={strings.masterPassword}
               name="masterPassword"
               autoComplete="current-password"
               value={password}
@@ -105,9 +106,7 @@ export function CardCodePrompt() {
               capsLockWarning
               required
             />
-            <Button type="submit" variant={request.helloAvailable ? "secondary" : "primary"} size="lg" block busy={busy === "password"} disabled={busy !== ""}>
-              Approve
-            </Button>
+            <Button type="submit" variant={request.helloAvailable ? "secondary" : "primary"} size="lg" block busy={busy === "password"} disabled={busy !== ""}>{strings.approve}</Button>
           </form>
         </>
       )}
@@ -115,7 +114,7 @@ export function CardCodePrompt() {
       <div className="prompt-actions">
         <Button variant="ghost" size="sm" disabled={busy !== ""} onClick={decline}>{request === null ? "Close" : "Don't fill"}</Button>
       </div>
-      <p className="auth-footnote">Only this code is sent, and only to the browser tab that asked.</p>
+      <p className="auth-footnote">{strings.onlyThisCodeIsSentAnd}</p>
     </main>
   );
 }

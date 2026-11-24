@@ -9,6 +9,7 @@ import { useVault } from "../app/vault";
 import { api, onAutoType, type AutoTypeTarget } from "../lib/api";
 import { rankForWindow } from "../lib/autoType";
 import { hostFromUrl } from "../lib/format";
+import { strings } from "../strings";
 
 /**
  * The auto-type picker. The shortcut in another app records that window (auto_type.rs) and
@@ -56,24 +57,24 @@ export function AutoTypePicker() {
 
   const matches = ranked.filter((item) => item.score > 0).length;
   return (
-    <Dialog open={target !== null} onClose={close} locked={busy !== ""} size="md" title="Auto-type a login"
+    <Dialog open={target !== null} onClose={close} locked={busy !== ""} size="md" title={strings.autoTypeALogin}
       description={target ? <>Into <strong>{target.app}</strong>: {target.title || "untitled window"}. Nuvori switches to that window, then types the username, Tab and the password.</> : null}
-      footer={<Button variant="ghost" onClick={close} disabled={busy !== ""}>Cancel</Button>}>
+      footer={<Button variant="ghost" onClick={close} disabled={busy !== ""}>{strings.cancel}</Button>}>
       <div className="form-stack">
-        <TextField label="Search logins" value={filter} onValue={setFilter} placeholder="Name, username or website" autoComplete="off" spellCheck={false} data-autofocus />
+        <TextField label={strings.searchLogins} value={filter} onValue={setFilter} placeholder={strings.nameUsernameOrWebsite} autoComplete="off" spellCheck={false} data-autofocus />
         <p className="field-hint">{matches ? `${matches === 1 ? "1 login fits" : `${matches} logins fit`} this window.` : "No login matches this window by name or website. Pick one below."}</p>
         <ul className="card list autotype-list">
           {ranked.slice(0, 50).map(({ entry, score }) => (
             <li key={entry.id} className="autotype-row">
               <Avatar title={entry.title} site={entry.tertiaryValue} />
               <span className="trash-text">
-                <span className="trash-title">{entry.title}{score > 0 && <span className="autotype-match"> · fits</span>}</span>
+                <span className="trash-title">{entry.title}{score > 0 && <span className="autotype-match">{strings.fits}</span>}</span>
                 <span className="trash-meta">{[entry.primaryValue, hostFromUrl(entry.tertiaryValue ?? "")].filter(Boolean).join(" · ")}</span>
               </span>
-              <Button size="sm" variant={score > 0 ? "primary" : "secondary"} icon={Keyboard} busy={busy === entry.id} disabled={busy !== ""} onClick={() => void type(entry.id)}>Type</Button>
+              <Button size="sm" variant={score > 0 ? "primary" : "secondary"} icon={Keyboard} busy={busy === entry.id} disabled={busy !== ""} onClick={() => void type(entry.id)}>{strings.type}</Button>
             </li>
           ))}
-          {ranked.length === 0 && <li className="autotype-row muted">No logins found.</li>}
+          {ranked.length === 0 && <li className="autotype-row muted">{strings.noLoginsFound}</li>}
         </ul>
       </div>
     </Dialog>

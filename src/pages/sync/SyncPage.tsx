@@ -18,6 +18,7 @@ import { ActivityList } from "../ActivityPage";
 import { useSyncNow } from "../Home";
 import { PairedNotice, PairingCard } from "./Pairing";
 import { CloudCard } from "./Cloud";
+import { strings } from "../../strings";
 
 export function SyncPage() {
   const { snapshot } = useVault();
@@ -35,16 +36,14 @@ export function SyncPage() {
       <RemovedNoticeBanner membership={membership.data} reload={membership.reload} />
       {snapshot.enrolled && <PairedNotice />}
       {!snapshot.enrolled && membership.data?.pendingLeave && (
-        <StatusBanner kind="info" title="You left the sync group" action={<PendingLeaveChip membership={membership.data} />}>
-          This PC keeps its items. Your phone is told the next time this PC reaches it.
-        </StatusBanner>
+        <StatusBanner kind="info" title={strings.youLeftTheSyncGroup} action={<PendingLeaveChip membership={membership.data} />}>{strings.thisPcKeepsItsItemsYour}</StatusBanner>
       )}
       {!snapshot.enrolled && (
-        <Card title="Add this PC to your vault" id="how-pairing">
+        <Card title={strings.addThisPcToYourVault} id="how-pairing">
           <ol className="how-list">
-            <li><strong>Connect.</strong> Scan the QR from your phone, or show a QR for your phone to scan. Both must be on the same Wi-Fi.</li>
-            <li><strong>Confirm the code.</strong> Make sure both screens show the same code. Same Wi-Fi never grants trust on its own.</li>
-            <li><strong>Import.</strong> This PC receives an encrypted copy and keeps any items it already has. Items already on your phone are not added twice.</li>
+            <li><strong>{strings.connect}</strong> Scan the QR from your phone, or show a QR for your phone to scan. Both must be on the same Wi-Fi.</li>
+            <li><strong>{strings.confirmTheCode}</strong> Make sure both screens show the same code. Same Wi-Fi never grants trust on its own.</li>
+            <li><strong>{strings.import2}</strong> This PC receives an encrypted copy and keeps any items it already has. Items already on your phone are not added twice.</li>
           </ol>
         </Card>
       )}
@@ -53,19 +52,15 @@ export function SyncPage() {
 
       {snapshot.enrolled && conflictCount > 0 && (
         <StatusBanner kind="warning" title={`${plural(conflictCount, "change")} need${conflictCount === 1 ? "s" : ""} review`}
-          action={conflicts.data ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>Review</Button> : undefined}>
+          action={conflicts.data ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>{strings.review}</Button> : undefined}>
           {conflicts.data ? "The same item changed on both devices. Both versions are kept until you choose." : "The same item changed on both devices. Both versions are kept; choose one on your phone under Devices & sync."}
         </StatusBanner>
       )}
       {snapshot.enrolled && sync.data?.waitingForKeys && (
-        <StatusBanner kind="info" title="Waiting for new sync keys from your phone">
-          A device was removed, so the sync keys changed. Changes made here stay on this PC until its new keys arrive. Open Nuvori on your phone, or put this PC on the same Wi-Fi.
-        </StatusBanner>
+        <StatusBanner kind="info" title={strings.waitingForNewSyncKeysFrom}>{strings.aDeviceWasRemovedSoThe}</StatusBanner>
       )}
       {snapshot.enrolled && sync.data && sync.data.waitingToApply - (sync.data.setAside ?? 0) > 0 && (
-        <StatusBanner kind="info" title={`${plural(sync.data.waitingToApply - (sync.data.setAside ?? 0), "change")} waiting to apply`}>
-          They'll be applied on a later sync.
-        </StatusBanner>
+        <StatusBanner kind="info" title={`${plural(sync.data.waitingToApply - (sync.data.setAside ?? 0), "change")} waiting to apply`}>{strings.theyLlBeAppliedOnA}</StatusBanner>
       )}
       {snapshot.enrolled && sync.data && (sync.data.setAside ?? 0) > 0 && (
         <StatusBanner kind="warning" title={`${plural(sync.data.setAside ?? 0, "change")} couldn't be read`}>
@@ -77,10 +72,10 @@ export function SyncPage() {
       {snapshot.enrolled && membershipShown && <DevicesGroup membership={membership.data!} reload={membership.reload} />}
       {snapshot.enrolled && membership.data?.managerLost && <PairingCard />}
       {snapshot.enrolled && !membershipShown && (
-        <SettingsGroup title="Devices">
-          <SettingsRow icon={Laptop} title="This PC" description="Keeps its own encrypted copy and catches up when connected." control={<StatusChip kind="success" label="Paired" />} />
-          <SettingsRow icon={Smartphone} title="Paired devices" description="Devices sharing this vault, including your phone." control={<span className="row-value">{snapshot.pairedDevices}</span>} />
-          <SettingsRow icon={History} title="Local changes recorded" description="Signed changes kept in the encrypted vault." control={<span className="row-value">{snapshot.pendingChanges}</span>} />
+        <SettingsGroup title={strings.devices}>
+          <SettingsRow icon={Laptop} title={strings.thisPc} description={strings.keepsItsOwnEncryptedCopyAnd} control={<StatusChip kind="success" label={strings.paired} />} />
+          <SettingsRow icon={Smartphone} title={strings.pairedDevices} description={strings.devicesSharingThisVaultIncludingYour} control={<span className="row-value">{snapshot.pairedDevices}</span>} />
+          <SettingsRow icon={History} title={strings.localChangesRecorded} description={strings.signedChangesKeptInTheEncrypted} control={<span className="row-value">{snapshot.pendingChanges}</span>} />
         </SettingsGroup>
       )}
 
@@ -88,11 +83,11 @@ export function SyncPage() {
 
       <section className="section" aria-labelledby="sync-activity-title">
         <div className="section-header">
-          <h2 id="sync-activity-title">Recent sync activity</h2>
-          <Button variant="ghost" size="sm" onClick={() => void router.navigate({ page: "activity" })}>View all</Button>
+          <h2 id="sync-activity-title">{strings.recentSyncActivity}</h2>
+          <Button variant="ghost" size="sm" onClick={() => void router.navigate({ page: "activity" })}>{strings.viewAll}</Button>
         </div>
-        {activity.error ? <div className="card card-padded muted small">Activity log unavailable.</div>
-          : recent.length === 0 ? <div className="card card-padded muted small">No sync activity yet.</div>
+        {activity.error ? <div className="card card-padded muted small">{strings.activityLogUnavailable2}</div>
+          : recent.length === 0 ? <div className="card card-padded muted small">{strings.noSyncActivityYet}</div>
           : <ActivityList events={recent} />}
       </section>
 
@@ -122,7 +117,7 @@ function PhotoTransfer() {
           <span className="row-description">{known ? `${formatBytes(data.transferredBytes)} of ${formatBytes(data.totalBytes)}` : "Photos move during the next sync."}</span>
         </span>
       </div>
-      {known && <ProgressBar label="Photo transfer" value={data.transferredBytes} max={data.totalBytes} />}
+      {known && <ProgressBar label={strings.photoTransfer} value={data.transferredBytes} max={data.totalBytes} />}
     </div>
   );
 }
@@ -142,7 +137,7 @@ function ConnectionCard({ status, error, reload }: { status: SyncStatus | null; 
       <div className="connection-head">
         <span className="connection-icon" aria-hidden="true"><Smartphone /></span>
         <div className="connection-text">
-          <h2 id="connection-title">Your devices</h2>
+          <h2 id="connection-title">{strings.yourDevices}</h2>
           <p className="muted small">{status?.phoneAddress ? status.phoneAddress : "Find paired devices automatically on this network"}</p>
         </div>
         <StatusChip kind={indicator.kind} label={indicator.label} />
@@ -151,7 +146,7 @@ function ConnectionCard({ status, error, reload }: { status: SyncStatus | null; 
       {running && status && (
         <div className="connection-progress" aria-live="polite">
           <div className="connection-progress-label"><span>{phaseLabel(status)}</span>{total > 0 && <span className="muted">{done} of {total}</span>}</div>
-          <ProgressBar label="Sync progress" value={done} max={total} indeterminate={total === 0} />
+          <ProgressBar label={strings.syncProgress} value={done} max={total} indeterminate={total === 0} />
         </div>
       )}
 
@@ -162,12 +157,12 @@ function ConnectionCard({ status, error, reload }: { status: SyncStatus | null; 
           {retry > 0 && status?.automatic && ` Retrying in ${retry < 60 ? `${retry}s` : `${Math.round(retry / 60)} min`}.`}
         </StatusBanner>
       )}
-      {error ? <StatusBanner kind="warning">Sync status is unavailable right now.</StatusBanner> : null}
+      {error ? <StatusBanner kind="warning">{strings.syncStatusIsUnavailableRightNow}</StatusBanner> : null}
 
       <dl className="connection-facts">
-        <div><dt>Last checked</dt><dd title={status?.lastAttempt || status?.lastSync ? formatDateTime(status?.lastAttempt || status?.lastSync || "") : undefined}>{relativeTime(status?.lastAttempt || status?.lastSync)}</dd></div>
-        <div><dt>Last successful sync</dt><dd title={status?.lastSync ? formatDateTime(status.lastSync) : undefined}>{relativeTime(status?.lastSync)}</dd></div>
-        <div><dt>Auto-sync</dt><dd>{status?.automatic ? "On" : "Off"}</dd></div>
+        <div><dt>{strings.lastChecked}</dt><dd title={status?.lastAttempt || status?.lastSync ? formatDateTime(status?.lastAttempt || status?.lastSync || "") : undefined}>{relativeTime(status?.lastAttempt || status?.lastSync)}</dd></div>
+        <div><dt>{strings.lastSuccessfulSync}</dt><dd title={status?.lastSync ? formatDateTime(status.lastSync) : undefined}>{relativeTime(status?.lastSync)}</dd></div>
+        <div><dt>{strings.autoSync}</dt><dd>{status?.automatic ? "On" : "Off"}</dd></div>
       </dl>
       {!running && status?.message && indicator.kind !== "error" && indicator.kind !== "warning" && <p className="muted small">{status.message}</p>}
 
@@ -252,29 +247,29 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
   };
 
   return (
-    <SettingsGroup title="Connection">
-      <SettingsRow icon={Wifi} title="Optional device address" description={editing ? "Leave blank for discovery. If needed, enter a paired device's local IP address and optional :port." : status.phoneAddress || "Find paired devices automatically"}
-        control={!editing && <IconButton label="Edit optional device address" icon={Pencil} onClick={() => setEditing(true)} disabled={running} />}>
+    <SettingsGroup title={strings.connection}>
+      <SettingsRow icon={Wifi} title={strings.optionalDeviceAddress} description={editing ? "Leave blank for discovery. If needed, enter a paired device's local IP address and optional :port." : status.phoneAddress || "Find paired devices automatically"}
+        control={!editing && <IconButton label={strings.editOptionalDeviceAddress} icon={Pencil} onClick={() => setEditing(true)} disabled={running} />}>
         {editing && (
           <form className="inline-form" onSubmit={(event) => void save(event)}>
-            <TextField label="Optional device address" value={address} onValue={setAddress} placeholder="192.168.1.24" autoComplete="off" spellCheck={false} disabled={busy || running} autoFocus />
+            <TextField label={strings.optionalDeviceAddress} value={address} onValue={setAddress} placeholder="192.168.1.24" autoComplete="off" spellCheck={false} disabled={busy || running} autoFocus />
             <div className="button-row">
-              <Button variant="primary" type="submit" busy={busy}>Save</Button>
-              <Button onClick={() => void saveAndSync()} busy={syncNow.busy} disabled={busy}>Save and sync</Button>
-              <Button variant="ghost" onClick={() => { setEditing(false); setAddress(status.phoneAddress); }}>Cancel</Button>
+              <Button variant="primary" type="submit" busy={busy}>{strings.save}</Button>
+              <Button onClick={() => void saveAndSync()} busy={syncNow.busy} disabled={busy}>{strings.saveAndSync}</Button>
+              <Button variant="ghost" onClick={() => { setEditing(false); setAddress(status.phoneAddress); }}>{strings.cancel}</Button>
             </div>
           </form>
         )}
       </SettingsRow>
-      <SettingsRow icon={RefreshCw} title="Sync automatically" description="Finds paired phones and PCs on your local network while unlocked. Sends new changes sooner and retries after a dropped connection."
-        control={<Toggle label="Sync automatically" checked={status.automatic} disabled={busy || running} onChange={(value) => void toggleAuto(value)} />} />
+      <SettingsRow icon={RefreshCw} title={strings.syncAutomatically} description={strings.findsPairedPhonesAndPcsOn}
+        control={<Toggle label={strings.syncAutomatically} checked={status.automatic} disabled={busy || running} onChange={(value) => void toggleAuto(value)} />} />
       {status.syncOnOpen !== undefined && (
-        <SettingsRow icon={Zap} title="Sync when Nuvori opens" description="Each time you open Nuvori, it checks paired devices on this Wi-Fi and Google Drive once, also when automatic sync is off."
-          control={<Toggle label="Sync when Nuvori opens" checked={status.syncOnOpen} disabled={busy || running} onChange={(value) => void toggleOnOpen(value)} />} />
+        <SettingsRow icon={Zap} title={strings.syncWhenNuvoriOpens} description={strings.eachTimeYouOpenNuvoriIt}
+          control={<Toggle label={strings.syncWhenNuvoriOpens} checked={status.syncOnOpen} disabled={busy || running} onChange={(value) => void toggleOnOpen(value)} />} />
       )}
       {status.automatic && status.wifiCheckSeconds !== undefined && (
-        <SettingsRow icon={Timer} title="Check devices every" description="How often this PC looks for paired devices on this Wi-Fi. Your own changes go out about 2 seconds after you save them."
-          control={<Segmented label="Check devices every" size="sm" value={String(status.wifiCheckSeconds)} onChange={(value) => void changeInterval(value)}
+        <SettingsRow icon={Timer} title={strings.checkDevicesEvery} description={strings.howOftenThisPcLooksFor}
+          control={<Segmented label={strings.checkDevicesEvery} size="sm" value={String(status.wifiCheckSeconds)} onChange={(value) => void changeInterval(value)}
             options={WIFI_CHECK_OPTIONS} />} />
       )}
     </SettingsGroup>

@@ -10,6 +10,7 @@ import { api, usingDevMock } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { cx } from "../lib/format";
 import { passwordStrength } from "../lib/strength";
+import { strings } from "../strings";
 
 export function BrandMark({ size = "md" }: { size?: "md" | "lg" }) {
   return <span className={cx("brand-mark", size === "lg" && "brand-mark-lg")} aria-hidden="true"><ShieldCheck /></span>;
@@ -99,8 +100,8 @@ export function UnlockPage() {
         <div className="auth-brand">
           <BrandMark size="lg" />
           <div>
-            <strong>Nuvori</strong>
-            <span>Yours, by design</span>
+            <strong>{strings.nuvori}</strong>
+            <span>{strings.yoursByDesign}</span>
           </div>
         </div>
         <div className="auth-heading">
@@ -112,15 +113,15 @@ export function UnlockPage() {
 
         {helloReady && (
           <>
-            <Button ref={helloRef} onKeyDown={typeIntoPassword} variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void unlockHello()}>Unlock with Windows Hello</Button>
-            <div className="auth-divider"><span>or use your master password</span></div>
+            <Button ref={helloRef} onKeyDown={typeIntoPassword} variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void unlockHello()}>{strings.unlockWithWindowsHello}</Button>
+            <div className="auth-divider"><span>{strings.orUseYourMasterPassword}</span></div>
           </>
         )}
 
         <form className="auth-form" onSubmit={(event) => void submit(event)} noValidate>
           <PasswordField
             ref={passwordRef}
-            label="Master password"
+            label={strings.masterPassword}
             name="masterPassword"
             autoComplete={configured ? "current-password" : "new-password"}
             value={password}
@@ -140,7 +141,7 @@ export function UnlockPage() {
           {!configured && (
             <PasswordField
               ref={confirmRef}
-              label="Confirm master password"
+              label={strings.confirmMasterPassword}
               name="confirmPassword"
               autoComplete="new-password"
               value={confirm}
@@ -158,7 +159,7 @@ export function UnlockPage() {
         <p className="auth-footnote">
           {configured ? "Nuvori can't recover a forgotten master password. Your phone keeps its own copy of the vault." : "There's no password recovery. If you forget it, you'll need to set up this PC again from your phone."}
         </p>
-        {usingDevMock && <p className="auth-footnote">Preview mode with sample data. Any password unlocks except "wrong".</p>}
+        {usingDevMock && <p className="auth-footnote">{strings.previewModeWithSampleDataAny}</p>}
       </main>
     </div>
   );

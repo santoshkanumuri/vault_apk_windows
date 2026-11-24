@@ -15,6 +15,7 @@ import {
 } from "../../lib/richNoteEdit";
 import { fromNodes, fromPastedText, toHtml, type HtmlNode } from "../../lib/richNoteHtml";
 import { useOpenNoteLink } from "./RichNoteView";
+import { strings } from "../../strings";
 
 export const COLOR_NAMES: Record<NoteColor, string> = {
   gray: "Gray", red: "Red", orange: "Orange", yellow: "Yellow", green: "Green", teal: "Teal", blue: "Blue", purple: "Purple", pink: "Pink",
@@ -471,7 +472,7 @@ export function RichNoteEditor({ initial, onChange, label, autoFocus, error }: P
   return (
     <div className={cx("field rn-field", error && "has-error")}>
       <div className="field-label-row"><label id={labelId} onClick={() => root.current?.focus()}>{label}</label></div>
-      <div className="rn-toolbar" role="toolbar" aria-label="Formatting">
+      <div className="rn-toolbar" role="toolbar" aria-label={strings.formatting}>
         {tool({ label: "Undo", shortcut: "Ctrl+Z", icon: Undo2, onClick: doUndo, disabled: !history.undo })}
         {tool({ label: "Redo", shortcut: "Ctrl+Y", icon: Redo2, onClick: doRedo, disabled: !history.redo })}
         <span className="rn-sep" />
@@ -482,8 +483,8 @@ export function RichNoteEditor({ initial, onChange, label, autoFocus, error }: P
         {tool({ label: "Underline", shortcut: "Ctrl+U", icon: Underline, active: !!marks.underline, onClick: () => toggle("underline") })}
         {tool({ label: "Strikethrough", shortcut: "Ctrl+Shift+X", icon: Strikethrough, active: !!marks.strike, onClick: () => toggle("strike") })}
         {tool({ label: "Inline code", shortcut: "Ctrl+E", icon: Code, active: !!marks.code, onClick: () => toggle("code") })}
-        <ColorPicker label="Text color" icon={Baseline} value={marks.color} keep={keep} onPick={(color) => markCommand((m) => ({ ...m, color }))} kind="color" />
-        <ColorPicker label="Highlight" icon={Highlighter} value={marks.bg} keep={keep} onPick={(bg) => markCommand((m) => ({ ...m, bg }))} kind="bg" />
+        <ColorPicker label={strings.textColor} icon={Baseline} value={marks.color} keep={keep} onPick={(color) => markCommand((m) => ({ ...m, color }))} kind="color" />
+        <ColorPicker label={strings.highlight} icon={Highlighter} value={marks.bg} keep={keep} onPick={(bg) => markCommand((m) => ({ ...m, bg }))} kind="bg" />
         {tool({ label: toolbar.link ? "Edit link" : "Add link", shortcut: "Ctrl+K", icon: Link2, active: !!toolbar.link, onClick: openLinkDialog })}
         {tool({ label: "Clear formatting", shortcut: "Ctrl+\\", icon: Eraser, onClick: clearCommand })}
         <span className="rn-sep" />
@@ -499,24 +500,24 @@ export function RichNoteEditor({ initial, onChange, label, autoFocus, error }: P
         {tool({ label: "Divider", icon: Minus, onClick: insertDivider })}
       </div>
       {toolbar.inTable && (
-        <div className="rn-subbar" role="toolbar" aria-label="Table">
+        <div className="rn-subbar" role="toolbar" aria-label={strings.table}>
           <span className="rn-subbar-label"><Table aria-hidden="true" />Table</span>
-          <SubButton keep={keep} icon={Rows2} onClick={() => tableCommand("addRowAbove")}>Row above</SubButton>
-          <SubButton keep={keep} icon={Rows2} onClick={() => tableCommand("addRowBelow")}>Row below</SubButton>
-          <SubButton keep={keep} icon={Columns2} onClick={() => tableCommand("addColumnLeft")}>Column left</SubButton>
-          <SubButton keep={keep} icon={Columns2} onClick={() => tableCommand("addColumnRight")}>Column right</SubButton>
-          <SubButton keep={keep} onClick={() => tableCommand("toggleHeader")}>Header row</SubButton>
-          <SubButton keep={keep} onClick={() => tableCommand("removeRow")}>Delete row</SubButton>
-          <SubButton keep={keep} onClick={() => tableCommand("removeColumn")}>Delete column</SubButton>
-          <SubButton keep={keep} icon={Trash2} danger onClick={() => tableCommand("removeTable")}>Delete table</SubButton>
+          <SubButton keep={keep} icon={Rows2} onClick={() => tableCommand("addRowAbove")}>{strings.rowAbove}</SubButton>
+          <SubButton keep={keep} icon={Rows2} onClick={() => tableCommand("addRowBelow")}>{strings.rowBelow}</SubButton>
+          <SubButton keep={keep} icon={Columns2} onClick={() => tableCommand("addColumnLeft")}>{strings.columnLeft}</SubButton>
+          <SubButton keep={keep} icon={Columns2} onClick={() => tableCommand("addColumnRight")}>{strings.columnRight}</SubButton>
+          <SubButton keep={keep} onClick={() => tableCommand("toggleHeader")}>{strings.headerRow}</SubButton>
+          <SubButton keep={keep} onClick={() => tableCommand("removeRow")}>{strings.deleteRow}</SubButton>
+          <SubButton keep={keep} onClick={() => tableCommand("removeColumn")}>{strings.deleteColumn}</SubButton>
+          <SubButton keep={keep} icon={Trash2} danger onClick={() => tableCommand("removeTable")}>{strings.deleteTable}</SubButton>
         </div>
       )}
       {toolbar.link && !toolbar.inTable && (
         <div className="rn-subbar" aria-live="polite">
           <span className="rn-subbar-link" title={toolbar.link}>{toolbar.link}</span>
-          <SubButton keep={keep} onClick={() => void openLink(toolbar.link!)}>Open</SubButton>
-          <SubButton keep={keep} onClick={openLinkDialog}>Edit</SubButton>
-          <SubButton keep={keep} icon={Unlink} onClick={removeLink}>Remove</SubButton>
+          <SubButton keep={keep} onClick={() => void openLink(toolbar.link!)}>{strings.open}</SubButton>
+          <SubButton keep={keep} onClick={openLinkDialog}>{strings.edit}</SubButton>
+          <SubButton keep={keep} icon={Unlink} onClick={removeLink}>{strings.remove}</SubButton>
         </div>
       )}
       <div ref={root} className="rn-doc rn-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true"
@@ -573,7 +574,7 @@ const HEADINGS: { label: string; kind: TextKind; level: number; shortcut: string
 function HeadingPicker({ kind, level, keep, onPick }: { kind: TextKind; level: number; keep: (event: ReactMouseEvent) => void; onPick: (kind: TextKind, level: number) => void }) {
   const currentLabel = kind === "heading" ? `Heading ${level}` : "Text";
   return (
-    <Popover label="Text style" keep={keep} active={kind === "heading"} button={<><Heading aria-hidden="true" /><span className="rn-tool-text">{currentLabel}</span></>}>
+    <Popover label={strings.textStyle} keep={keep} active={kind === "heading"} button={<><Heading aria-hidden="true" /><span className="rn-tool-text">{currentLabel}</span></>}>
       {(close) => (
         <div className="rn-menu">
           {HEADINGS.map((item) => (
@@ -593,7 +594,7 @@ function ColorPicker({ label, icon: Icon, value, keep, onPick, kind }: { label: 
     <Popover label={label} keep={keep} active={!!value} button={<span className="rn-color-icon"><Icon aria-hidden="true" /><span className="rn-color-bar rn-c" data-color={kind === "color" ? value : undefined} data-bg={kind === "bg" ? value : undefined} data-kind={kind} /></span>}>
       {(close) => (
         <div className="rn-swatches" role="listbox" aria-label={label}>
-          <button type="button" role="option" aria-selected={!value} className={cx("rn-swatch rn-swatch-none", !value && "is-active")} title="Default" aria-label="Default"
+          <button type="button" role="option" aria-selected={!value} className={cx("rn-swatch rn-swatch-none", !value && "is-active")} title={strings.default} aria-label={strings.default}
             onMouseDown={keep} onClick={() => { close(); onPick(undefined); }} />
           {NOTE_COLORS.map((color) => (
             <button key={color} type="button" role="option" aria-selected={value === color} title={COLOR_NAMES[color]} aria-label={COLOR_NAMES[color]}
@@ -609,7 +610,7 @@ function ColorPicker({ label, icon: Icon, value, keep, onPick, kind }: { label: 
 function TablePicker({ keep, onPick }: { keep: (event: ReactMouseEvent) => void; onPick: (rows: number, columns: number) => void }) {
   const [size, setSize] = useState({ rows: 0, columns: 0 });
   return (
-    <Popover label="Insert table" keep={keep} button={<Table aria-hidden="true" />}>
+    <Popover label={strings.insertTable} keep={keep} button={<Table aria-hidden="true" />}>
       {(close) => (
         <div className="rn-grid-picker">
           <div className="rn-grid" onMouseLeave={() => setSize({ rows: 0, columns: 0 })}>
@@ -642,14 +643,14 @@ function LinkDialog({ state, onClose, onSave, onRemove }: {
   return (
     <Dialog open={state !== null} title={state?.existing ? "Edit link" : "Add link"} onClose={onClose}
       footer={<>
-        {state?.existing && <Button variant="ghost" icon={Unlink} onClick={onRemove}>Remove link</Button>}
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={save}>Save</Button>
+        {state?.existing && <Button variant="ghost" icon={Unlink} onClick={onRemove}>{strings.removeLink}</Button>}
+        <Button variant="ghost" onClick={onClose}>{strings.cancel}</Button>
+        <Button variant="primary" onClick={save}>{strings.save}</Button>
       </>}>
       <form className="form-stack" onSubmit={(event) => { event.preventDefault(); save(); }}>
-        {state?.needsLabel && <TextField label="Text" value={label} onValue={setLabel} maxLength={500} />}
-        <TextField label="Link" value={link} onValue={(value) => { setLinkValue(value); setError(""); }} error={error} placeholder="https://example.com or name@example.com"
-          autoFocus inputMode="url" spellCheck={false} maxLength={2048} hint="Links open only after you confirm." />
+        {state?.needsLabel && <TextField label={strings.text} value={label} onValue={setLabel} maxLength={500} />}
+        <TextField label={strings.link} value={link} onValue={(value) => { setLinkValue(value); setError(""); }} error={error} placeholder={strings.httpsExampleComOrNameExample}
+          autoFocus inputMode="url" spellCheck={false} maxLength={2048} hint={strings.linksOpenOnlyAfterYouConfirm} />
         <button type="submit" hidden />
       </form>
     </Dialog>

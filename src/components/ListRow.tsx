@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { ChevronRight, Fingerprint, Star } from "lucide-react";
 import { cx } from "../lib/format";
+import { strings } from "../strings";
 
 type ListRowProps = {
   id: string;
@@ -29,8 +30,8 @@ export function ListRow({ id, title, subtitle, leading, favorite, passkey, onOpe
         <span className="list-row-text">
           <span className="list-row-title">
             <span className="truncate">{title}</span>
-            {favorite && <Star className="fav-star" aria-label="Favorite" />}
-            {passkey && <span className="passkey-mark" title="A passkey for this account is saved too"><Fingerprint aria-label="Passkey saved" /></span>}
+            {favorite && <Star className="fav-star" aria-label={strings.favorite} />}
+            {passkey && <span className="passkey-mark" title={strings.aPasskeyForThisAccountIs}><Fingerprint aria-label={strings.passkeySaved} /></span>}
           </span>
           {subtitle && <span className="list-row-subtitle truncate">{subtitle}</span>}
         </span>

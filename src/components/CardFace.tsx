@@ -4,6 +4,7 @@ import type { VaultEntry } from "../lib/api";
 import { DEFAULT_CARD_COLOR, css, inkFor, needsOutline } from "../lib/cardColors";
 import { cardNetwork, maskedCardNumber, networkMark } from "../lib/cardFace";
 import { cardLast4, cx } from "../lib/format";
+import { strings } from "../strings";
 
 type Props = {
   entry: VaultEntry;
@@ -50,7 +51,7 @@ export function CardFace({ entry, size = "md", onOpen, className }: Props) {
       <span className="cf-glare" aria-hidden="true" />
       <span className="cf-top">
         <span className="cf-title">{title}</span>
-        <span className="cf-kind">{entry.favorite && <Star aria-label="Favorite" />}{kind}</span>
+        <span className="cf-kind">{entry.favorite && <Star aria-label={strings.favorite} />}{kind}</span>
       </span>
       <span className="cf-middle" aria-hidden="true">
         <span className="cf-chip" />
@@ -59,11 +60,11 @@ export function CardFace({ entry, size = "md", onOpen, className }: Props) {
       <span className="cf-number mono">{maskedCardNumber(entry.primaryValue)}</span>
       <span className="cf-bottom">
         <span className="cf-meta">
-          <span className="cf-label">Cardholder</span>
+          <span className="cf-label">{strings.cardholder}</span>
           <span className="cf-value">{entry.secondaryValue.trim() || "—"}</span>
         </span>
         <span className="cf-meta">
-          <span className="cf-label">Expires</span>
+          <span className="cf-label">{strings.expires}</span>
           <span className="cf-value mono">{entry.tertiaryValue.trim() || "—"}</span>
         </span>
         <span className="cf-network">

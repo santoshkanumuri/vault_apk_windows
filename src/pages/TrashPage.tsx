@@ -12,6 +12,7 @@ import { api, type TrashedItem } from "../lib/api";
 import { typeLabel } from "../lib/entries";
 import { formatDateTime, relativeTime } from "../lib/format";
 import { TRASH_DAYS } from "../lib/trash";
+import { strings } from "../strings";
 
 function label(item: TrashedItem): string {
   return item.itemType === "NOTE" ? "Note" : typeLabel(item.itemType);
@@ -83,7 +84,7 @@ export function TrashPage() {
       <div className="toolbar">
         <p className="toolbar-text">Items deleted on this PC or on a paired device stay here for {TRASH_DAYS} days. A restored item syncs to your other devices.</p>
         <div className="toolbar-group">
-          <Button variant="ghost" icon={Trash2} onClick={() => void empty()} disabled={items.length === 0}>Empty</Button>
+          <Button variant="ghost" icon={Trash2} onClick={() => void empty()} disabled={items.length === 0}>{strings.empty}</Button>
         </div>
       </div>
       {joinCopies > 0 && (
@@ -91,8 +92,8 @@ export function TrashPage() {
           When this PC joined your phone's vault, your phone had another version of {joinCopies === 1 ? "this item" : "these items"}. Your phone's version is kept. Compare, then restore this PC's version as a new item, or delete it. {joinCopies === 1 ? "It stays" : "They stay"} here until you choose.
         </StatusBanner>
       )}
-      {trash.loading && !trash.data ? <div className="card card-padded center"><Spinner label="Loading" /></div>
-        : items.length === 0 ? <div className="card"><EmptyState icon={ArchiveRestore} title="Nothing deleted recently" body={`Deleted passwords, cards, codes and notes stay here for ${TRASH_DAYS} days.`} /></div>
+      {trash.loading && !trash.data ? <div className="card card-padded center"><Spinner label={strings.loading} /></div>
+        : items.length === 0 ? <div className="card"><EmptyState icon={ArchiveRestore} title={strings.nothingDeletedRecently} body={`Deleted passwords, cards, codes and notes stay here for ${TRASH_DAYS} days.`} /></div>
         : (
           <ul className="card list trash-list">
             {items.map((item) => (
@@ -101,21 +102,21 @@ export function TrashPage() {
                 <span className="trash-text">
                   <span className="trash-title">{item.title || "Untitled"}</span>
                   <span className="trash-meta">
-                    {item.reason === "join" ? <><span className="badge">Needs review</span> {label(item)} · this PC's version · set aside </>
-                      : item.reason === "removal" ? <><span className="badge badge-removed" title="This PC was removed from the sync group before this change could apply">Removed</span> {label(item)} · a paired device's version, not applied · kept </>
+                    {item.reason === "join" ? <><span className="badge">{strings.needsReview}</span> {label(item)} · this PC's version · set aside </>
+                      : item.reason === "removal" ? <><span className="badge badge-removed" title={strings.thisPcWasRemovedFromThe}>{strings.removed}</span> {label(item)} · a paired device's version, not applied · kept </>
                       : <>{label(item)} · deleted {item.deletedElsewhere ? "on another device " : ""}</>}
                     <time title={formatDateTime(item.deletedAt)}>{relativeTime(item.deletedAt, now).replace(/^Just/, "just").replace(/^Yesterday/, "yesterday")}</time>{item.reason === "join" ? "" : ` · ${daysLeft(item, now)}`}
                   </span>
                 </span>
                 <span className="trash-actions">
-                  <Button size="sm" icon={ArchiveRestore} onClick={() => void restore(item)}>Restore</Button>
-                  <Button size="sm" variant="ghost" className="btn-danger-text" onClick={() => void forget(item)}>Delete</Button>
+                  <Button size="sm" icon={ArchiveRestore} onClick={() => void restore(item)}>{strings.restore}</Button>
+                  <Button size="sm" variant="ghost" className="btn-danger-text" onClick={() => void forget(item)}>{strings.delete}</Button>
                 </span>
               </li>
             ))}
           </ul>
         )}
-      <p className="detail-meta">Kept on this PC only. Photos and passkeys are not kept; logins keep their previous passwords.</p>
+      <p className="detail-meta">{strings.keptOnThisPcOnlyPhotos}</p>
     </div>
   );
 }

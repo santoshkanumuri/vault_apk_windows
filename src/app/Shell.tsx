@@ -28,6 +28,7 @@ import { usePreferences } from "./settings";
 import { useTheme } from "./theme";
 import { useToast } from "./toast";
 import { useVault } from "./vault";
+import { strings } from "../strings";
 
 type NavItem = { id: string; label: string; icon: LucideIcon; route: Route };
 
@@ -207,13 +208,13 @@ export function Shell() {
   return (
     <SearchContext.Provider value={openSearch}>
       <div className="shell">
-        <a className="skip-link" href="#main-content">Skip to content</a>
-        <aside className="sidebar" aria-label="Primary" onMouseOver={showRailTip} onMouseLeave={hideRailTip} onFocus={showRailTip} onBlur={hideRailTip}>
+        <a className="skip-link" href="#main-content">{strings.skipToContent}</a>
+        <aside className="sidebar" aria-label={strings.primary} onMouseOver={showRailTip} onMouseLeave={hideRailTip} onFocus={showRailTip} onBlur={hideRailTip}>
           <div className="sidebar-brand">
             <BrandMark />
-            <span className="nav-label brand-text"><strong>Nuvori</strong><span>Yours, by design</span></span>
+            <span className="nav-label brand-text"><strong>{strings.nuvori}</strong><span>{strings.yoursByDesign}</span></span>
           </div>
-          <nav className="nav" aria-label="Vault" onScroll={hideRailTip}>
+          <nav className="nav" aria-label={strings.vault} onScroll={hideRailTip}>
             {primaryNav.map((item) => navButton(item, section, "side"))}
             <div className="nav-divider" role="separator" />
             {secondaryNav.map((item) => navButton(item, section, "side"))}
@@ -225,7 +226,7 @@ export function Shell() {
             </button>
             <button type="button" className="nav-item" data-tooltip="Lock (Ctrl+L)" onClick={() => void lock()}>
               <LockKeyhole aria-hidden="true" />
-              <span className="nav-label">Lock vault</span>
+              <span className="nav-label">{strings.lockVault}</span>
             </button>
           </div>
         </aside>
@@ -233,17 +234,17 @@ export function Shell() {
 
         <div className="main-column">
           <header className={cx("topbar", route.page === "home" && "is-home")}>
-            {canGoBack && <IconButton label="Back" icon={ArrowLeft} onClick={() => void back()} className="back-button" />}
+            {canGoBack && <IconButton label={strings.back} icon={ArrowLeft} onClick={() => void back()} className="back-button" />}
             {!canGoBack && <span className="topbar-brand"><BrandMark /></span>}
             <h1 className="topbar-title truncate">{title}</h1>
             <div className="topbar-actions">
-              <button type="button" className="search-trigger" onClick={openSearch} aria-label="Search (Ctrl+K)" aria-keyshortcuts="Control+K">
+              <button type="button" className="search-trigger" onClick={openSearch} aria-label={strings.searchCtrlK} aria-keyshortcuts="Control+K">
                 <Search aria-hidden="true" />
-                <span className="search-trigger-label">Search</span>
-                <span className="search-trigger-keys"><Kbd>Ctrl</Kbd><Kbd>K</Kbd></span>
+                <span className="search-trigger-label">{strings.search}</span>
+                <span className="search-trigger-keys"><Kbd>{strings.ctrl}</Kbd><Kbd>{strings.k}</Kbd></span>
               </button>
               <IconButton className="narrow-only" label={resolved === "dark" ? "Switch to light theme" : "Switch to dark theme"} icon={resolved === "dark" ? Sun : Moon} onClick={toggleTheme} />
-              <IconButton className="narrow-only" label="Lock vault" icon={LockKeyhole} onClick={() => void lock()} />
+              <IconButton className="narrow-only" label={strings.lockVault} icon={LockKeyhole} onClick={() => void lock()} />
             </div>
           </header>
           <main id="main-content" className="content" ref={(element) => { scrollElement.current = element; }} tabIndex={-1}>
@@ -253,7 +254,7 @@ export function Shell() {
           </main>
         </div>
 
-        <nav className="bottom-nav" aria-label="Quick navigation">
+        <nav className="bottom-nav" aria-label={strings.quickNavigation}>
           {bottomNav.map((item) => navButton(item, bottomSection, "bottom"))}
         </nav>
       </div>

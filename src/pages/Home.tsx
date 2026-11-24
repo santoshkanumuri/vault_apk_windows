@@ -19,6 +19,7 @@ import { browserIndicator, isSyncing, syncIndicator } from "../lib/syncState";
 import { totpAt } from "../lib/totp";
 import { useTotpCodes } from "./codes/useTotp";
 import { EntryQuickActions } from "./items/actions";
+import { strings } from "../strings";
 
 /** Items for the Add type picker. Shared with the Home quick actions. */
 export function useAddItems(): MenuItem[] {
@@ -40,19 +41,19 @@ export function HomePage() {
 
   return (
     <div className="page home">
-      <section className="home-hero" aria-label="Welcome">
+      <section className="home-hero" aria-label={strings.welcome}>
         <div className="home-hello">
           <h2 className="home-greeting">{greeting()}</h2>
           <p className="muted">{plural(entries.length + notes.length, "item")} in your vault</p>
         </div>
         <div className="home-hero-actions">
-          <Menu label="Add new" items={addItems} trigger={(props) => <Button {...props} variant="primary" icon={Plus}>Add</Button>} />
-          <IconButton label="Lock vault (Ctrl+L)" icon={LockKeyhole} variant="secondary" className="home-lock" onClick={() => void lock()} />
+          <Menu label={strings.addNew} items={addItems} trigger={(props) => <Button {...props} variant="primary" icon={Plus}>{strings.add}</Button>} />
+          <IconButton label={strings.lockVaultCtrlL} icon={LockKeyhole} variant="secondary" className="home-lock" onClick={() => void lock()} />
         </div>
         <button type="button" className="home-search" onClick={openSearch} aria-keyshortcuts="Control+K">
           <Search aria-hidden="true" />
-          <span className="home-search-label">Search passwords, cards, codes, notes</span>
-          <span className="home-search-keys"><Kbd>Ctrl</Kbd><Kbd>K</Kbd></span>
+          <span className="home-search-label">{strings.searchPasswordsCardsCodesNotes}</span>
+          <span className="home-search-keys"><Kbd>{strings.ctrl}</Kbd><Kbd>{strings.k}</Kbd></span>
         </button>
       </section>
 
@@ -113,7 +114,7 @@ function AttentionStrip() {
     );
   }
   return (
-    <div className="attention" role="list" aria-label="Needs attention">
+    <div className="attention" role="list" aria-label={strings.needsAttention}>
       {visible.map((item) => (
         <div key={item.key} role="listitem" className={cx("attention-item", `tone-${item.kind}`)}>
           <button type="button" className="attention-main" onClick={item.onClick}>
@@ -147,9 +148,9 @@ function QuickAccess() {
 
   return (
     <section className="section" aria-labelledby="quick-title">
-      <div className="section-header"><h2 id="quick-title">Quick access</h2></div>
+      <div className="section-header"><h2 id="quick-title">{strings.quickAccess}</h2></div>
       {items.length === 0 ? (
-        <div className="card card-padded hint-card"><Star aria-hidden="true" /><span>Star an item or open one, and it shows up here.</span></div>
+        <div className="card card-padded hint-card"><Star aria-hidden="true" /><span>{strings.starAnItemOrOpenOne}</span></div>
       ) : (
         <ul className="qa-grid">
           {items.map(({ entry }) => (
@@ -157,7 +158,7 @@ function QuickAccess() {
               <button type="button" className="qa-open" onClick={() => void router.navigate({ page: "item", id: entry.id })} aria-label={`Open ${entry.title}`}>
                 <Avatar title={entry.title || "?"} cardColor={entry.type === "CARD" ? entry.color : undefined} site={entry.type === "PASSWORD" ? entry.tertiaryValue : undefined} />
                 <span className="qa-text">
-                  <span className="qa-title"><span className="truncate">{entry.title || "Untitled"}</span>{entry.favorite && <Star className="fav-star" aria-label="Favorite" />}</span>
+                  <span className="qa-title"><span className="truncate">{entry.title || "Untitled"}</span>{entry.favorite && <Star className="fav-star" aria-label={strings.favorite} />}</span>
                   <span className="qa-subtitle truncate">{entrySubtitle(entry)}</span>
                 </span>
               </button>
@@ -186,8 +187,8 @@ function LiveCodes() {
   return (
     <section className="section" aria-labelledby="codes-title">
       <div className="section-header">
-        <h2 id="codes-title">Codes</h2>
-        <Button variant="ghost" size="sm" trailingIcon={ChevronRight} onClick={() => void router.root({ page: "codes" })}>All codes</Button>
+        <h2 id="codes-title">{strings.codes}</h2>
+        <Button variant="ghost" size="sm" trailingIcon={ChevronRight} onClick={() => void router.root({ page: "codes" })}>{strings.allCodes}</Button>
       </div>
       <ul className="live-codes">
         {codes.map((entry) => {
@@ -220,7 +221,7 @@ function Categories({ counts }: { counts: Record<Category | "notes", number> }) 
   ];
   return (
     <section className="section" aria-labelledby="categories-title">
-      <div className="section-header"><h2 id="categories-title">Categories</h2></div>
+      <div className="section-header"><h2 id="categories-title">{strings.categories}</h2></div>
       <div className="tiles">
         {tiles.map(({ key, label, icon: Icon }) => (
           <button key={key} type="button" className="tile" onClick={() => void router.root(key === "codes" ? { page: "codes" } : key === "notes" ? { page: "notes" } : { page: "list", category: key })}>
@@ -244,10 +245,10 @@ function QuickActions() {
   const running = syncNow.busy || isSyncing(sync.data);
   return (
     <section className="section" aria-labelledby="actions-title">
-      <div className="section-header"><h2 id="actions-title">Quick actions</h2></div>
+      <div className="section-header"><h2 id="actions-title">{strings.quickActions}</h2></div>
       <div className="card rows quick-actions">
-        <Menu label="Add new" align="start" items={addItems} trigger={(props) => (
-          <button type="button" {...props} className="action-row"><span className="row-icon"><Plus aria-hidden="true" /></span><span className="row-text"><span className="row-title">Add an item</span><span className="row-description">Password, card, code, note…</span></span><ChevronRight aria-hidden="true" className="row-chevron" /></button>
+        <Menu label={strings.addNew} align="start" items={addItems} trigger={(props) => (
+          <button type="button" {...props} className="action-row"><span className="row-icon"><Plus aria-hidden="true" /></span><span className="row-text"><span className="row-title">{strings.addAnItem}</span><span className="row-description">{strings.passwordCardCodeNote}</span></span><ChevronRight aria-hidden="true" className="row-chevron" /></button>
         )} />
         {snapshot.enrolled ? (
           <button type="button" className="action-row" disabled={running || !sync.data} onClick={() => void syncNow.run()}>
@@ -257,13 +258,13 @@ function QuickActions() {
         ) : (
           <button type="button" className="action-row" onClick={() => void router.root({ page: "sync" })}>
             <span className="row-icon"><MonitorSmartphone aria-hidden="true" /></span>
-            <span className="row-text"><span className="row-title">Pair with your phone</span><span className="row-description">Scan a QR to copy your vault here</span></span>
+            <span className="row-text"><span className="row-title">{strings.pairWithYourPhone}</span><span className="row-description">{strings.scanAQrToCopyYour}</span></span>
             <ChevronRight aria-hidden="true" className="row-chevron" />
           </button>
         )}
         <button type="button" className="action-row" onClick={() => void router.root({ page: "codes" })}>
           <span className="row-icon"><Fingerprint aria-hidden="true" /></span>
-          <span className="row-text"><span className="row-title">Codes and passkeys</span><span className="row-description">Two-step codes and saved passkeys</span></span>
+          <span className="row-text"><span className="row-title">{strings.codesAndPasskeys}</span><span className="row-description">{strings.twoStepCodesAndSavedPasskeys}</span></span>
           <ChevronRight aria-hidden="true" className="row-chevron" />
         </button>
       </div>

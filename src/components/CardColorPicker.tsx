@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { Check } from "lucide-react";
 import { argbToHsv, css, hsvToArgb, inkFor, needsOutline, parseHex, toHex } from "../lib/cardColors";
 import { TextField } from "./Field";
+import { strings } from "../strings";
 
 type Props = {
   /** Opaque ARGB, 0xFFRRGGBB. */
@@ -52,7 +53,7 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
   const ink = inkFor(value);
   return (
     <div className="color-picker">
-      <span className="color-picker-label">Card color</span>
+      <span className="color-picker-label">{strings.cardColor}</span>
       <div className={"color-preview" + (needsOutline(value) ? " outlined" : "")} style={{ background: css(value), color: ink }} aria-hidden="true">
         <strong>{title.trim() || "Card"}</strong>
         <span className="mono">{lastDigits ? `•••• ${lastDigits}` : "•••• ••••"}</span>
@@ -79,7 +80,7 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
         max={360}
         step={1}
         value={Math.round(hsv[0])}
-        aria-label="Hue"
+        aria-label={strings.hue}
         aria-valuetext={`${Math.round(hsv[0])} degrees`}
         style={{ ["--hue-thumb" as string]: hueColor }}
         onChange={(event) => pick([Number(event.target.value), hsv[1], hsv[2]])}
@@ -87,7 +88,7 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
       <div className="color-hex-row">
         <span className={"color-dot" + (needsOutline(value) ? " outlined" : "")} style={{ background: css(value) }} aria-hidden="true" />
         <TextField
-          label="Hex"
+          label={strings.hex}
           value={hexText}
           className="mono"
           spellCheck={false}
@@ -105,8 +106,8 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
       </div>
       {used.length > 0 && (
         <div className="color-used">
-          <span className="color-picker-label">On your other cards</span>
-          <div className="swatch-grid" role="radiogroup" aria-label="Colors on your other cards">
+          <span className="color-picker-label">{strings.onYourOtherCards}</span>
+          <div className="swatch-grid" role="radiogroup" aria-label={strings.colorsOnYourOtherCards}>
             {used.map((color) => {
               const selected = color === value;
               return (
