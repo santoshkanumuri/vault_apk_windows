@@ -312,7 +312,8 @@ pub struct MemberRow {
     pub status: &'static str,
     pub is_manager: bool,
     pub is_this_device: bool,
-    /// Unix ms of the last completed exchange with this device; 0 = unknown.
+    /// Unix ms of the last completed Wi-Fi exchange with this device or its newest signed Google
+    /// Drive progress report; 0 = unknown. An unsigned report never counts (`cloud_sync.rs`).
     pub last_seen: i64,
     /// Counts from the device's last report, computed as the phone's `peerSyncCounts`.
     pub counts: PeerCounts,
@@ -332,6 +333,9 @@ pub struct PeerCounts {
     pub received_there: u64,
     /// The device's own changes (as of its last report) that have not arrived here.
     pub to_receive_here: u64,
+    /// This PC's changes the device has not applied yet, by its verified progress over Wi-Fi or a
+    /// signed Google Drive report; all of them before its first report (Android `SyncOverviewRules.unconfirmed`).
+    pub unconfirmed: u64,
 }
 
 /// Android `peerSyncCounts`, over `(sequence, hash)` heads.
@@ -341,9 +345,9 @@ pub fn peer_counts(
     local: &crate::progress::SyncProgress,
     peer: Option<&crate::progress::SyncProgress>,
 ) -> PeerCounts {
-    let Some(peer) = peer else { return PeerCounts::default() };
     let head = |heads: &std::collections::BTreeMap<String, (u64, String)>, id: &str| heads.get(id).map_or(0, |head| head.0);
     let local_written = head(&local.applied, local_id);
+    let Some(peer) = peer else { return PeerCounts { unconfirmed: local_written, ..PeerCounts::default() } };
     let remote_received = head(&peer.received, local_id);
     let remote_applied = head(&peer.applied, local_id);
     let peer_written = head(&peer.applied, peer_id);
@@ -355,6 +359,7 @@ pub fn peer_counts(
         to_apply_here: local_received.saturating_sub(local_applied),
         received_there: remote_received.saturating_sub(remote_applied),
         to_receive_here: peer_written.saturating_sub(local_received),
+        unconfirmed: local_written.saturating_sub(remote_applied),
     }
 }
 
@@ -535,6 +540,22 @@ mod tests {
 
     use super::*;
     use crate::sync::GENESIS_HASH;
+
+    /// The Sync page's "Up to date" per device: this PC's changes the device applied, over either transport.
+    #[test]
+    fn unconfirmed_counts_this_pcs_changes_the_device_has_not_applied() {
+        let heads = |pairs: &[(&str, u64)]| pairs.iter().map(|(id, seq)| ((*id).to_owned(), (*seq, "a".repeat(64)))).collect();
+        let local = crate::progress::SyncProgress { received: heads(&[("pc", 7), ("phone", 3)]), applied: heads(&[("pc", 7), ("phone", 3)]) };
+        // No report yet: every change of this PC waits.
+        let none = peer_counts("pc", "phone", &local, None);
+        assert_eq!((none.checked, none.unconfirmed), (false, 7));
+        // Received but not applied there is not confirmed.
+        let received = crate::progress::SyncProgress { received: heads(&[("pc", 7), ("phone", 3)]), applied: heads(&[("pc", 4), ("phone", 3)]) };
+        let counts = peer_counts("pc", "phone", &local, Some(&received));
+        assert_eq!((counts.checked, counts.unconfirmed, counts.to_send, counts.received_there), (true, 3, 0, 3));
+        let applied = crate::progress::SyncProgress { received: heads(&[("pc", 7)]), applied: heads(&[("pc", 7)]) };
+        assert_eq!(peer_counts("pc", "phone", &local, Some(&applied)).unconfirmed, 0);
+    }
 
     fn event(signer: &SigningKey, previous: Option<&MembershipEvent>, action: MembershipAction, subject: &str, key: &str, epoch: u64) -> MembershipEvent {
         let mut event = MembershipEvent {

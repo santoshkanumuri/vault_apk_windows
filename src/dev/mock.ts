@@ -69,6 +69,19 @@ state.conflicts = [
 state.sync.conflicts = state.conflicts.length;
 // Preview "Welcome back" (a vault from an earlier install, last used 9 days ago) with ?welcome in the URL.
 const mockInstall = { welcomeBack: window.location.search.includes("welcome"), lastUsedAt: minutes(60 * 24 * 9 + 35) };
+// Sync status previews (lib/syncOverview.ts): ?wifidrive = Wi-Fi couldn't reach the devices but Google Drive
+// delivered everything; ?uptodate = every device confirmed every change. Synthetic devices only.
+const syncScenario = window.location.search.includes("wifidrive") ? "wifidrive" : window.location.search.includes("uptodate") ? "uptodate" : "";
+if (syncScenario) {
+  state.conflicts = [];
+  state.sync.conflicts = 0;
+  state.photos_waiting = 0;
+  state.cloud = { ...state.cloud, connected: true, account: "you@gmail.com", lastSync: new Date(minutes(1)).toISOString() };
+}
+if (syncScenario === "wifidrive") {
+  state.sync = { ...state.sync, phase: "error", lastError: "No paired device answered on this Wi-Fi.", consecutiveFailures: 3, nextRetrySeconds: 120,
+    lastSync: new Date(minutes(60 * 5)).toISOString(), lastAttempt: new Date(minutes(1)).toISOString(), message: "" };
+}
 // Preview the "removed from group" notice with ?removed in the URL.
 if (window.location.search.includes("removed")) {
   state.enrolled = false;
@@ -361,12 +374,14 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       const status: MembershipStatus = {
         managerDeviceId: "dev-pixel", managerName: "Pixel 8", localDeviceId: "dev-pc",
         devices: state.enrolled ? [
-          { deviceId: "dev-pixel", name: "Pixel 8", platform: "android", status: "active", isManager: true, isThisDevice: false },
+          { deviceId: "dev-pixel", name: "Pixel 8", platform: "android", status: "active", isManager: true, isThisDevice: false,
+            ...(syncScenario ? { lastSeen: minutes(2), counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } } : {}) },
           { deviceId: "dev-pc", name: "This PC", platform: "windows", status: "active", isManager: false, isThisDevice: true },
-          { deviceId: "dev-tab", name: "Galaxy Tab", platform: "android", status: "active", isManager: false, isThisDevice: false },
+          { deviceId: "dev-tab", name: "Galaxy Tab", platform: "android", status: "active", isManager: false, isThisDevice: false,
+            ...(syncScenario ? { lastSeen: minutes(40), counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } } : {}) },
           { deviceId: "dev-old", name: "Old phone", platform: "android", status: "removed", isManager: false, isThisDevice: false }
         ] : [],
-        pendingTransferTo: state.enrolled ? "dev-tab" : "", transferAccepted: false,
+        pendingTransferTo: state.enrolled && !syncScenario ? "dev-tab" : "", transferAccepted: false,
         removedNotice: state.removedNotice, pendingLeave: state.pendingLeave, managerLost: state.managerLost
       };
       return status;

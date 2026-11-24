@@ -7,6 +7,7 @@ import { StatusIcon, type StatusKind } from "../components/Status";
 import { useCopy } from "../app/clipboard";
 import { useBrowserStatus, useConflicts, useHelloAvailable, useLastSync, useLock, useMembership, useNow, useSyncStatus } from "../app/hooks";
 import { RemovedNoticeBanner } from "./sync/Membership";
+import { useSyncOverview } from "../app/useSyncOverview";
 import { dismissHint, readDismissed, readRecent } from "../app/recent";
 import { useRouter } from "../app/router";
 import { useOpenSearch } from "../app/search";
@@ -90,13 +91,19 @@ function AttentionStrip() {
   const conflicts = useConflicts();
   const hello = useHelloAvailable();
   const [dismissed, setDismissed] = useState(readDismissed);
+  const membership = useMembership();
+  const conflictCount = !snapshot.enrolled ? 0 : conflicts.data ? conflicts.data.length : sync.data?.conflicts ?? 0;
+  // One status over Wi-Fi and Google Drive: a Wi-Fi miss while Drive delivers is not a problem here.
+  const overview = useSyncOverview(snapshot.enrolled ? sync.data : null, membership.error ? null : membership.data, conflictCount);
   const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error));
   const extension = browserIndicator(snapshot, browser.data, Boolean(browser.error));
 
   const items: Attention[] = [];
-  const conflictCount = !snapshot.enrolled ? 0 : conflicts.data ? conflicts.data.length : sync.data?.conflicts ?? 0;
   if (conflictCount > 0) items.push({ key: "conflicts", kind: "warning", label: `${plural(conflictCount, "change")} need${conflictCount === 1 ? "s" : ""} review`, detail: "Edited on both devices", onClick: () => void router.navigate(conflicts.data ? { page: "conflicts" } : { page: "sync" }) });
-  if (snapshot.enrolled && (phone.kind === "warning" || phone.kind === "error") && phone.label !== "Needs review") items.push({ key: "phone", kind: phone.kind, label: phone.label, detail: phone.detail, onClick: () => void router.root({ page: "sync" }) });
+  const state = overview?.overview;
+  if (snapshot.enrolled && overview && state && ((state.state === "attention" && state.cause !== "rejected") || state.state === "stale" || state.state === "keys")) {
+    items.push({ key: "phone", kind: overview.text.kind, label: overview.text.title, detail: overview.text.detail, onClick: () => void router.root({ page: "sync" }) });
+  } else if (snapshot.enrolled && !overview && (phone.kind === "warning" || phone.kind === "error") && phone.label !== "Needs review") items.push({ key: "phone", kind: phone.kind, label: phone.label, detail: phone.detail, onClick: () => void router.root({ page: "sync" }) });
   if (sync.data && (sync.data.setAside ?? 0) > 0) items.push({ key: "set-aside", kind: "warning", label: `${plural(sync.data.setAside ?? 0, "change")} couldn't be read`, detail: "Set aside and tried again on each sync", onClick: () => void router.root({ page: "sync" }) });
   if (sync.data && sync.data.waitingToApply - (sync.data.setAside ?? 0) > 0) items.push({ key: "waiting", kind: "info", label: `${plural(sync.data.waitingToApply - (sync.data.setAside ?? 0), "change")} waiting`, detail: "Applied on a later sync", onClick: () => void router.root({ page: "sync" }) });
   if (browser.data && extension.label === "Not listening") items.push({ key: "browser", kind: "warning", label: "Browser filling is off", detail: "Nuvori isn't listening for the extension", onClick: () => void router.root({ page: "settings", section: "browser" }) });
@@ -108,8 +115,9 @@ function AttentionStrip() {
     const syncing = isSyncing(sync.data);
     return (
       <p className="calm-line" role="status">
-        {syncing ? <StatusIcon kind="progress" size={16} /> : <CircleCheck aria-hidden="true" />}
-        {!snapshot.enrolled ? "Your vault is ready" : syncing ? "Syncing with your devices…" : lastSync ? `Everything's in sync · ${relativeTime(lastSync).toLowerCase()}` : "Everything's up to date"}
+        {syncing ? <StatusIcon kind="progress" size={16} /> : state?.state === "waiting" ? <StatusIcon kind="info" size={16} /> : <CircleCheck aria-hidden="true" />}
+        {!snapshot.enrolled ? "Your vault is ready" : syncing ? "Syncing with your devices…" : state?.state === "waiting" && overview ? overview.text.title
+          : lastSync ? `Everything's in sync · ${relativeTime(state?.lastSynced || lastSync).toLowerCase()}` : "Everything's up to date"}
       </p>
     );
   }

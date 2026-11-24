@@ -1093,13 +1093,15 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         let signed = (context.epoch_for(&file.name) == Some(context.keys_epoch))
             .then(|| drive_progress::verify(&body, &context.vault_id, peer, &member.public_key, context.keys_epoch))
             .flatten();
+        // Only a signed report proves the member synced: an unsigned one may come from a removed device
+        // that still holds an old key, so it never makes a member look seen or up to date (Sync page).
+        let Some((peer_progress, features)) = &signed else { continue };
         // A report older than one this PC got over Wi-Fi is refused there and simply skipped here.
         let _ = with_vault(state, &context.vault_id, &membership.head, |vault| {
             let db = vault.connection();
             if seen_at > 0 {
                 crate::membership_exit::record_peer_seen(db, peer, seen_at).map_err(storage_error)?;
             }
-            let Some((peer_progress, features)) = &signed else { return Ok(()) };
             if let Some(features) = features {
                 crate::appearance::record_peer_features(db, &context.vault_id, peer, features).map_err(storage_error)?;
             }
