@@ -32,14 +32,30 @@ The same protocol upgrades as Android 2.3.4: website icons sync, checkpoint enro
 - **Copied secrets** stay out of Windows clipboard history and the cloud clipboard (L-17).
 - The source-tree pairing helper is used only in debug builds (L-19).
 
+## Welcome back and start fresh
+
+- After a reinstall, Nuvori notices the vault left by the earlier install and asks: **Unlock it** (old master password, everything kept) or **Start fresh on this PC** (deletes this PC's vault and device identity after you type RESET, then goes to creating a vault and pairing with the phone). Neither choice touches the phone or other devices.
+- The unlock screen has **Forgot the password or starting over?** with the same choices, so nobody is stuck with a forgotten password.
+- A PC that was removed from its group, or left it, gets a new device identity and can pair again.
+
+## One sync status for Wi-Fi and Google Drive
+
+- **Devices & sync** and **Home** count a sync over either Wi-Fi or Google Drive. When Wi-Fi can't reach a device but Google Drive keeps it in step, the status says **Up to date**, with a quiet note about Wi-Fi.
+- Each device shows **Up to date** when its signed progress shows it applied this PC's latest changes, or **Waiting for …** with when it was last heard from. **Waiting** counts changes no device has confirmed yet.
+- An error shows only when both ways fail, or a device stays silent.
+
 ## Interface
 
 - The sidebar footer is pinned so **Lock** stays reachable. Toasts show over dialogs. Arrow keys work in segmented controls, focus rings show in menus and search, and click targets are at least 32 px.
 - Helium and Comet are detected as browsers. Codes show site logos. The KeePass import has a styled file button.
+- **Store app icon:** the taskbar and Start show the padlock without an accent-colored plate behind it (unplated icons and `resources.pri` in the package).
+- Clearer wording and stronger control borders. All on-screen text is in `src/strings.ts`.
+- Unproven Wi-Fi sync connections are limited, and a pairing QR outlasts a stranger's connection attempt (L-20).
+- Signed releases: when code signing is set up, Nuvori trusts only programs signed with its own certificates (M-07). Without signing set up, builds work as before.
 
 ## Checks
 
-- `cargo test --lib`: all pass. `npm test`: 247 pass. `npx tsc --noEmit`: clean.
+- `cargo test --lib`: 391 pass. One test (`named_pipe_releases_only_one_selected_password_and_locks`) fails only when the installed Nuvori is running on the same PC, because both use the same pipe name. `npm test`: 258 pass. `npx tsc --noEmit`: clean.
 - The installers and both MSIX packages were built from `main` at this version.
 
 ## Downloads
