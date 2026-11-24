@@ -887,6 +887,26 @@ fn open_address(address: &str) -> bool {
     result.0 as usize > 32
 }
 
+/// A link in a note, checked again here: only web and mail addresses open, and only after the
+/// person confirmed it in the app.
+fn note_link_allowed(link: &str) -> bool {
+    let lower = link.to_ascii_lowercase();
+    link.len() <= 2048
+        && !link.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '<' || c == '>')
+        && ((lower.starts_with("https://") || lower.starts_with("http://")) && link.splitn(2, "://").nth(1).is_some_and(|rest| {
+            let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+            !host.is_empty() && !host.contains('@')
+        }) || lower.starts_with("mailto:") && link.len() > 7)
+}
+
+#[tauri::command]
+fn open_note_link(link: String) -> Result<(), String> {
+    if !note_link_allowed(&link) {
+        return Err("This link can't be opened.".to_owned());
+    }
+    if open_address(&link) { Ok(()) } else { Err("Couldn't open the link.".to_owned()) }
+}
+
 #[tauri::command]
 fn open_windows_settings(page: String) -> Result<(), String> {
     let uri = windows_settings_uri(&page).ok_or_else(|| "Unknown settings page".to_owned())?;
@@ -2169,6 +2189,7 @@ fn save_note(
     title: String,
     body: String,
     group_ids: Option<Vec<String>>,
+    rich: Option<String>,
     state: State<'_, ManagedState>,
 ) -> Result<LocalNote, String> {
     let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
@@ -2176,7 +2197,7 @@ fn save_note(
         .unlocked
         .as_mut()
         .ok_or("Unlock the vault first".to_owned())?
-        .save_note(id.as_deref(), &title, &body, group_ids)
+        .save_rich_note(id.as_deref(), &title, &body, rich.as_deref(), group_ids)
         .map_err(public_vault_error)?;
     activity::log(Level::Success, Category::Items, activity::item_saved_message("NOTE", id.is_none()));
     Ok(note)
@@ -2902,6 +2923,7 @@ pub fn run() {
             set_browser,
             build_status,
             open_windows_settings,
+            open_note_link,
             cloud_status,
             cloud_connect,
             cloud_cancel_connect,
@@ -2947,6 +2969,18 @@ pub fn run() {
 #[cfg(test)]
 mod activity_tests {
     use super::*;
+
+    #[test]
+    fn only_web_and_mail_links_in_notes_can_be_opened() {
+        for link in ["https://example.com", "http://example.com/a?b=1#c", "mailto:someone@example.com", "HTTPS://EXAMPLE.COM"] {
+            assert!(note_link_allowed(link), "{link}");
+        }
+        for link in ["", "javascript:alert(1)", "file:///C:/Windows/system32/calc.exe", "ms-settings:privacy", "https://",
+            "https://bank.example@evil.example/", "https://a b.example", "https://example.com/\u{0}", "mailto:", "\\\\server\\share"] {
+            assert!(!note_link_allowed(link), "{link}");
+        }
+        assert!(!note_link_allowed(&format!("https://example.com/{}", "a".repeat(2048))));
+    }
 
     #[test]
     fn only_two_windows_settings_pages_can_be_opened() {

@@ -699,6 +699,7 @@ fn migrate_inventory(
                     created_at: note.created_at,
                     updated_at: note.updated_at,
                     group_ids: vec![],
+                    rich: String::new(),
                 })
             })
         })
@@ -932,6 +933,7 @@ fn inventory_items(inventory: &MigrationInventory) -> Vec<(String, Value, bool)>
                     created_at: note.created_at,
                     updated_at: note.updated_at,
                     group_ids: vec![],
+                    rich: String::new(),
                 })
             });
             (note.id.clone(), json, true)

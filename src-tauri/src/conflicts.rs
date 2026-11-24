@@ -244,6 +244,8 @@ fn summary(entity_type: &str, local: Option<&Value>, remote: Option<&Value>) -> 
                         ("secondaryValue", "PASSWORD") => "Password",
                         ("secondaryValue", "QUESTION") => "Answer",
                         ("secondaryValue", "AUTHENTICATOR") => "Code setup key",
+                        ("fourthValue", "NOTE") => "Formatting",
+                        ("notes", "NOTE") => "Note text",
                         _ => label,
                     });
                 }

@@ -250,9 +250,10 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "list_notes": requireUnlocked(); return state.notes.map((n) => ({ ...n }));
     case "save_note": {
       const existing = state.notes.find((n) => n.id === args.id);
-      const saved: LocalNote = { id: (args.id as string) ?? id(), title: String(args.title), body: String(args.body), groupIds: (args.groupIds as string[]) ?? [], createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now() };
+      const saved: LocalNote = { id: (args.id as string) ?? id(), title: String(args.title), body: String(args.body), groupIds: (args.groupIds as string[]) ?? [], createdAt: existing?.createdAt ?? Date.now(), updatedAt: Date.now(), rich: typeof args.rich === "string" ? args.rich : existing?.rich ?? "" };
       state.notes = [saved, ...state.notes.filter((n) => n.id !== saved.id)]; state.revision++; log("success", "items", "Note saved"); return saved;
     }
+    case "open_note_link": return null;
     case "delete_note": {
       const gone = state.notes.find((n) => n.id === args.id);
       if (gone) mockTrash.unshift({ id: id(), itemId: gone.id, kind: "note", itemType: "NOTE", title: gone.title, deletedAt: Date.now(), deletedElsewhere: false, expiresAt: Date.now() + 30 * 86_400_000, data: gone });

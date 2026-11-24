@@ -43,7 +43,8 @@ export type VaultEntry = {
 };
 
 export type EntryDraft = Omit<VaultEntry, "id" | "createdAt" | "updatedAt"> & { id?: string };
-export type LocalNote = { id: string; title: string; body: string; createdAt: number; updatedAt: number; groupIds: string[] };
+/** `rich` is the note's formatting (lib/richNote.ts), "" for a plain note. */
+export type LocalNote = { id: string; title: string; body: string; createdAt: number; updatedAt: number; groupIds: string[]; rich?: string };
 
 /** What a KeePass file holds (preview), or what an import saved. No secrets. */
 export type KeepassSummary = {
@@ -363,8 +364,9 @@ export const api = {
   deleteEntryPhoto: (photoId: string) => call<void>("delete_entry_photo", { photoId }),
 
   listNotes: () => call<LocalNote[]>("list_notes"),
-  saveNote: (note: { id?: string; title: string; body: string; groupIds: string[] }) =>
-    call<LocalNote>("save_note", { id: note.id ?? null, title: note.title, body: note.body, groupIds: note.groupIds }),
+  /** `rich` replaces the note's formatting ("" makes it plain); leaving it out keeps what the note had. */
+  saveNote: (note: { id?: string; title: string; body: string; groupIds: string[]; rich?: string }) =>
+    call<LocalNote>("save_note", { id: note.id ?? null, title: note.title, body: note.body, groupIds: note.groupIds, rich: note.rich ?? null }),
   deleteNote: (id: string) => call<void>("delete_note", { id }),
 
   listGroups: () => call<VaultGroup[]>("list_groups"),
@@ -405,6 +407,8 @@ export const api = {
   cloudCancelConnect: () => call<void>("cloud_cancel_connect"),
   cloudDisconnect: () => call<CloudStatus>("cloud_disconnect"),
   openWindowsSettings: (page: "passkeys" | "apps") => call<void>("open_windows_settings", { page }),
+  /** Opens a web or mail link from a note, after the person confirmed it. */
+  openNoteLink: (link: string) => call<void>("open_note_link", { link }),
   listConflicts: () => call<SyncConflict[]>("list_conflicts"),
   resolveConflict: (id: string, keep: "local" | "remote") => call<AppSnapshot>("resolve_conflict", { id, keep }),
   photoSyncStatus: () => call<PhotoSyncStatus>("photo_sync_status"),
