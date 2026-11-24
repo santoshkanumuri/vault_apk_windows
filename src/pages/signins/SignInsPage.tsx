@@ -259,7 +259,7 @@ export function SignInsSettingRow() {
   const change = async (enabled: boolean) => {
     setBusy(true);
     try { setState(await api.setSignIns(enabled)); toast.success(enabled ? "Sign-in methods on" : "Sign-in methods off"); }
-    catch (failure) { toast.error(failure, "Could not change the setting."); }
+    catch (failure) { toast.error(failure, "Couldn't change the setting."); }
     finally { setBusy(false); }
   };
   return (

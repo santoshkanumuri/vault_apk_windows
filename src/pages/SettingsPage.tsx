@@ -48,7 +48,7 @@ export function SettingsPage({ section }: { section?: string }) {
   };
 
   const changeAppearance = (nextAccent: string, nextSurface: string) => {
-    setAppearance(nextAccent, nextSurface).catch((failure) => toast.error(failure, "Could not save the colors."));
+    setAppearance(nextAccent, nextSurface).catch((failure) => toast.error(failure, "Couldn't save the colors."));
   };
 
   return (
@@ -227,7 +227,7 @@ function SiteIconsRow() {
   const [busy, setBusy] = useState(false);
   const run = async (task: () => Promise<Parameters<typeof apply>[0]>, done: string) => {
     setBusy(true);
-    try { apply(await task()); toast.success(done); } catch (failure) { toast.error(failure, "Could not change website icons."); } finally { setBusy(false); }
+    try { apply(await task()); toast.success(done); } catch (failure) { toast.error(failure, "Couldn't change website icons."); } finally { setBusy(false); }
   };
   return (
     <SettingsRow icon={Globe} title="Website icons"

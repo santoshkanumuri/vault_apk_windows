@@ -171,7 +171,7 @@ function LoginFields({ draft, set, errors }: { draft: EntryDraft; set: <K extend
   const [generateError, setGenerateError] = useState("");
   // One click uses the settings last chosen in the generator on this PC.
   const quickGenerate = () => generateWithSavedSettings().then((value) => { setGenerateError(""); set("secondaryValue", value); },
-    () => setGenerateError("Could not generate a passphrase. Open the generator options and try again."));
+    () => setGenerateError("Couldn't generate a passphrase. Open the generator options and try again."));
   return <>
     <TextField label="Username or email" value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} autoComplete="off" spellCheck={false} />
     <PasswordField label="Password" value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue || generateError || undefined} autoComplete="new-password" required

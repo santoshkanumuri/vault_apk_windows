@@ -256,8 +256,8 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
     try {
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image."));
-        reader.onerror = () => reject(new Error("Could not read image."));
+        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Couldn't read the image."));
+        reader.onerror = () => reject(new Error("Couldn't read the image."));
         reader.readAsDataURL(file);
       });
       const separator = dataUrl.indexOf(",");
