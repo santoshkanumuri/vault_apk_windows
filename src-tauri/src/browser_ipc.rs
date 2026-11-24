@@ -197,6 +197,22 @@ pub fn calling_browser() -> Option<String> {
     browser_of_chain(&process_table(), std::process::id())
 }
 
+/// H-03: called for browser requests that a user started (a fill or a save), so that the
+/// backend's auto-lock counts them as activity. Set by the app; absent in the native host.
+static USER_ACTIVITY_HOOK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+pub fn set_user_activity_hook(hook: impl Fn() + Send + Sync + 'static) {
+    let _ = USER_ACTIVITY_HOOK.set(Box::new(hook));
+}
+
+/// Actions the extension sends only after the user chose something: filling a login, card,
+/// address or code, asking for a card's security code, saving or updating a login or details.
+/// Listings and checks (sent when a field gets focus) don't count, nor does polling for a code.
+fn user_started(action: &BrowserAction) -> bool {
+    matches!(action, BrowserAction::FillCredential | BrowserAction::FillItem | BrowserAction::RequestCvv
+        | BrowserAction::CommitLogin | BrowserAction::UpdateLogin | BrowserAction::CommitDetails)
+}
+
 /// `hand_over`: `allowed` checks the calling process ID; `close` ends this copy of the app after
 /// the answer is written. Without a handler (the native host), the request is refused.
 struct HandOverHandler {
@@ -991,7 +1007,15 @@ fn serve_connection(
                 if !matches!(request.action, BrowserAction::ShowApp) {
                     seen = Some((RequestKind::from(&request.action), host));
                 }
-                handle_request(request, provider, grants)
+                let started_by_user = user_started(&request.action);
+                let response = handle_request(request, provider, grants);
+                if started_by_user
+                    && response.as_ref().is_ok_and(|response| matches!(response.status.as_str(), "ok" | "saved" | "pending"))
+                    && let Some(hook) = USER_ACTIVITY_HOOK.get()
+                {
+                    hook();
+                }
+                response
             }
             Err(error) => Err(error.into()),
         },

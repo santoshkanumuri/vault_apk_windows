@@ -209,6 +209,9 @@ export async function call<T>(command: string, args?: Record<string, unknown>): 
   return invoke<T>(command, args);
 }
 
+/** `saved` is false until the backend has its own value; the main window then sends its old one. */
+export type AutoLockStatus = { minutes: number; saved: boolean };
+
 /** Auto-type (auto_type.rs): a shortcut that types a login into any desktop app. */
 export type AutoTypeStatus = {
   enabled: boolean;
@@ -317,6 +320,10 @@ export const api = {
   resetVault: (password: string) => call<AppSnapshot>("reset_vault", { password }),
   showMainWindow: () => call<void>("show_main_window"),
   hideMainWindow: () => call<void>("hide_main_window"),
+  /** Auto-lock lives in the backend (auto_lock.rs): it locks with no window open. */
+  autoLockStatus: () => call<AutoLockStatus>("auto_lock_status"),
+  setAutoLock: (minutes: number) => call<AutoLockStatus>("set_auto_lock", { minutes }),
+  noteUserActivity: () => call<void>("note_user_activity"),
   quickSearchStatus: () => call<QuickSearchStatus>("quick_search_status"),
   setQuickSearch: (enabled: boolean, preset?: string) => call<QuickSearchStatus>("set_quick_search", { enabled, preset: preset ?? null }),
   takeQuickSearchRequest: () => call<boolean>("take_quick_search_request"),

@@ -1,4 +1,5 @@
 pub mod activity;
+mod auto_lock;
 mod auto_type;
 pub mod appearance;
 pub mod browser;
@@ -1964,6 +1965,43 @@ fn lock(state: &ManagedState, browser: &BrowserIpcServer, pairing: &PairingContr
     snapshot
 }
 
+/// H-03: the backend's auto-lock (idle, Windows session lock, sleep). Runs on the auto-lock
+/// threads, never the UI thread; a vault that is already locked is left alone.
+fn auto_lock_vault(app: &AppHandle, reason: auto_lock::Reason) {
+    let state = app.state::<ManagedState>();
+    let unlocked = state.lock().is_ok_and(|state| state.unlocked.is_some());
+    if !unlocked {
+        return;
+    }
+    let locked = lock(
+        state.inner(),
+        app.state::<Arc<BrowserIpcServer>>().inner(),
+        app.state::<Arc<PairingController>>().inner(),
+    );
+    if locked.is_ok() {
+        activity::log(Level::Info, Category::Security, reason.message());
+        vault_changed(app, false);
+    }
+}
+
+// Auto-lock commands. The timer and the Windows session watcher live in `auto_lock.rs`.
+
+#[tauri::command]
+fn auto_lock_status(auto_lock: State<'_, Arc<auto_lock::AutoLock>>) -> auto_lock::Status {
+    auto_lock.status()
+}
+
+#[tauri::command]
+fn set_auto_lock(minutes: u32, auto_lock: State<'_, Arc<auto_lock::AutoLock>>) -> Result<auto_lock::Status, String> {
+    auto_lock.set_minutes(minutes)
+}
+
+/// The app's windows report user input here (throttled by the page): it restarts the idle time.
+#[tauri::command]
+fn note_user_activity(auto_lock: State<'_, Arc<auto_lock::AutoLock>>) {
+    auto_lock.touch();
+}
+
 /// Tray "Lock vault". Runs off the UI thread because a sync may hold the vault for a moment.
 fn lock_from_tray(app: &AppHandle) {
     let app = app.clone();
@@ -2788,6 +2826,17 @@ pub fn run() {
                 unlocked: None,
             })));
             app.manage(Arc::new(BrowserIpcServer::start()?));
+            let auto_lock = auto_lock::AutoLock::new(directory.clone());
+            app.manage(auto_lock.clone());
+            let activity_source = auto_lock.clone();
+            browser_ipc::set_user_activity_hook(move || activity_source.touch());
+            let watched = app.state::<ManagedState>().inner().clone();
+            let lock_handle = app.handle().clone();
+            auto_lock.start(
+                // A vault busy with a sync is checked again on the next tick.
+                move || watched.try_lock().ok().map(|state| state.unlocked.is_some()),
+                move |reason| auto_lock_vault(&lock_handle, reason),
+            );
             app.manage(Arc::new(SyncController::default()));
             app.manage(quick_search::QuickSearch::new(directory.clone()));
             app.state::<quick_search::QuickSearch>().apply(app.handle());
@@ -2922,6 +2971,9 @@ pub fn run() {
             show_main_window,
             quick_search_status,
             set_quick_search,
+            auto_lock_status,
+            set_auto_lock,
+            note_user_activity,
             take_quick_search_request,
             get_appearance,
             set_appearance,
