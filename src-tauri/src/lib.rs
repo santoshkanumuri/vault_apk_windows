@@ -2766,16 +2766,22 @@ pub fn run() {
                 .path()
                 .resource_dir()?
                 .join("pairing/Nuvori.PairingHelper.exe");
-            let development_helper = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../pairing-helper/publish/Nuvori.PairingHelper.exe");
+            // Only a development build may fall back to the helper in the source tree. A release
+            // build never runs a program from a path baked in on the build machine (a folder that
+            // could exist, and be writable, on the user's PC); without the packaged helper,
+            // pairing reports that the helper is missing.
+            #[cfg(debug_assertions)]
+            let helper_path = if packaged_helper.is_file() {
+                packaged_helper
+            } else {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../pairing-helper/publish/Nuvori.PairingHelper.exe")
+            };
+            #[cfg(not(debug_assertions))]
+            let helper_path = packaged_helper;
             app.manage(Arc::new(PairingController {
                 progress: Mutex::new(PairingProgress::default()),
                 approval: Condvar::new(),
-                helper_path: if packaged_helper.is_file() {
-                    packaged_helper
-                } else {
-                    development_helper
-                },
+                helper_path,
             }));
             app.manage(Arc::new(Mutex::new(AppState {
                 store: VaultStore::new(directory.clone()),
