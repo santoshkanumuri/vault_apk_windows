@@ -13,7 +13,7 @@ export function managerLabel(managerName?: string): string {
 
 /** Where to remove a device: on the managing phone, never on this PC. */
 export function removeHelp(managerName?: string): string {
-  return `To remove a device, open Nuvori on ${managerLabel(managerName)}, go to Settings > Devices & sync, and tap Remove on this PC's card. The device doesn't need to be on.`;
+  return `To remove a device, open Nuvori on ${managerLabel(managerName)}, go to Settings > Devices & sync, and tap Remove on that device's card. The device doesn't need to be on.`;
 }
 
 /** True for another active device that synced before but not in the last STALE_AFTER_DAYS days. */
