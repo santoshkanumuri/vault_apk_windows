@@ -13,7 +13,15 @@ const STATE = path.join(STATE_DIR, "vault.json");
 const LOG = path.join(STATE_DIR, "host-log.jsonl");
 const LOCK = path.join(STATE_DIR, "lock");
 const FEATURES = ["status_no_origin", "login_title", "password_only", "multi_update", "unlock_prompt",
-  "cards", "profiles", "codes", "save_details", "login_edit", "related_logins", "all_logins"];
+  "cards", "profiles", "codes", "save_details", "login_edit", "related_logins", "all_logins", "sign_in_methods"];
+// "sign_in_methods": like sign_ins.rs, with the site as the host minus "www." (no public suffix list here).
+const SIGN_IN_PROVIDERS = ["google", "apple", "microsoft", "github", "facebook", "x", "linkedin", "discord", "amazon", "slack"];
+function signInAnswer(state, origin) {
+  const site = new URL(origin).hostname.replace(/^www\./, "");
+  const methods = (state.signIns || []).filter((entry) => entry.site === site).sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+    .map(({ provider, account, lastUsedAt, useCount }) => ({ provider, account, lastUsedAt, useCount }));
+  return { site, methods };
+}
 const GRANT_TTL_MS = 2 * 60 * 1000;
 
 // ---------------------------------------------------------------------------- framing
@@ -198,6 +206,23 @@ function handle(request, state) {
   }
 
   switch (action) {
+    case "query_sign_ins":
+      if (request.signIn !== undefined) return invalid(request, "The browser request is incomplete.");
+      return { ...base(request, "ok"), signIns: signInAnswer(state, origin) };
+    case "record_sign_in": {
+      const details = request.signIn;
+      const account = typeof details?.account === "string" ? details.account.trim() : "";
+      if (!details || !SIGN_IN_PROVIDERS.includes(details.provider) || account.length > 256) return invalid(request, "The sign-in method was not accepted.");
+      const site = signInAnswer(state, origin).site;
+      state.signIns = state.signIns || [];
+      const same = state.signIns.filter((entry) => entry.site === site && entry.provider === details.provider);
+      // As sign_ins.rs: no account adds to the only row of that provider, else to the row without one.
+      const row = account ? same.find((entry) => entry.account.toLowerCase() === account.toLowerCase())
+        : same.length === 1 ? same[0] : same.find((entry) => !entry.account);
+      if (row) { row.lastUsedAt = Date.now(); row.useCount++; }
+      else state.signIns.push({ site, provider: details.provider, account, lastUsedAt: Date.now(), useCount: 1 });
+      return { ...base(request, "saved"), signIns: signInAnswer(state, origin) };
+    }
     case "status":
       return { ...base(request, "ok"), features: FEATURES, appearance: state.appearance };
     case "query_credentials": {

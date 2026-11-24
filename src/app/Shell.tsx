@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { SearchContext } from "./search";
-import { Activity, ArchiveRestore, ArrowLeft, Clock3, CircleHelp, CreditCard, Ellipsis, FileText, House, KeyRound, LockKeyhole, MonitorSmartphone, Moon, Search, Settings, Sun, UserRound, type LucideIcon } from "lucide-react";
+import { Activity, ArchiveRestore, ArrowLeft, Clock3, CircleHelp, CreditCard, Ellipsis, FileText, House, KeyRound, LockKeyhole, LogIn, MonitorSmartphone, Moon, Search, Settings, Sun, UserRound, type LucideIcon } from "lucide-react";
 import { IconButton } from "../components/Button";
 import { api, onQuickSearch } from "../lib/api";
 import { Kbd } from "../components/Display";
@@ -10,6 +10,7 @@ import { ItemsListPage } from "../pages/items/ItemsList";
 import { ItemDetailPage } from "../pages/items/ItemDetail";
 import { ItemEditorPage } from "../pages/items/ItemEditor";
 import { CodesPage } from "../pages/codes/CodesPage";
+import { SignInsPage } from "../pages/signins/SignInsPage";
 import { NoteDetailPage, NoteEditorPage, NotesListPage } from "../pages/notes/Notes";
 import { SyncPage } from "../pages/sync/SyncPage";
 import { ConflictsPage } from "../pages/sync/ConflictsPage";
@@ -34,6 +35,7 @@ const primaryNav: NavItem[] = [
   { id: "home", label: "Home", icon: House, route: { page: "home" } },
   { id: "cards", label: "Cards", icon: CreditCard, route: { page: "list", category: "cards" } },
   { id: "logins", label: "Passwords", icon: KeyRound, route: { page: "list", category: "logins" } },
+  { id: "signins", label: "Sign-ins", icon: LogIn, route: { page: "signins" } },
   { id: "codes", label: "Codes", icon: Clock3, route: { page: "codes" } },
   { id: "notes", label: "Notes", icon: FileText, route: { page: "notes" } },
   { id: "questions", label: "Questions", icon: CircleHelp, route: { page: "list", category: "questions" } },
@@ -46,7 +48,7 @@ const secondaryNav: NavItem[] = [
   { id: "settings", label: "Settings", icon: Settings, route: { page: "settings" } }
 ];
 const bottomNav: NavItem[] = [
-  primaryNav[0], primaryNav[1], primaryNav[2], primaryNav[3],
+  primaryNav[0], primaryNav[1], primaryNav[2], primaryNav.find((item) => item.id === "codes") ?? primaryNav[3],
   { id: "more", label: "More", icon: Ellipsis, route: { page: "more" } }
 ];
 
@@ -124,7 +126,8 @@ export function Shell() {
           return;
         }
       }
-      if (direction.current !== "back") element.focus({ preventScroll: true });
+      // Keep the focus a new page set itself (an editor's first field); otherwise start at the page.
+      if (direction.current !== "back" && !element.contains(document.activeElement)) element.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -252,6 +255,7 @@ function PageFor({ route }: { route: Route }): ReactNode {
     case "home": return <HomePage />;
     case "list": return <ItemsListPage category={route.category} />;
     case "codes": return <CodesPage />;
+    case "signins": return <SignInsPage />;
     case "item": return <ItemDetailPage id={route.id} />;
     case "edit": return <ItemEditorPage id={route.id} category={route.category} />;
     case "notes": return <NotesListPage />;
@@ -272,6 +276,7 @@ function useRouteTitle(route: Route): string {
     case "home": return "Home";
     case "list": return categories[route.category].label;
     case "codes": return "Codes";
+    case "signins": return "Sign-ins";
     case "item": {
       const entry = entries.find((item) => item.id === route.id);
       return entry ? categories[categoryForType(entry.type)].label.replace(/s$/, "") : "Item";

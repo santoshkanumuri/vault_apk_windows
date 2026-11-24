@@ -13,10 +13,12 @@ import { useVault } from "../../app/vault";
 import { api, type EntryPhoto, type PreviousPassword, type VaultEntry } from "../../lib/api";
 import { deleteMessage, restoreDeleted } from "../../lib/trash";
 import { categoryForType, profileFields, profileFrom, typeLabel } from "../../lib/entries";
+import { iconHints } from "../../lib/siteIcons";
 import { formatDateTime, groupCardNumber, groupCode, hostFromUrl, maskCard, relativeTime } from "../../lib/format";
 import { totpAt } from "../../lib/totp";
 import { useTotpCodes } from "../codes/useTotp";
 import { markUsed } from "../../app/recent";
+import { LoginSignIns } from "../signins/SignInsPage";
 
 export function ItemDetailPage({ id }: { id: string }) {
   const { entries, groups, loaded, upsertEntry, removeEntry, refresh } = useVault();
@@ -87,7 +89,7 @@ export function ItemDetailPage({ id }: { id: string }) {
     <div className="page page-narrow">
       {entry.type === "CARD" && <div className="detail-card"><CardFace entry={entry} size="lg" /></div>}
       <section className="detail-hero">
-        {entry.type !== "CARD" && <Avatar title={entry.title} size="lg" site={entry.type === "PASSWORD" ? entry.tertiaryValue : undefined} />}
+        {entry.type !== "CARD" && <Avatar title={entry.title} size="lg" {...iconHints(entry, entries)} />}
         <div className="detail-hero-text">
           <h2>{entry.title || "Untitled"}</h2>
           <p>{typeLabel(entry.type)}{entry.type === "CARD" && entry.network ? ` · ${entry.network}` : ""}{entry.type === "PASSWORD" && entry.tertiaryValue ? ` · ${hostFromUrl(entry.tertiaryValue)}` : ""}</p>
@@ -123,9 +125,10 @@ export function ItemDetailPage({ id }: { id: string }) {
         </div>
       )}
 
+      {entry.type === "PASSWORD" && <LoginSignIns loginId={entry.id} />}
       {entry.type === "PASSWORD" && <PreviousPasswords entryId={entry.id} updatedAt={entry.updatedAt} />}
 
-      <Photos entryId={entry.id} />
+      <Photos entryId={entry.id} entryType={entry.type} />
 
       <p className="detail-meta">Updated {formatDateTime(entry.updatedAt)} · Created {formatDateTime(entry.createdAt)}</p>
     </div>
@@ -230,7 +233,7 @@ function LiveCodeField({ entry }: { entry: VaultEntry }) {
   );
 }
 
-function Photos({ entryId }: { entryId: string }) {
+function Photos({ entryId, entryType }: { entryId: string; entryType: string }) {
   const { snapshot } = useVault();
   const toast = useToast();
   const confirm = useConfirm();
@@ -294,7 +297,7 @@ function Photos({ entryId }: { entryId: string }) {
           <Button size="sm" icon={ImagePlus} busy={busy} disabled={photos === null || photos.length >= 20} onClick={() => input.current?.click()}>Add photo</Button>
         </div>
       </header>
-      {photos === null ? <Spinner label="Loading photos" /> : photos.length === 0 ? <p className="muted small">No photos. Add a card scan or receipt, up to 10 MB each.</p> : (
+      {photos === null ? <Spinner label="Loading photos" /> : photos.length === 0 ? <p className="muted small">No photos. {entryType === "CARD" ? "Add a card scan or receipt" : "Add a photo or screenshot"}, up to 10 MB each.</p> : (
         <div className="photo-grid">
           {photos.map((photo) => (
             <figure key={photo.id} className="photo">

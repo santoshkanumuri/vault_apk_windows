@@ -17,9 +17,16 @@ use crate::membership::{self, MembershipAction, MembershipEvent, VerifiedMembers
 
 /// Transport secret for a membership key epoch, as Android `TransportEpochs.secret`: epoch 1 is
 /// the stored group secret; epoch N > 1 is HMAC-SHA256(epoch-1 secret, "nuvori-transport-epoch-v1:<vaultId>:<N>").
-pub fn transport_epoch_secret(root: &[u8], vault_id: &str, epoch: u64) -> Option<Zeroizing<Vec<u8>>> {
+/// `random` holds the random secrets of rotated epochs, read from `vault.db`
+/// (`epoch_keys::random_secrets_in`), never from memory.
+pub fn transport_epoch_secret(root: &[u8], vault_id: &str, epoch: u64,
+    random: &std::collections::BTreeMap<u64, Zeroizing<[u8; 32]>>) -> Option<Zeroizing<Vec<u8>>> {
     if root.len() != 32 || epoch == 0 {
         return None;
+    }
+    // After a key rotation: the random secret of the epoch, or the chain from the newest one (`epoch_keys.rs`).
+    if !random.is_empty() {
+        return crate::epoch_keys::transport_secret(root, vault_id, epoch, random);
     }
     if epoch == 1 {
         return Some(Zeroizing::new(root.to_vec()));
@@ -116,6 +123,7 @@ pub fn answer_leave(
     frame: &[u8],
     challenge: &[u8],
     root_secret: &[u8],
+    random: &std::collections::BTreeMap<u64, Zeroizing<[u8; 32]>>,
     events: &[MembershipEvent],
     local_device: &str,
     now: i64,
@@ -142,7 +150,7 @@ pub fn answer_leave(
     {
         return LeaveAnswer::Reject;
     }
-    let proved = transport_epoch_secret(root_secret, &verified.vault_id, request.key_epoch).is_some_and(|secret| {
+    let proved = transport_epoch_secret(root_secret, &verified.vault_id, request.key_epoch, random).is_some_and(|secret| {
         let Ok(mut mac) = <Hmac<Sha256> as Mac>::new_from_slice(&secret) else { return false };
         mac.update(b"nuvori-lan-probe-v1");
         mac.update(challenge);
@@ -363,12 +371,19 @@ pub struct MembershipStatus {
     pub pending_leave: bool,
     /// First address a leave request from this PC goes to; empty when none is known.
     pub leave_address: String,
+    /// "Mark as lost" on this PC: it no longer takes changes from the managing device (`merge_join.rs`).
+    pub manager_lost: bool,
+    /// A device silent for months that holds back the cleanup of old sync history: [device ID, text].
+    /// Only a suggestion (`compaction::cleanup_suggestion`); nothing is removed automatically.
+    pub cleanup_hint: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RemovedNotice {
     pub by: String,
     pub at: i64,
+    /// Received items that had not applied before the removal and are now in Recently deleted.
+    pub kept: u32,
 }
 
 fn ensure(db: &Connection) -> rusqlite::Result<()> {
@@ -435,6 +450,42 @@ pub fn clear_pending_leave(db: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// After this PC joins a group: drops a pending leave request signed by the identity that just
+/// joined (`device_id`). The manager would otherwise remove this PC again when the request reaches
+/// it (a request from a build before identity rotation, made by the same identity). A request from
+/// an earlier, retired identity stays: it removes that stale entry from the group. True when it
+/// cleared one.
+pub fn clear_pending_leave_of(db: &Connection, device_id: &str, now: i64) -> rusqlite::Result<bool> {
+    match pending_leave(db, now)? {
+        Some(pending) if pending.request.device_id == device_id => {
+            clear_pending_leave(db)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Device identities this PC used in a group it left or was removed from. The leave writes the
+/// row in the same transaction that drops the group, and the identity is replaced right after
+/// (`UnlockedVault::replace_retired_identity`). A crash in between leaves the row, and the next
+/// unlock replaces the identity before it signs anything. So an identity that left a group never
+/// signs again, and the same PC can pair again later as a new device.
+const RETIRED_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS local_retired_identities (
+    device_id TEXT NOT NULL PRIMARY KEY, retired_at INTEGER NOT NULL)";
+
+pub fn retire_identity(db: &Connection, device_id: &str, at: i64) -> rusqlite::Result<()> {
+    db.execute_batch(RETIRED_SCHEMA)?;
+    db.execute("INSERT OR IGNORE INTO local_retired_identities (device_id, retired_at) VALUES (?1, ?2)",
+        params![device_id, at])?;
+    Ok(())
+}
+
+pub fn is_retired(db: &Connection, device_id: &str) -> rusqlite::Result<bool> {
+    db.execute_batch(RETIRED_SCHEMA)?;
+    db.query_row("SELECT EXISTS(SELECT 1 FROM local_retired_identities WHERE device_id = ?1)", [device_id],
+        |row| row.get(0))
+}
+
 /// Records an attempt; returns false when the last attempt was under `min_gap_millis` ago.
 pub fn claim_leave_attempt(db: &Connection, now: i64, min_gap_millis: i64) -> rusqlite::Result<bool> {
     ensure(db)?;
@@ -459,9 +510,16 @@ pub fn removed_notice(db: &Connection) -> rusqlite::Result<Option<RemovedNotice>
     db.query_row(
         "SELECT removed_by, removed_at FROM local_membership_notices WHERE id = 1 AND removed_at != 0",
         [],
-        |row| Ok(RemovedNotice { by: row.get(0)?, at: row.get(1)? }),
+        |row| Ok(RemovedNotice { by: row.get(0)?, at: row.get(1)?, kept: 0 }),
     )
-    .optional()
+    .optional()?
+    .map(|notice| {
+        crate::local_recovery::initialize(db)?;
+        let kept: i64 = db.query_row("SELECT count(*) FROM local_trash WHERE reason = ?1",
+            [crate::local_recovery::REASON_REMOVAL], |row| row.get(0))?;
+        Ok(RemovedNotice { kept: kept.max(0) as u32, ..notice })
+    })
+    .transpose()
 }
 
 pub fn dismiss_removed(db: &Connection) -> rusqlite::Result<()> {
@@ -560,6 +618,30 @@ mod tests {
     }
 
     #[test]
+    fn joining_again_drops_only_a_leave_request_of_the_joining_identity() {
+        let db = Connection::open_in_memory().unwrap();
+        let request = LeaveRequest { vault_id: "v".into(), device_id: "old-pc".into(), membership_head: "h".into(), key_epoch: 1, created_at: 1_000 };
+        store_pending_leave(&db, &PendingLeave { request, signature: [3; 64],
+            transport_secret: Zeroizing::new(vec![5; 32]), address: String::new() }).unwrap();
+        // A new identity joined: the request still removes the old, stale entry from the group.
+        assert!(!clear_pending_leave_of(&db, "new-pc", 2_000).unwrap());
+        assert!(pending_leave(&db, 2_000).unwrap().is_some());
+        // The same identity joined again (a request made before identity rotation existed).
+        assert!(clear_pending_leave_of(&db, "old-pc", 2_000).unwrap());
+        assert!(pending_leave(&db, 2_000).unwrap().is_none(), "the manager must not remove the PC that just joined");
+    }
+
+    #[test]
+    fn a_retired_identity_is_remembered() {
+        let db = Connection::open_in_memory().unwrap();
+        assert!(!is_retired(&db, "pc").unwrap());
+        retire_identity(&db, "pc", 5).unwrap();
+        retire_identity(&db, "pc", 6).unwrap();
+        assert!(is_retired(&db, "pc").unwrap());
+        assert!(!is_retired(&db, "other").unwrap());
+    }
+
+    #[test]
     fn pending_leave_persists_and_expires_after_thirty_days() {
         let db = Connection::open_in_memory().unwrap();
         let request = LeaveRequest { vault_id: "v".into(), device_id: "pc".into(), membership_head: "h".into(), key_epoch: 1, created_at: 1_000 };
@@ -573,7 +655,7 @@ mod tests {
         assert!(pending_leave(&db, 1_000 + LEAVE_RETENTION_MILLIS + 1).unwrap().is_none());
         assert!(pending_leave(&db, 2_000).unwrap().is_none(), "expired requests are deleted");
         record_removed(&db, "Pixel 8", 42).unwrap();
-        assert_eq!(removed_notice(&db).unwrap(), Some(RemovedNotice { by: "Pixel 8".into(), at: 42 }));
+        assert_eq!(removed_notice(&db).unwrap(), Some(RemovedNotice { by: "Pixel 8".into(), at: 42, kept: 0 }));
         dismiss_removed(&db).unwrap();
         assert_eq!(removed_notice(&db).unwrap(), None);
     }
@@ -588,7 +670,7 @@ mod tests {
         let vault_id = transport["vaultId"].as_str().unwrap();
         let root = b64(&transport["epoch1SecretB64"]);
         for epoch in transport["epochs"].as_array().unwrap() {
-            let derived = transport_epoch_secret(&root, vault_id, epoch["epoch"].as_u64().unwrap()).unwrap();
+            let derived = transport_epoch_secret(&root, vault_id, epoch["epoch"].as_u64().unwrap(), &Default::default()).unwrap();
             assert_eq!(*derived, b64(&epoch["secretB64"]), "epoch {}", epoch["epoch"]);
         }
 
@@ -673,18 +755,18 @@ mod tests {
         let other = vectors["other"]["deviceId"].as_str().unwrap();
         let manager = vectors["manager"]["deviceId"].as_str().unwrap();
 
-        assert_eq!(answer_leave(frame, &challenge, &root, before, other, now), LeaveAnswer::NotManager);
-        assert_eq!(answer_leave(frame, &challenge, &root, &removed, other, now), LeaveAnswer::Left,
+        assert_eq!(answer_leave(frame, &challenge, &root, &Default::default(), before, other, now), LeaveAnswer::NotManager);
+        assert_eq!(answer_leave(frame, &challenge, &root, &Default::default(), &removed, other, now), LeaveAnswer::Left,
             "a history that already removes the device confirms the leave");
-        assert_eq!(answer_leave(frame, &challenge, &root, before, manager, now), LeaveAnswer::Reject,
+        assert_eq!(answer_leave(frame, &challenge, &root, &Default::default(), before, manager, now), LeaveAnswer::Reject,
             "this PC never signs a removal");
-        assert_eq!(answer_leave(frame, &[7; 32], &root, before, other, now), LeaveAnswer::Reject,
+        assert_eq!(answer_leave(frame, &[7; 32], &root, &Default::default(), before, other, now), LeaveAnswer::Reject,
             "a frame captured in another session does not match this challenge");
-        assert_eq!(answer_leave(frame, &challenge, &root, before, other, now + LEAVE_RETENTION_MILLIS + 1), LeaveAnswer::Reject);
+        assert_eq!(answer_leave(frame, &challenge, &root, &Default::default(), before, other, now + LEAVE_RETENTION_MILLIS + 1), LeaveAnswer::Reject);
         let mut forged = frame.to_vec();
         let last = forged.len() - 1;
         forged[last] = if forged[last] == b'A' { b'B' } else { b'A' };
-        assert_eq!(answer_leave(&forged, &challenge, &root, before, other, now), LeaveAnswer::Reject);
-        assert_eq!(answer_leave(b"leave1.a.b", &challenge, &root, before, other, now), LeaveAnswer::Reject);
+        assert_eq!(answer_leave(&forged, &challenge, &root, &Default::default(), before, other, now), LeaveAnswer::Reject);
+        assert_eq!(answer_leave(b"leave1.a.b", &challenge, &root, &Default::default(), before, other, now), LeaveAnswer::Reject);
     }
 }

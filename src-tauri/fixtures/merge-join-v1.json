@@ -1,0 +1,1492 @@
+{
+  "format": "nuvori-sync-merge-join-vectors",
+  "version": 1,
+  "feature": "merge-join-v1",
+  "entryFields": [
+    "type",
+    "title",
+    "primaryValue",
+    "secondaryValue",
+    "tertiaryValue",
+    "fourthValue",
+    "notes",
+    "tags",
+    "favorite",
+    "sortOrder",
+    "color",
+    "network",
+    "linkedAuthenticatorId",
+    "linkedApps",
+    "autofillSignatures",
+    "autofillOrigins",
+    "cardKind",
+    "totpAlgorithm",
+    "totpDigits",
+    "totpPeriod"
+  ],
+  "groupFields": [
+    "name",
+    "notes",
+    "folderType"
+  ],
+  "passkeyFields": [
+    "id",
+    "rpId",
+    "userHandle",
+    "username",
+    "displayName",
+    "privateKey",
+    "publicKey",
+    "createdAt"
+  ],
+  "cases": [
+    {
+      "name": "same content, shared lineage",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 4,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "same"
+    },
+    {
+      "name": "same content, no lineage",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "same"
+    },
+    {
+      "name": "only lastOpenedAt differs",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 99,
+            "updatedAt": 1700000000099
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "same"
+    },
+    {
+      "name": "the group saw the joiner's copy (BEFORE)",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 4,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "keepHost"
+    },
+    {
+      "name": "the group saw the joiner's copy (EQUAL)",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "keepHost"
+    },
+    {
+      "name": "the joiner changed it after (AFTER)",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 2
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "both changed it (CONCURRENT)",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 2
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 4,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "other content, no lineage",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "shared lineage, the joiner's copy was never synced",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "only the folders differ",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": [
+            "g1"
+          ]
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "only on the joiner, the group deleted it after seeing it",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "absent",
+        "content": null
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 4,
+          "dev-pc": 1
+        },
+        "deleted": true
+      },
+      "expected": "drop"
+    },
+    {
+      "name": "only on the joiner, deleted concurrently",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 2
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "absent",
+        "content": null
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 4,
+          "dev-pc": 1
+        },
+        "deleted": true
+      },
+      "expected": "add"
+    },
+    {
+      "name": "only on the joiner, no lineage",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "absent",
+        "content": null
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "add"
+    },
+    {
+      "name": "only on the joiner, the lineage does not know it",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "absent",
+        "content": null
+      },
+      "lineage": {
+        "shared": true,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "add"
+    },
+    {
+      "name": "deleted in the new group after the group saw it",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "deleted",
+        "content": null
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "drop"
+    },
+    {
+      "name": "deleted in the new group, no lineage",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "deleted",
+        "content": null
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "a folder with another name, no lineage",
+      "entityType": "group",
+      "joiner": {
+        "content": {
+          "group": {
+            "id": "g1",
+            "name": "Work",
+            "notes": "",
+            "folderType": ""
+          }
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "group": {
+            "id": "g1",
+            "name": "Office",
+            "notes": "",
+            "folderType": ""
+          }
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "the same folder",
+      "entityType": "group",
+      "joiner": {
+        "content": {
+          "group": {
+            "id": "g1",
+            "name": "Work",
+            "notes": "",
+            "folderType": ""
+          }
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "group": {
+            "id": "g1",
+            "name": "Work",
+            "notes": "",
+            "folderType": ""
+          }
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "same"
+    },
+    {
+      "name": "a passkey with the same ID and other data",
+      "entityType": "passkey",
+      "joiner": {
+        "content": {
+          "passkey": {
+            "id": "pk1",
+            "rpId": "example.com",
+            "userHandle": "dXNlcg",
+            "username": "ann",
+            "displayName": "ann",
+            "privateKey": "cHJpdmF0ZQ",
+            "publicKey": "cHVibGlj",
+            "createdAt": 1700000000000
+          }
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "passkey": {
+            "id": "pk1",
+            "rpId": "example.com",
+            "userHandle": "dXNlcg",
+            "username": "bob",
+            "displayName": "bob",
+            "privateKey": "cHJpdmF0ZQ",
+            "publicKey": "cHVibGlj",
+            "createdAt": 1700000000000
+          }
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "the same passkey",
+      "entityType": "passkey",
+      "joiner": {
+        "content": {
+          "passkey": {
+            "id": "pk1",
+            "rpId": "example.com",
+            "userHandle": "dXNlcg",
+            "username": "ann",
+            "displayName": "ann",
+            "privateKey": "cHJpdmF0ZQ",
+            "publicKey": "cHVibGlj",
+            "createdAt": 1700000000000
+          }
+        },
+        "oldVersion": null,
+        "changedSinceLineage": false
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "passkey": {
+            "id": "pk1",
+            "rpId": "example.com",
+            "userHandle": "dXNlcg",
+            "username": "ann",
+            "displayName": "ann",
+            "privateKey": "cHJpdmF0ZQ",
+            "publicKey": "cHVibGlj",
+            "createdAt": 1700000000000
+          }
+        }
+      },
+      "lineage": {
+        "shared": false,
+        "version": null,
+        "deleted": false
+      },
+      "expected": "same"
+    },
+    {
+      "name": "the group saw it, but the joiner edited it after leaving",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": true
+      },
+      "host": {
+        "state": "present",
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "pw",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        }
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 4,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "conflict"
+    },
+    {
+      "name": "the group deleted it after seeing it, but the joiner edited it after leaving",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": true
+      },
+      "host": {
+        "state": "absent",
+        "content": null
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 4,
+          "dev-pc": 1
+        },
+        "deleted": true
+      },
+      "expected": "add"
+    },
+    {
+      "name": "deleted in the new group, but the joiner edited it after leaving",
+      "entityType": "entry",
+      "joiner": {
+        "content": {
+          "entry": {
+            "id": "e1",
+            "type": "PASSWORD",
+            "title": "Mail",
+            "primaryValue": "me@example.com",
+            "secondaryValue": "new",
+            "tertiaryValue": "",
+            "fourthValue": "",
+            "notes": "",
+            "tags": "",
+            "favorite": false,
+            "sortOrder": 0,
+            "color": "",
+            "network": "",
+            "linkedAuthenticatorId": "",
+            "linkedApps": "",
+            "autofillSignatures": "",
+            "autofillOrigins": "",
+            "cardKind": "NONE",
+            "totpAlgorithm": "SHA1",
+            "totpDigits": 6,
+            "totpPeriod": 30,
+            "lastOpenedAt": 0,
+            "updatedAt": 1700000000000
+          },
+          "groupIds": []
+        },
+        "oldVersion": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "changedSinceLineage": true
+      },
+      "host": {
+        "state": "deleted",
+        "content": null
+      },
+      "lineage": {
+        "shared": true,
+        "version": {
+          "dev-phone": 3,
+          "dev-pc": 1
+        },
+        "deleted": false
+      },
+      "expected": "conflict"
+    }
+  ],
+  "freeze": {
+    "deviceId": "dev-phone",
+    "membershipCount": 3,
+    "headSequence": 7,
+    "headHash": "abababababababababababababababababababababababababababababababab",
+    "changes": [
+      {
+        "deviceId": "dev-phone",
+        "sequence": 1,
+        "hash": "0101010101010101010101010101010101010101010101010101010101010101",
+        "allowed": true
+      },
+      {
+        "deviceId": "dev-phone",
+        "sequence": 7,
+        "hash": "abababababababababababababababababababababababababababababababab",
+        "allowed": true
+      },
+      {
+        "deviceId": "dev-phone",
+        "sequence": 7,
+        "hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "allowed": false
+      },
+      {
+        "deviceId": "dev-phone",
+        "sequence": 8,
+        "hash": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+        "allowed": false
+      },
+      {
+        "deviceId": "dev-pc",
+        "sequence": 900,
+        "hash": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+        "allowed": true
+      }
+    ],
+    "events": [
+      {
+        "offered": 2,
+        "kept": 2
+      },
+      {
+        "offered": 3,
+        "kept": 3
+      },
+      {
+        "offered": 9,
+        "kept": 3
+      }
+    ]
+  }
+}

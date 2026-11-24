@@ -15,6 +15,7 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 use crate::{
+    checkpoint::{Checkpoint, CheckpointHead, ConflictRef, RecordRef, TombstoneRef},
     identity::DeviceIdentity,
     incoming::{IncomingError, IncomingVerifier},
     membership::{self, MembershipError, MembershipEvent, VerifiedMembership},
@@ -23,6 +24,9 @@ use crate::{
 };
 
 const MAGIC: &[u8; 8] = b"NUVSYNC3";
+/// Snapshot v4 (`checkpoint-enroll-v1`): the keep set under a checkpoint signed by the managing
+/// device, instead of every change. The phone sends it only to a device that announced the feature.
+const MAGIC_V4: &[u8; 8] = b"NUVSYNC4";
 /// Android 2.1.4+ sends this instead of [MAGIC] when it cannot prepare the vault copy.
 const FAILURE_MAGIC: &[u8; 8] = b"NUVFAIL1";
 const MAX_METADATA: usize = 16 * 1024 * 1024;
@@ -41,6 +45,16 @@ struct AndroidMetadata {
     operations: Vec<AndroidOperation>,
     tombstones: Vec<SnapshotTombstone>,
     conflicts: Vec<SnapshotConflict>,
+    /// Version 4 only. Keys of later epochs are not used yet and must be empty. A lineage is read
+    /// only from a phone that announced `merge-join-v1` (`merge_join::Lineage`).
+    #[serde(default)]
+    content_keys: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    transport_secrets: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    lineage: Option<serde_json::Value>,
+    #[serde(default)]
+    checkpoint: Option<Checkpoint>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -134,6 +148,12 @@ pub struct VerifiedSnapshotMetadata {
     pub operations: Vec<ChangeRecord>,
     pub tombstones: Vec<SnapshotTombstone>,
     pub conflicts: Vec<SnapshotConflict>,
+    /// The checkpoint of a v4 snapshot: this PC's base, below which changes are missing on purpose.
+    pub checkpoint: Option<Checkpoint>,
+    /// The group the phone came from, for a merge join (only from a phone that merges by ID).
+    pub lineage: Option<crate::merge_join::Lineage>,
+    /// Keys of rotated epochs (`epoch_keys.rs`): (epoch, content key, transport secret).
+    pub epoch_keys: Vec<(u64, Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>)>,
 }
 
 /// Leaves the input positioned at Android's encrypted vault backup body.
@@ -144,6 +164,18 @@ pub fn read_metadata<R: Read>(
     local: &DeviceIdentity,
     peer: &DeviceIdentity,
 ) -> Result<VerifiedSnapshotMetadata, SnapshotError> {
+    read_metadata_with(input, pairing_key, expected_vault_id, local, peer, false)
+}
+
+/// [`read_metadata`]; `allow_lineage` when the phone announced `merge-join-v1` in its hello.
+pub fn read_metadata_with<R: Read>(
+    input: &mut R,
+    pairing_key: &[u8; 32],
+    expected_vault_id: &str,
+    local: &DeviceIdentity,
+    peer: &DeviceIdentity,
+    allow_lineage: bool,
+) -> Result<VerifiedSnapshotMetadata, SnapshotError> {
     let mut magic = [0; 8];
     input.read_exact(&mut magic).map_err(|error| match error.kind() {
         std::io::ErrorKind::UnexpectedEof => SnapshotError::PhoneSentNothing,
@@ -152,9 +184,11 @@ pub fn read_metadata<R: Read>(
     if &magic == FAILURE_MAGIC {
         return Err(SnapshotError::PhoneFailed(read_failure(input)));
     }
-    if &magic != MAGIC {
-        return Err(SnapshotError::InvalidMetadata);
-    }
+    let version = match &magic {
+        MAGIC => 3,
+        MAGIC_V4 => 4,
+        _ => return Err(SnapshotError::InvalidMetadata),
+    };
     let mut nonce = [0; 12];
     input.read_exact(&mut nonce)?;
     let mut size = [0; 4];
@@ -173,13 +207,16 @@ pub fn read_metadata<R: Read>(
                 Nonce::from_slice(&nonce),
                 Payload {
                     msg: &ciphertext,
-                    aad: MAGIC,
+                    aad: &magic,
                 },
             )
             .map_err(|_| SnapshotError::AuthenticationFailed)?,
     );
     let metadata: AndroidMetadata = serde_json::from_slice(&plaintext)?;
-    validate(metadata, expected_vault_id, local, peer)
+    if metadata.version != version {
+        return Err(SnapshotError::InvalidMetadata);
+    }
+    validate(metadata, expected_vault_id, local, peer, allow_lineage)
 }
 
 fn validate(
@@ -187,8 +224,18 @@ fn validate(
     expected_vault_id: &str,
     local: &DeviceIdentity,
     peer: &DeviceIdentity,
+    allow_lineage: bool,
 ) -> Result<VerifiedSnapshotMetadata, SnapshotError> {
-    if state.version != 3
+    let checkpointed = state.version == 4;
+    let lineage_value = state.lineage.take().filter(|lineage| !lineage.is_null());
+    let lineage = match (&lineage_value, allow_lineage) {
+        (None, _) => None,
+        (Some(value), true) => Some(crate::merge_join::Lineage::parse(value).ok_or(SnapshotError::InvalidMetadata)?),
+        (Some(_), false) => return Err(SnapshotError::InvalidMetadata),
+    };
+    if !(state.version == 3 || checkpointed)
+        || checkpointed != state.checkpoint.is_some()
+        || (lineage.is_some() && !checkpointed)
         || state.vault_id != expected_vault_id
         || local.device_id == peer.device_id
     {
@@ -199,6 +246,22 @@ fn validate(
     let content_key = Zeroizing::new(decode_key(&content_encoded)?);
     let transport_secret = Zeroizing::new(decode_key(&transport_encoded)?);
     let membership = membership::verify(&state.membership_events)?;
+    // Keys of rotated epochs (epoch-keys-v1, which this build reads): epochs 2..=current, in pairs, 32 bytes each.
+    let content_keys = state.content_keys.take().unwrap_or_default();
+    let transport_secrets = state.transport_secrets.take().unwrap_or_default();
+    if content_keys.keys().ne(transport_secrets.keys()) || content_keys.len() > 1024 || (!checkpointed && !content_keys.is_empty()) {
+        return Err(SnapshotError::InvalidMetadata);
+    }
+    let mut epoch_keys = Vec::new();
+    for (epoch, content) in &content_keys {
+        let epoch: u64 = epoch.parse().map_err(|_| SnapshotError::InvalidMetadata)?;
+        if !(2..=membership.key_epoch).contains(&epoch) {
+            return Err(SnapshotError::InvalidMetadata);
+        }
+        let content = Zeroizing::new(decode_key(&Zeroizing::new(content.clone()))?);
+        let secret = Zeroizing::new(decode_key(&Zeroizing::new(transport_secrets[&epoch.to_string()].clone()))?);
+        epoch_keys.push((epoch, content, secret));
+    }
     if membership.vault_id != state.vault_id || state.members.len() != membership.members.len() {
         return Err(SnapshotError::InvalidMembership);
     }
@@ -262,6 +325,10 @@ fn validate(
         {
             return Err(SnapshotError::InvalidHistory);
         }
+        if checkpointed {
+            // Witnesses with gaps between them: `checkpoint::validate` checks each one below.
+            continue;
+        }
         if operation.device_id != current_device {
             if let Some(previous) = verifier.take() {
                 heads.insert(
@@ -292,14 +359,14 @@ fn validate(
             (previous.head().0, previous.head().1.to_owned()),
         );
     }
-    if heads.len() != state.heads.len() {
+    if !checkpointed && heads.len() != state.heads.len() {
         return Err(SnapshotError::InvalidHistory);
     }
     let mut seen_heads = HashSet::new();
     for head in &state.heads {
         if head.vault_id != state.vault_id
             || !seen_heads.insert(&head.device_id)
-            || heads.get(&head.device_id) != Some(&(head.sequence, head.hash.clone()))
+            || (!checkpointed && heads.get(&head.device_id) != Some(&(head.sequence, head.hash.clone())))
         {
             return Err(SnapshotError::InvalidHistory);
         }
@@ -363,6 +430,52 @@ fn validate(
                 .map_err(|_| SnapshotError::InvalidHistory)?;
         }
     }
+    if let Some(checkpoint) = &state.checkpoint {
+        let records = state
+            .records
+            .iter()
+            .map(|record| {
+                Ok(RecordRef {
+                    entity_type: &record.entity_type,
+                    entity_id: &record.entity_id,
+                    revision: record.revision,
+                    version: serde_json::from_str(&record.record_version_json)?,
+                })
+            })
+            .collect::<Result<Vec<_>, SnapshotError>>()?;
+        let tombstones: Vec<TombstoneRef> = state
+            .tombstones
+            .iter()
+            .map(|t| TombstoneRef { entity_type: &t.entity_type, entity_id: &t.entity_id, change_hash: &t.change_hash })
+            .collect();
+        let conflicts: Vec<ConflictRef> = state
+            .conflicts
+            .iter()
+            .map(|c| ConflictRef {
+                conflict_id: &c.conflict_id,
+                local_change_hash: &c.local_change_hash,
+                remote_change_hash: &c.remote_change_hash,
+                resolved: !c.resolved_at_utc.is_empty(),
+            })
+            .collect();
+        let heads: Vec<CheckpointHead> = state
+            .heads
+            .iter()
+            .map(|h| CheckpointHead { device_id: h.device_id.clone(), sequence: h.sequence, hash: h.hash.clone() })
+            .collect();
+        crate::checkpoint::validate(
+            checkpoint,
+            &membership,
+            state.membership_events.len(),
+            &peer.device_id,
+            &heads,
+            &operations,
+            &records,
+            &tombstones,
+            &conflicts,
+        )
+        .map_err(|_| SnapshotError::InvalidCheckpoint)?;
+    }
     Ok(VerifiedSnapshotMetadata {
         vault_id: state.vault_id,
         content_key,
@@ -375,6 +488,9 @@ fn validate(
         operations,
         tombstones: state.tombstones,
         conflicts: state.conflicts,
+        checkpoint: state.checkpoint,
+        lineage,
+        epoch_keys,
     })
 }
 
@@ -443,6 +559,8 @@ pub enum SnapshotError {
     InvalidMembership,
     #[error("snapshot operation history is invalid")]
     InvalidHistory,
+    #[error("snapshot checkpoint is invalid")]
+    InvalidCheckpoint,
     #[error("snapshot signed membership is invalid: {0}")]
     Membership(#[from] MembershipError),
     #[error("snapshot operation is invalid: {0}")]

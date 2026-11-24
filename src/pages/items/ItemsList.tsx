@@ -10,6 +10,7 @@ import { useRouteState, useRouter } from "../../app/router";
 import { useVault } from "../../app/vault";
 import type { VaultGroup } from "../../lib/api";
 import { categories, foldersFor, sortItems, type Category, type SortMode } from "../../lib/entries";
+import { iconHints } from "../../lib/siteIcons";
 import { cx, plural } from "../../lib/format";
 import { buildIndex, matchesFilter } from "../../lib/search";
 import { FolderDialog } from "../FolderDialog";
@@ -81,7 +82,7 @@ export function ItemsListPage({ category }: { category: Exclude<Category, "codes
                 return (
                   <ListRow key={entry.id} id={entry.id} title={entry.title || "Untitled"} subtitle={subtitle} favorite={entry.favorite}
                     passkey={entry.type === "PASSWORD" && passkeyIds.has(entry.id)}
-                    leading={<Avatar title={entry.title || info.label} cardColor={entry.type === "CARD" ? entry.color : undefined} site={entry.type === "PASSWORD" ? entry.tertiaryValue : undefined} />}
+                    leading={<Avatar title={entry.title || info.label} cardColor={entry.type === "CARD" ? entry.color : undefined} {...iconHints(entry, entries)} />}
                     highlighted={router.highlight === entry.id}
                     entering={fresh.has(entry.id)}
                     openLabel={`Open ${entry.title}`}

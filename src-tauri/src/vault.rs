@@ -30,6 +30,34 @@ use crate::{
     sync::{ChangeKind, ChangeRecord, GENESIS_HASH},
 };
 
+/// What a forced leave kept of the received changes that had not applied (see
+/// `UnlockedVault::leave_after_removal`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RemovalKept {
+    /// Entries and notes kept in Recently deleted.
+    pub kept_entries: usize,
+    /// Folder, passkey and photo changes that could not be kept on this PC.
+    pub other_changes: usize,
+}
+
+impl RemovalKept {
+    /// The sentence for the person, or `None` when nothing was waiting. Same words as Android.
+    pub(crate) fn message(&self) -> Option<String> {
+        let kept = match self.kept_entries {
+            0 => String::new(),
+            1 => "1 item that had not finished syncing is in Recently deleted. Restore it there within 30 days.".to_owned(),
+            count => format!("{count} items that had not finished syncing are in Recently deleted. Restore them there within 30 days."),
+        };
+        let other = match self.other_changes {
+            0 => String::new(),
+            1 => "1 other change (folders, passkeys or photos) could not be kept here. The devices that made them still have them.".to_owned(),
+            count => format!("{count} other changes (folders, passkeys or photos) could not be kept here. The devices that made them still have them."),
+        };
+        let text = [kept, other].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" ");
+        (!text.is_empty()).then_some(text)
+    }
+}
+
 /// Format 2 stores the Argon2id settings in the file. Format 1 (Windows 2.2.9 and earlier) always used
 /// [`KdfParams::LEGACY`]; the next unlock with the master password saves it again in format 2.
 const BOOTSTRAP_VERSION: u16 = 2;
@@ -49,6 +77,8 @@ pub struct UnlockedVault {
     key: [u8; 32],
     identity_store: DeviceIdentityStore,
     blobs: PhotoBlobs,
+    /// This instance's claim on the in-memory keys of rotated epochs (`epoch_keys::KeyringOwner`).
+    keyring: crate::epoch_keys::KeyringOwner,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -141,8 +171,13 @@ impl VaultStore {
         self.open_with_key(key)
     }
 
+    /// Checks the master password without opening a second `UnlockedVault`: one more instance would
+    /// run unlock side effects and, before the keyring had owners, its drop emptied the keyring of
+    /// the vault that stays unlocked (C1 of the key-rotation review).
     pub fn verify_password(&self, password: &str) -> Result<(), VaultError> {
-        drop(self.unlock(password)?);
+        let (key, ..) = self.unwrap_key(password)?;
+        let connection = open_database(&self.directory.join(DATABASE_FILE), &key, false)?;
+        connection.query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get::<_, i64>(0))?;
         Ok(())
     }
 
@@ -218,10 +253,30 @@ impl VaultStore {
                 self.directory.join("device-identity-v1.json"),
             ),
             blobs: PhotoBlobs::new(self.directory.join(PHOTO_BLOB_DIRECTORY)),
+            keyring: crate::epoch_keys::KeyringOwner::new(),
         })
     }
 
     pub fn unlock(&self, password: &str) -> Result<UnlockedVault, VaultError> {
+        let (key, bootstrap, elapsed, params) = self.unwrap_key(password)?;
+        let bootstrap_path = self.directory.join(BOOTSTRAP_FILE);
+        let vault = self.open_with_key(&key)?;
+        if bootstrap.format_version == LEGACY_BOOTSTRAP_VERSION {
+            // The key opened the database, so save it again with settings timed on this PC. The
+            // Argon2id run above already measured this PC, so no extra benchmark runs. A failure
+            // keeps the old file, and the vault still opens.
+            let upgraded = wrap_vault_key(&key, password, KdfParams::for_measured(elapsed, params.iterations))
+                .and_then(|bootstrap| write_new_bootstrap(&bootstrap_path, &bootstrap));
+            if let Err(error) = upgraded {
+                crate::activity::diagnostic(crate::activity::Category::Vault, "Could not strengthen the vault key file", error);
+            }
+        }
+        Ok(vault)
+    }
+
+    /// The vault key the master password unwraps, with what `unlock` needs to upgrade the key file.
+    #[allow(clippy::type_complexity)]
+    fn unwrap_key(&self, password: &str) -> Result<(Zeroizing<[u8; 32]>, VaultBootstrap, std::time::Duration, KdfParams), VaultError> {
         let bootstrap_path = self.directory.join(BOOTSTRAP_FILE);
         let bootstrap: VaultBootstrap = serde_json::from_slice(&fs::read(&bootstrap_path)?)?;
         let params = bootstrap.kdf_params()?;
@@ -244,18 +299,7 @@ impl VaultStore {
             }
         };
         unwrapped.zeroize();
-        let vault = self.open_with_key(&key)?;
-        if bootstrap.format_version == LEGACY_BOOTSTRAP_VERSION {
-            // The key opened the database, so save it again with settings timed on this PC. The
-            // Argon2id run above already measured this PC, so no extra benchmark runs. A failure
-            // keeps the old file, and the vault still opens.
-            let upgraded = wrap_vault_key(&key, password, KdfParams::for_measured(elapsed, params.iterations))
-                .and_then(|bootstrap| write_new_bootstrap(&bootstrap_path, &bootstrap));
-            if let Err(error) = upgraded {
-                crate::activity::diagnostic(crate::activity::Category::Vault, "Could not strengthen the vault key file", error);
-            }
-        }
-        Ok(vault)
+        Ok((key, bootstrap, elapsed, params))
     }
 
     fn open_with_key(&self, key: &[u8; 32]) -> Result<UnlockedVault, VaultError> {
@@ -272,8 +316,13 @@ impl VaultStore {
                 self.directory.join("device-identity-v1.json"),
             ),
             blobs: PhotoBlobs::new(self.directory.join(PHOTO_BLOB_DIRECTORY)),
+            keyring: crate::epoch_keys::KeyringOwner::new(),
         };
+        vault.replace_retired_identity()?;
         vault.backfill_independent_history()?;
+        // Keys of rotated epochs into memory while unlocked, for reading changes (`epoch_keys.rs`);
+        // this vault's drop releases its claim. Without them the vault does not open.
+        crate::epoch_keys::load(&vault.connection, &vault.keyring)?;
         // Local housekeeping only; a failure here must not block unlocking.
         let _ = now_millis().map(|now| crate::local_recovery::purge(&vault.connection, now));
         let _ = crate::site_icons::purge(&vault.connection, crate::site_icons::enabled());
@@ -284,6 +333,11 @@ impl VaultStore {
 }
 
 impl UnlockedVault {
+    /// This PC's device ID, when it has an identity (never creates one).
+    pub(crate) fn local_device_id(&self) -> Option<String> {
+        self.identity_store.exists().then(|| self.identity_store.get_or_create().ok()).flatten().map(|identity| identity.device_id)
+    }
+
     pub fn key_for_hello(&self) -> &[u8; 32] {
         &self.key
     }
@@ -326,6 +380,17 @@ impl UnlockedVault {
             return Err(VaultError::PendingConflicts);
         }
         let transaction = self.connection.transaction()?;
+        // What this PC keeps of the group: each item's version, for a later merge join (`merge_join.rs`).
+        let old_vault: String = transaction.query_row("SELECT vault_id FROM sync_group_state", [], |row| row.get(0))?;
+        let versions = crate::merge_join::current_versions(&transaction)?;
+        let digests = crate::migration_inventory::read(&transaction).map(|inventory| crate::snapshot_import::inventory_digests(&inventory))
+            .unwrap_or_default();
+        crate::merge_join::save_lineage(&transaction, &old_vault, &versions, &digests)?;
+        crate::merge_join::clear_lost(&transaction)?;
+        // The keys of the group's rotated epochs go with it (`epoch_keys.rs`).
+        transaction.execute_batch(crate::epoch_keys::SCHEMA)?;
+        transaction.execute_batch("DELETE FROM sync_epoch_keys; DELETE FROM sync_key_packages; DELETE FROM sync_key_statements;")?;
+        crate::epoch_keys::forget(&old_vault);
         for table in [
             "sync_received_operations",
             "sync_applied_operations",
@@ -349,10 +414,32 @@ impl UnlockedVault {
             "UPDATE local_sync_settings SET vault_id = ?1 WHERE id = 1",
             [Uuid::new_v4().to_string()],
         )?;
+        // The group keeps this identity as a member (or as removed) forever, and a device ID or
+        // key that was ever in a group can't be added to it again. So this PC gets a new identity
+        // (below) and can pair again later as a new device.
+        if self.identity_store.exists() {
+            let device_id = self.identity_store.get_or_create()?.device_id;
+            crate::membership_exit::retire_identity(&transaction, &device_id, now_millis()?)?;
+        }
         transaction.commit()?;
         // Shared photo blobs are encrypted with the group's content key, which is gone now.
         let _ = self.blobs.remove_all();
+        // Before the independent history is signed, so it is signed by the new identity.
+        self.replace_retired_identity()?;
         self.backfill_independent_history()
+    }
+
+    /// Replaces this PC's identity when a leave retired it (`membership_exit::retire_identity`).
+    /// Runs right after the leave and again on unlock, in case the app stopped in between.
+    fn replace_retired_identity(&mut self) -> Result<(), VaultError> {
+        if !self.identity_store.exists() || self.is_enrolled()? {
+            return Ok(());
+        }
+        let device_id = self.identity_store.get_or_create()?.device_id;
+        if crate::membership_exit::is_retired(&self.connection, &device_id)? {
+            self.identity_store.rotate()?;
+        }
+        Ok(())
     }
 
     pub fn paired_device_count(&self) -> Result<u32, VaultError> {
@@ -375,9 +462,18 @@ impl UnlockedVault {
         Ok(count)
     }
 
+    /// A number that changes when a change is stored or applied or the membership grows. The sync
+    /// loop reads it every 2 seconds with the vault locked for other callers, so it reads the largest
+    /// rowid of each table (one index step) instead of counting rows (a full scan: about 48 ms with
+    /// 44,000 changes in a debug build). These tables only ever lose every row at once.
     pub fn change_revision(&self) -> Result<u64, VaultError> {
-        let count: i64 = self.connection.query_row("SELECT (SELECT count(*) FROM sync_operations) + (SELECT count(*) FROM sync_applied_operations) + (SELECT count(*) FROM sync_membership_events)", [], |row| row.get(0))?;
-        Ok(count as u64)
+        let revision: i64 = self.connection.query_row(
+            "SELECT (SELECT ifnull(max(rowid), 0) FROM sync_operations) + (SELECT ifnull(max(rowid), 0) FROM sync_applied_operations)
+                  + (SELECT ifnull(max(rowid), 0) FROM sync_membership_events)",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(revision as u64)
     }
 
     pub fn local_change_count(&self) -> Result<u32, VaultError> {
@@ -385,8 +481,10 @@ impl UnlockedVault {
             return Ok(0);
         }
         let device_id = self.identity_store.get_or_create()?.device_id;
+        // This device's newest sequence: the number of changes it wrote, also after history
+        // compaction deleted older ones (a count of rows would shrink).
         let count: i64 = self.connection.query_row(
-            "SELECT count(*) FROM sync_operations
+            "SELECT ifnull(max(sequence), 0) FROM sync_operations
              WHERE vault_id = (SELECT vault_id FROM local_sync_settings WHERE id = 1)
                AND device_id = ?1",
             [&device_id],
@@ -640,8 +738,8 @@ impl UnlockedVault {
             return Ok(());
         }
         // In a sync group a photo travels like Android's: a signed change plus a shared blob.
-        let (hash, size) = self.create_photo_blob(&photo_id, &data)?;
-        let payload = photo_payload(&photo_id, entry_id, !has_cover, added_at, &hash, size);
+        let (hash, size, epoch) = self.create_photo_blob(&photo_id, &data)?;
+        let payload = photo_payload(&photo_id, entry_id, !has_cover, added_at, &hash, size, epoch);
         let (entry_id, mime_type) = (entry_id.to_owned(), mime_type.to_owned());
         self.write_change("photo", &photo_id.clone(), ChangeKind::Upsert, payload, move |transaction| {
             transaction.execute(
@@ -700,6 +798,40 @@ impl UnlockedVault {
             .filter(|name| !name.trim().is_empty())
     }
 
+    /// "Mark as lost": the managing phone is gone. This PC keeps the group's membership as it is and
+    /// takes no new changes from that phone. It keeps syncing with the other devices, and it may
+    /// pair with a new managing phone, keeping its items (`merge_join.rs`). Local only.
+    pub fn mark_manager_lost(&mut self) -> Result<(), VaultError> {
+        if !self.is_enrolled()? {
+            return Err(VaultError::NotSharing);
+        }
+        let events = self.membership_events()?;
+        let verified = crate::membership::verify(&events).map_err(|_| VaultError::NotSharing)?;
+        let local = self.identity_store.get_or_create()?;
+        if verified.manager_device_id == local.device_id {
+            return Err(VaultError::ManagingDevice);
+        }
+        crate::merge_join::mark_lost(&self.connection, &verified.vault_id, &local.device_id, &events, now_millis()?)
+            .map_err(|_| VaultError::NotSharing)?;
+        Ok(())
+    }
+
+    /// The managing phone was not lost after all: the freeze ends. Nothing else changed.
+    pub fn undo_manager_lost(&mut self) -> Result<(), VaultError> {
+        crate::merge_join::clear_lost(&self.connection)?;
+        Ok(())
+    }
+
+    /// True after "Mark as lost" for the current group: pairing with a new managing phone is allowed.
+    pub fn manager_lost(&self) -> Result<bool, VaultError> {
+        let vault_id: String = self
+            .connection
+            .query_row("SELECT vault_id FROM local_sync_settings WHERE id = 1", [], |row| row.get(0))
+            .optional()?
+            .unwrap_or_default();
+        Ok(crate::merge_join::lost_freeze(&self.connection, &vault_id)?.is_some())
+    }
+
     /// SPEC3 `membership_status`. Display names only; no keys or secrets.
     pub fn membership_status(&self) -> Result<crate::membership_exit::MembershipStatus, VaultError> {
         use crate::membership_exit::{self as exit, MemberRow, MembershipStatus};
@@ -721,6 +853,12 @@ impl UnlockedVault {
             return Ok(status);
         };
         status.manager_name = self.member_name(&verified.manager_device_id).unwrap_or_else(|| "Managing device".to_owned());
+        status.manager_lost = crate::merge_join::lost_freeze(&self.connection, &verified.vault_id)?
+            .is_some_and(|freeze| freeze.device_id == verified.manager_device_id);
+        let names: std::collections::BTreeMap<String, String> = verified.members.keys()
+            .filter_map(|id| self.member_name(id).map(|name| (id.clone(), name))).collect();
+        status.cleanup_hint = crate::compaction::cleanup_suggestion(&self.connection, &verified.vault_id, &local_device_id,
+            &verified, &names, now_millis()?).ok().flatten();
         status.manager_device_id = verified.manager_device_id.clone();
         status.leave_address = self.leave_addresses(&verified)?.into_iter().next().unwrap_or_default();
         status.pending_transfer_to = verified.pending_transfer.clone().unwrap_or_default();
@@ -788,7 +926,8 @@ impl UnlockedVault {
         // Read before the local leave deletes the saved routes.
         let address = self.leave_addresses(&verified)?.join(",");
         // The leave proof uses the transport secret of the current key epoch.
-        let secret = crate::membership_exit::transport_epoch_secret(&secret, &verified.vault_id, verified.key_epoch)
+        let random = crate::epoch_keys::random_secrets_in(&self.connection, &verified.vault_id)?;
+        let secret = crate::membership_exit::transport_epoch_secret(&secret, &verified.vault_id, verified.key_epoch, &random)
             .ok_or(VaultError::InvalidVaultKey)?
             .to_vec();
         let request = LeaveRequest {
@@ -805,21 +944,28 @@ impl UnlockedVault {
             "SELECT transport_secret FROM sync_group_state WHERE vault_id = ?1", [&verified.vault_id], |row| row.get(0))?;
         let _ = crate::lan_sync::cloud::save_pending_leave(&self.connection, &Zeroizing::new(root), &verified.vault_id,
             &request, &signature);
-        self.leave_locally(true)?;
-        if !keep_items {
-            self.clear_local_items()?;
-        }
+        // Saved before the local leave, so a stop right after it still sends the request later.
+        // A leave that fails withdraws it.
         exit::store_pending_leave(&self.connection, &PendingLeave {
             request,
             signature,
             transport_secret: Zeroizing::new(secret),
             address,
         })?;
+        if let Err(error) = self.leave_locally(true) {
+            let _ = exit::clear_pending_leave(&self.connection);
+            crate::lan_sync::cloud::finish_pending_leave(&self.connection);
+            return Err(error);
+        }
+        if !keep_items {
+            self.clear_local_items()?;
+        }
         Ok(())
     }
 
     /// Empties this vault after leaving so it can join another group with nothing to merge.
-    /// The master password, Windows Hello, device identity, and pending leave notice stay.
+    /// The master password, Windows Hello and pending leave notice stay. The device identity is
+    /// already a new one (`leave_locally`).
     /// Only for a vault that is no longer enrolled: other devices never see these deletions.
     fn clear_local_items(&mut self) -> Result<(), VaultError> {
         if self.is_enrolled()? {
@@ -850,11 +996,147 @@ impl UnlockedVault {
 
     /// Applies a verified removal notice: leave locally even with open conflicts, keep items,
     /// and remember who removed this PC.
-    pub(crate) fn leave_after_removal(&mut self, by: &str, at: i64) -> Result<(), VaultError> {
+    ///
+    /// Received changes that have not applied yet would be lost with the group's key, so first
+    /// they are applied where possible, and the newest unapplied version of each entry or note goes
+    /// to Recently deleted (`keep_unapplied`). When that can't be saved, this returns the error and
+    /// the PC stays in the group; the next removal notice tries again.
+    pub(crate) fn leave_after_removal(&mut self, by: &str, at: i64) -> Result<RemovalKept, VaultError> {
+        let kept = self.keep_unapplied(at)?;
         self.leave_locally(false)?;
         crate::membership_exit::record_removed(&self.connection, by, at)?;
         crate::membership_exit::clear_pending_leave(&self.connection)?;
-        Ok(())
+        if let Some(message) = kept.message() {
+            crate::activity::log(crate::activity::Level::Warning, crate::activity::Category::Sync, message);
+        }
+        Ok(kept)
+    }
+
+    /// Received changes stored here but not applied, in each author's chain order.
+    fn unapplied_received(&self) -> Result<Vec<ChangeRecord>, VaultError> {
+        let mut query = self.connection.prepare(
+            "SELECT o.format_version, o.vault_id, o.device_id, o.sequence, o.previous_hash, o.mutation_id, o.entity_type,
+                    o.entity_id, o.kind, o.base_revision, o.record_version_json, o.occurred_at_utc, o.payload_ciphertext,
+                    o.payload_nonce, o.device_signature, o.hash
+             FROM sync_received_operations r CROSS JOIN sync_operations o ON o.mutation_id = r.mutation_id
+             WHERE NOT EXISTS (SELECT 1 FROM sync_applied_operations a WHERE a.mutation_id = r.mutation_id)
+               AND o.vault_id = (SELECT vault_id FROM local_sync_settings WHERE id = 1)
+             ORDER BY o.device_id, o.sequence",
+        )?;
+        let rows = query.query_map([], |row| {
+            let number = |index: usize| -> rusqlite::Result<u64> {
+                let value: i64 = row.get(index)?;
+                u64::try_from(value).map_err(|error| rusqlite::Error::FromSqlConversionFailure(
+                    index, rusqlite::types::Type::Integer, Box::new(error)))
+            };
+            let kind: String = row.get(8)?;
+            let version: String = row.get(10)?;
+            Ok((ChangeRecord {
+                format_version: row.get(0)?,
+                vault_id: row.get(1)?,
+                device_id: row.get(2)?,
+                sequence: number(3)?,
+                previous_hash: row.get(4)?,
+                mutation_id: row.get(5)?,
+                entity_type: row.get(6)?,
+                entity_id: row.get(7)?,
+                kind: if kind == "upsert" { ChangeKind::Upsert } else { ChangeKind::Delete },
+                base_revision: number(9)?,
+                record_version: RecordVersion::default(),
+                occurred_at_utc: row.get(11)?,
+                payload_ciphertext: row.get(12)?,
+                payload_nonce: row.get(13)?,
+                device_signature: row.get(14)?,
+                hash: row.get(15)?,
+            }, version))
+        })?;
+        let mut operations = Vec::new();
+        for row in rows {
+            let (mut operation, version) = row?;
+            operation.record_version = serde_json::from_str(&version)?;
+            operations.push(operation);
+        }
+        Ok(operations)
+    }
+
+    /// Before a forced leave (the Android counterpart is `LockedSyncStore.archiveUnapplied`):
+    /// applies what it can, then keeps the newest unapplied version of each entry or note in
+    /// Recently deleted, unless this PC already holds the same content. Other unapplied changes
+    /// with data (folders, passkeys, photos) can't be kept there; they are counted. Their authors
+    /// still hold them, and deletes need nothing.
+    fn keep_unapplied(&mut self, now: i64) -> Result<RemovalKept, VaultError> {
+        let Some(key) = self.sync_content_key()? else {
+            return Ok(RemovalKept::default());
+        };
+        // Apply what can apply now. Each change applies in its own transaction; one that fails
+        // (it waits for something, or can't be read) is left for the archive below.
+        let blobs = self.blobs.clone();
+        loop {
+            let mut advanced = false;
+            for operation in self.unapplied_received()? {
+                if crate::incoming_apply::IncomingApply::apply_with_blobs(&mut self.connection, &operation, &*key, Some(&blobs)).is_ok() {
+                    advanced = true;
+                }
+            }
+            if !advanced {
+                break;
+            }
+        }
+        let remaining = self.unapplied_received()?;
+        let other_changes = remaining.iter()
+            .filter(|operation| operation.kind == ChangeKind::Upsert
+                && matches!(operation.entity_type.as_str(), "group" | "passkey" | "photo" | "photo_cover"))
+            .count();
+        // The newest version of each entry, by change time, then author and sequence.
+        let mut newest: BTreeMap<String, &ChangeRecord> = BTreeMap::new();
+        for operation in remaining.iter().filter(|o| o.entity_type == "entry" && o.kind == ChangeKind::Upsert) {
+            let order = |o: &ChangeRecord| (o.occurred_at_utc.clone(), o.device_id.clone(), o.sequence);
+            if newest.get(&operation.entity_id).map_or(true, |known| order(operation) > order(known)) {
+                newest.insert(operation.entity_id.clone(), operation);
+            }
+        }
+        let mut copies = Vec::new();
+        for operation in newest.values() {
+            let Ok(plaintext) = payload::decrypt(&*key, operation) else { continue };
+            let plaintext = Zeroizing::new(plaintext);
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&plaintext) else { continue };
+            let entry = &value["entry"];
+            let (Some(item_type), Some(title)) = (entry["type"].as_str(), entry["title"].as_str()) else { continue };
+            let group_ids: Vec<String> = value["groupIds"].as_array().map(|ids| {
+                ids.iter().filter_map(|id| id.as_str().map(str::to_owned)).collect()
+            }).unwrap_or_default();
+            let (kind, data) = if item_type == "NOTE" {
+                ("note", serde_json::json!({"title": title, "body": entry["notes"].as_str().unwrap_or_default()}))
+            } else {
+                ("entry", entry.clone())
+            };
+            if self.holds_same(&operation.entity_id, kind, &data)? {
+                continue;
+            }
+            copies.push((format!("unapplied-{}", operation.hash), operation.entity_id.clone(), kind, item_type.to_owned(),
+                title.to_owned(), data, group_ids));
+        }
+        let transaction = self.connection.transaction()?;
+        for (trash_id, item_id, kind, item_type, title, data, group_ids) in &copies {
+            crate::local_recovery::keep_removal_copy(&transaction, trash_id, item_id, kind, item_type, title, data,
+                group_ids, now)?;
+        }
+        transaction.commit()?;
+        Ok(RemovalKept { kept_entries: copies.len(), other_changes })
+    }
+
+    /// True when this PC holds the item `id` with exactly this content.
+    fn holds_same(&self, id: &str, kind: &str, data: &serde_json::Value) -> Result<bool, VaultError> {
+        if kind == "note" {
+            let note: Option<(String, String)> = self.connection
+                .query_row("SELECT title, body FROM local_notes WHERE id = ?1", [id], |row| Ok((row.get(0)?, row.get(1)?)))
+                .optional()?;
+            return Ok(note.is_some_and(|(title, body)| data["title"] == title.as_str() && data["body"] == body.as_str()));
+        }
+        let stored: Option<String> = self.connection
+            .query_row("SELECT data_json FROM local_entries WHERE id = ?1", [id], |row| row.get(0))
+            .optional()?;
+        Ok(stored.and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok()).as_ref() == Some(data))
     }
 
     pub(crate) fn stored_membership(&self) -> Result<Vec<crate::membership::MembershipEvent>, VaultError> {
@@ -915,6 +1197,21 @@ impl UnlockedVault {
         Ok(())
     }
 
+    /// After a join: drops a pending leave request (Wi-Fi and Google Drive copy) that the joined
+    /// identity signed itself, so the manager can't remove this PC again when it arrives. A request
+    /// from an earlier, retired identity stays and removes that old entry.
+    pub(crate) fn forget_own_pending_leave(&self) -> Result<bool, VaultError> {
+        if !self.identity_store.exists() {
+            return Ok(false);
+        }
+        let device_id = self.identity_store.get_or_create()?.device_id;
+        let cleared = crate::membership_exit::clear_pending_leave_of(&self.connection, &device_id, now_millis()?)?;
+        if cleared {
+            crate::lan_sync::cloud::finish_pending_leave(&self.connection);
+        }
+        Ok(cleared)
+    }
+
     pub fn list_conflicts(&self) -> Result<Vec<crate::conflicts::SyncConflict>, crate::conflicts::ConflictError> {
         let Some(key) = self.sync_content_key().map_err(|_| crate::conflicts::ConflictError::Data)? else {
             return Ok(Vec::new());
@@ -952,14 +1249,20 @@ impl UnlockedVault {
             .transpose()
     }
 
-    fn create_photo_blob(&self, photo_id: &str, data: &[u8]) -> Result<(String, u64), VaultError> {
+    /// The blob is sealed with the newest content key (`epoch_keys.rs`); its payload names that epoch.
+    fn create_photo_blob(&self, photo_id: &str, data: &[u8]) -> Result<(String, u64, u64), VaultError> {
         let key = self.sync_content_key()?.ok_or(VaultError::NotSharing)?;
         let vault_id: String =
             self.connection
                 .query_row("SELECT vault_id FROM local_sync_settings WHERE id = 1", [], |row| row.get(0))?;
-        self.blobs
+        let (epoch, key) = match crate::epoch_keys::write_key_in(&self.connection, &vault_id)? {
+            Some((epoch, newer)) => (epoch, newer),
+            None => (1, key),
+        };
+        let (hash, size) = self.blobs
             .create(&*key, &vault_id, photo_id, data)
-            .map_err(|_| VaultError::InvalidPhoto)
+            .map_err(|_| VaultError::InvalidPhoto)?;
+        Ok((hash, size, epoch))
     }
 
     /// Publishes photos that have never been part of the signed history (added before pairing or
@@ -987,9 +1290,9 @@ impl UnlockedVault {
                 [&photo_id],
                 |row| row.get(0),
             )?);
-            let (hash, size) = self.create_photo_blob(&photo_id, &data)?;
+            let (hash, size, epoch) = self.create_photo_blob(&photo_id, &data)?;
             let added_at = if added_at > 0 { added_at } else { now_millis()? };
-            let payload = photo_payload(&photo_id, &entry_id, is_cover, added_at, &hash, size);
+            let payload = photo_payload(&photo_id, &entry_id, is_cover, added_at, &hash, size, epoch);
             let (id, owner) = (photo_id.clone(), entry_id.clone());
             self.write_change("photo", &photo_id, ChangeKind::Upsert, payload, move |transaction| {
                 transaction.execute("UPDATE local_entry_photos SET added_at = ?2 WHERE id = ?1", params![id, added_at])?;
@@ -2096,7 +2399,8 @@ impl UnlockedVault {
         let version = RecordVersion::new(counters);
         let mutation_id = Uuid::new_v4().to_string();
         let plaintext = serde_json::to_vec(&payload_json)?;
-        let encrypted = payload::encrypt(
+        let encrypted = payload::encrypt_in(
+            &self.connection,
             &*content_key,
             entity_type,
             &vault_id,
@@ -2151,11 +2455,16 @@ impl UnlockedVault {
 }
 
 /// Android `LocalPhotoChangeWriter` payload for a photo upsert.
-fn photo_payload(id: &str, entry_id: &str, is_cover: bool, added_at: i64, hash: &str, size: u64) -> serde_json::Value {
-    serde_json::json!({"photo": {
+fn photo_payload(id: &str, entry_id: &str, is_cover: bool, added_at: i64, hash: &str, size: u64, epoch: u64) -> serde_json::Value {
+    let mut payload = serde_json::json!({"photo": {
         "id": id, "entryId": entry_id, "isCover": is_cover, "addedAt": added_at,
         "blobHash": hash, "blobSize": size
-    }})
+    }});
+    // Epoch 1 photos say nothing, as before.
+    if epoch > 1 {
+        payload["photo"]["keyEpoch"] = epoch.into();
+    }
+    payload
 }
 
 fn insert_manifest(transaction: &Transaction<'_>, photo_id: &str, entry_id: &str, hash: &str, size: u64) -> Result<(), StoreError> {
@@ -2337,6 +2646,7 @@ fn initialize_notes(connection: &Connection) -> Result<(), VaultError> {
     )?;
     crate::local_recovery::initialize(connection)?;
     crate::site_icons::initialize(connection)?;
+    crate::sign_ins::initialize(connection)?;
     migrate_local_schema(connection)
 }
 
@@ -2413,6 +2723,10 @@ fn initialize_local_sync_settings(connection: &Connection) -> Result<(), VaultEr
 
 impl Drop for UnlockedVault {
     fn drop(&mut self) {
+        // Only this vault's claim goes: another unlocked instance keeps its keys (C1).
+        if let Ok(vault_id) = self.connection.query_row("SELECT vault_id FROM local_sync_settings WHERE id = 1", [], |row| row.get::<_, String>(0)) {
+            self.keyring.release(&vault_id);
+        }
         self.key.zeroize();
     }
 }
@@ -2766,6 +3080,31 @@ mod tests {
 
     fn passwords(vault: &UnlockedVault, id: &str) -> Vec<String> {
         vault.previous_passwords(id).unwrap().into_iter().map(|old| old.password).collect()
+    }
+
+    #[test]
+    fn the_change_revision_moves_with_each_change_and_only_then() {
+        let directory = std::env::temp_dir().join(format!("nuvori-revision-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let start = vault.change_revision().unwrap();
+        assert_eq!(vault.change_revision().unwrap(), start, "reading changes nothing");
+        login(&mut vault, "first", &[]);
+        let saved = vault.change_revision().unwrap();
+        assert!(saved > start, "a saved item writes a change");
+        assert_eq!(vault.change_revision().unwrap(), saved);
+        login(&mut vault, "second", &[]);
+        let again = vault.change_revision().unwrap();
+        assert!(again > saved);
+        // An applied mark and a membership event move it too.
+        let mutation: String = vault.connection.query_row("SELECT mutation_id FROM sync_operations LIMIT 1", [], |row| row.get(0)).unwrap();
+        vault.connection.execute("INSERT INTO sync_applied_operations (mutation_id, change_hash, outcome, applied_at_utc) VALUES (?1, 'h', 'applied', 'now')", [&mutation]).unwrap();
+        let applied = vault.change_revision().unwrap();
+        assert!(applied > again);
+        vault.connection.execute("INSERT INTO sync_membership_events (vault_id, sequence, event_json) VALUES ('v', 1, '{}')", []).unwrap();
+        assert!(vault.change_revision().unwrap() > applied);
+        drop(vault);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -3864,5 +4203,26 @@ mod tests {
         assert_eq!(tombstones, 1);
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// C1: checking the master password (card codes, Windows Hello, reset) opens no second unlocked
+    /// vault, so the keys of a rotated epoch stay loaded, and writes keep the newest epoch.
+    #[test]
+    fn verifying_the_password_keeps_the_rotated_keys_of_the_unlocked_vault() {
+        let directory = std::env::temp_dir().join(format!("nuvori-c1-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let vault = store.create("synthetic-test-password").unwrap();
+        let vault_id: String = vault.connection.query_row("SELECT vault_id FROM local_sync_settings WHERE id = 1", [], |row| row.get(0)).unwrap();
+        vault.connection.execute_batch(crate::epoch_keys::SCHEMA).unwrap();
+        vault.connection.execute("INSERT INTO sync_epoch_keys VALUES (?1, 2, ?2, ?3)", params![vault_id, &[7u8; 32][..], &[8u8; 32][..]]).unwrap();
+        crate::epoch_keys::load(&vault.connection, &vault.keyring).unwrap();
+        store.verify_password("synthetic-test-password").unwrap();
+        assert!(store.verify_password("wrong").is_err());
+        assert_eq!(crate::epoch_keys::content_key(&vault_id, 2).map(|key| *key), Some([7; 32]));
+        let payload = payload::encrypt_in(&vault.connection, &[1; 32], "entry", &vault_id, "m", "e", b"{}").unwrap();
+        assert!(payload.nonce.starts_with("e2."));
+        drop(vault);
+        assert!(crate::epoch_keys::content_key(&vault_id, 2).is_none(), "locking releases them");
+        std::fs::remove_dir_all(directory).ok();
     }
 }

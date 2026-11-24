@@ -48,6 +48,10 @@ const PROGRESS_BYTES: u64 = 200_000;
 /// Work bounds for one pass; the next pass continues.
 const UPLOAD_FILES_PER_PASS: usize = 64;
 const PHOTOS_PER_PASS: usize = 32;
+/// Blobs under a rotated prefix are sealed in memory; larger ones travel over Wi-Fi only.
+const SEALED_BLOB_BYTES: u64 = 32 * 1024 * 1024;
+/// "NVC1", nonce and tag around a sealed blob.
+const BLOB_ENVELOPE: u64 = 4 + 12 + 16;
 /// A relisting starts this long before the newest file seen, to cover provider clock skew.
 const LIST_OVERLAP: time::Duration = time::Duration::minutes(10);
 
@@ -55,6 +59,8 @@ const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS cloud_sync_files (
         vault_id TEXT NOT NULL, file_id TEXT NOT NULL, name TEXT NOT NULL,
         size INTEGER NOT NULL, modified TEXT NOT NULL, PRIMARY KEY (vault_id, file_id));
+    CREATE TABLE IF NOT EXISTS cloud_sync_compaction (
+        vault_id TEXT NOT NULL PRIMARY KEY, drive_compacted_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS cloud_sync_state (
         vault_id TEXT NOT NULL PRIMARY KEY, cursor TEXT NOT NULL DEFAULT '',
         last_sync_utc TEXT NOT NULL DEFAULT '', progress_digest TEXT NOT NULL DEFAULT '');";
@@ -107,6 +113,10 @@ pub trait CloudStore {
     fn download(&mut self, id: &str, max_bytes: u64, sink: &mut dyn FnMut(&[u8]) -> Cloud<()>) -> Cloud<()>;
     fn upload(&mut self, name: &str, size: u64, content: &mut dyn Read) -> Cloud<CloudFile>;
     fn replace(&mut self, id: &str, content: &[u8]) -> Cloud<CloudFile>;
+    /// Drive cleanup only (`compaction.rs` `drive`). A file already gone is `NotFound`.
+    fn delete(&mut self, _id: &str) -> Cloud<()> {
+        Err(CloudError::Other("delete unsupported".into()))
+    }
 }
 
 fn download_bytes(store: &mut dyn CloudStore, id: &str, max_bytes: u64) -> Cloud<Vec<u8>> {
@@ -130,6 +140,12 @@ pub enum CloudName {
     Progress { device: String },
     Blob { hash: String },
     Leave { device: String },
+    /// `e.<epoch>.<recipient>`: the signed package set of a new epoch, under the previous prefix (`epoch_keys.rs`).
+    Packages { epoch: u64, recipient: String },
+    /// `k.<device>`: a device's signed key statement.
+    Statement { device: String },
+    /// `c.<author>`: a floor marker of drive compaction (`compaction.rs` `drive`).
+    Floor { author: String },
 }
 
 fn hex_field(text: &str, length: usize) -> bool {
@@ -193,6 +209,20 @@ impl CloudKeys {
         format!("{}l.{}", self.prefix(), self.device_tag(device_id))
     }
 
+    /// The managing phone writes these (`EpochKeyRotation`); this PC only reads them.
+    #[allow(dead_code)]
+    pub fn package_name(&self, epoch: u64, recipient: &str) -> String {
+        format!("{}e.{epoch}.{}", self.prefix(), self.device_tag(recipient))
+    }
+
+    pub fn statement_name(&self, device_id: &str) -> String {
+        format!("{}k.{}", self.prefix(), self.device_tag(device_id))
+    }
+
+    pub fn floor_name(&self, author: &str) -> String {
+        format!("{}c.{}", self.prefix(), self.device_tag(author))
+    }
+
     /// `None` for a file of another group or with a name this version does not know.
     pub fn parse(&self, name: &str) -> Option<CloudName> {
         let parts: Vec<&str> = name.strip_prefix(&self.prefix())?.split('.').collect();
@@ -207,6 +237,13 @@ impl CloudKeys {
             ["p", device] if hex_field(device, 16) => Some(CloudName::Progress { device: (*device).into() }),
             ["b", hash] if photo_blobs::valid_hash(hash) => Some(CloudName::Blob { hash: (*hash).into() }),
             ["l", device] if hex_field(device, 16) => Some(CloudName::Leave { device: (*device).into() }),
+            ["e", epoch, recipient] if hex_field(recipient, 16) && !epoch.is_empty() && epoch.len() <= 10
+                && !epoch.starts_with('0') && epoch.bytes().all(|byte| byte.is_ascii_digit()) => {
+                let epoch: u64 = epoch.parse().ok()?;
+                (epoch >= 2).then(|| CloudName::Packages { epoch, recipient: (*recipient).into() })
+            }
+            ["k", device] if hex_field(device, 16) => Some(CloudName::Statement { device: (*device).into() }),
+            ["c", author] if hex_field(author, 16) => Some(CloudName::Floor { author: (*author).into() }),
             _ => None,
         }
     }
@@ -235,19 +272,6 @@ impl CloudKeys {
     }
 }
 
-/// How far the files for one author reach without a gap, starting at change 1.
-fn coverage(ranges: &mut [(u64, u64)]) -> u64 {
-    ranges.sort_unstable();
-    let mut covered = 0;
-    for (first, last) in ranges.iter() {
-        if *first > covered + 1 {
-            break;
-        }
-        covered = covered.max(*last);
-    }
-    covered
-}
-
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -271,6 +295,127 @@ struct Context {
     cursor: String,
     progress_digest: String,
     revision: u64,
+    /// "Mark as lost" on this PC (`merge_join.rs`).
+    freeze: Option<crate::merge_join::LostFreeze>,
+    /// The keys of every prefix this PC holds a secret for, newest first (`keys` is the first), with
+    /// the epoch of each prefix (1 for the root): new files go to the newest, files under every one
+    /// are read (`epoch_keys.rs`).
+    ring: Vec<(u64, CloudKeys)>,
+    /// The epoch of the prefix new files go to.
+    keys_epoch: u64,
+    /// The group's root transport secret, to rebuild the ring when new keys arrive in a pass.
+    root: Zeroizing<Vec<u8>>,
+}
+
+impl Context {
+    fn keys_for(&self, name: &str) -> Option<&CloudKeys> {
+        self.ring.iter().find(|(_, keys)| name.starts_with(&keys.prefix())).map(|(_, keys)| keys)
+    }
+
+    fn epoch_for(&self, name: &str) -> Option<u64> {
+        self.ring.iter().find(|(_, keys)| name.starts_with(&keys.prefix())).map(|(epoch, _)| *epoch)
+    }
+
+    /// The newest prefix and the ring for `epoch`, from the random secrets in `vault.db` (never from
+    /// memory, C1): no file ever goes under an older prefix than the newest this PC holds a secret for.
+    fn rebuild(&mut self, epoch: u64, random: &BTreeMap<u64, Zeroizing<[u8; 32]>>) -> Result<()> {
+        let (keys_epoch, drive) = crate::epoch_keys::drive_secret(&self.root, epoch, random);
+        self.keys = CloudKeys::derive(&drive, &self.vault_id).ok_or("Invalid sync keys")?;
+        self.keys_epoch = keys_epoch;
+        let mut ring = vec![(keys_epoch, CloudKeys::derive(&drive, &self.vault_id).ok_or("Invalid sync keys")?)];
+        let older = random.iter().rev().map(|(epoch, secret)| (*epoch, secret.to_vec())).chain(std::iter::once((1, self.root.to_vec())));
+        for (epoch, secret) in older {
+            if let Some(keys) = CloudKeys::derive(&secret, &self.vault_id)
+                && !ring.iter().any(|(_, known)| known.prefix() == keys.prefix())
+            {
+                ring.push((epoch, keys));
+            }
+        }
+        self.ring = ring;
+        Ok(())
+    }
+
+    fn parse(&self, name: &str) -> Option<CloudName> {
+        self.keys_for(name)?.parse(name)
+    }
+
+    fn open(&self, name: &str, sealed: &[u8]) -> Option<Vec<u8>> {
+        self.keys_for(name)?.open(name, sealed)
+    }
+}
+
+/// A drive progress report signed by its device's identity (H2 of the key-rotation review), as
+/// Android `DriveProgress`; vectors `progressFile` in `fixtures/epoch-keys-v1.json`.
+pub(crate) mod drive_progress {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    use sha2::{Digest, Sha256};
+
+    use crate::progress::SyncProgress;
+
+    pub fn signing_bytes(vault_id: &str, device_id: &str, prefix_epoch: u64, updated_at: i64, key_epoch: u64,
+        progress_text: &str, features: &[String]) -> Vec<u8> {
+        let mut sorted = features.to_vec();
+        sorted.sort();
+        format!("nuvori-drive-progress-v1\n{vault_id}\n{device_id}\n{prefix_epoch}\n{updated_at}\n{key_epoch}\n{}\n{}",
+            hex::encode(Sha256::digest(progress_text.as_bytes())), sorted.join(",")).into_bytes()
+    }
+
+    /// The body: `progress` (an object, for older builds), `progressText` (what is signed), and the signature.
+    #[allow(clippy::too_many_arguments)]
+    pub fn body(vault_id: &str, device_id: &str, prefix_epoch: u64, updated_at: i64, key_epoch: u64, progress_text: &str,
+        features: &[&str], sign: impl FnOnce(&[u8]) -> Option<[u8; 64]>) -> Result<serde_json::Value, String> {
+        let features: Vec<String> = features.iter().map(|feature| (*feature).to_owned()).collect();
+        let mut body = serde_json::json!({
+            "deviceId": device_id,
+            "updatedAt": updated_at,
+            "keyEpoch": key_epoch,
+            "prefixEpoch": prefix_epoch,
+            "progress": serde_json::from_str::<serde_json::Value>(progress_text).map_err(|error| error.to_string())?,
+            "progressText": progress_text,
+            // Older builds ignore these keys. A member that syncs only through the drive learns the features here.
+            "features": features,
+        });
+        if let Some(signature) = sign(&signing_bytes(vault_id, device_id, prefix_epoch, updated_at, key_epoch, progress_text, &features)) {
+            body["signature"] = URL_SAFE_NO_PAD.encode(signature).into();
+        }
+        Ok(body)
+    }
+
+    /// The progress and features when `device_id` (identity `public_key`) signed the report for this
+    /// group under the prefix of `prefix_epoch`; otherwise `None`.
+    pub fn verify(body: &serde_json::Value, vault_id: &str, device_id: &str, public_key: &[u8; 32], prefix_epoch: u64)
+        -> Option<(SyncProgress, Option<Vec<String>>)> {
+        if body["deviceId"].as_str() != Some(device_id) || body["prefixEpoch"].as_u64() != Some(prefix_epoch) {
+            return None;
+        }
+        let text = body["progressText"].as_str()?;
+        let features = super::peer_features(body);
+        let signature: [u8; 64] = URL_SAFE_NO_PAD.decode(body["signature"].as_str()?).ok()?.try_into().ok()?;
+        let bytes = signing_bytes(vault_id, device_id, prefix_epoch, body["updatedAt"].as_i64()?, body["keyEpoch"].as_u64()?, text,
+            features.as_deref().unwrap_or_default());
+        VerifyingKey::from_bytes(public_key).ok()?.verify(&bytes, &Signature::from_bytes(&signature)).ok()?;
+        Some((SyncProgress::parse(text.as_bytes()).ok()?, features))
+    }
+}
+
+/// This build's features, sorted, for the drive progress file.
+fn sorted_features() -> Vec<&'static str> {
+    let mut features = crate::protocol::SYNC_FEATURES.to_vec();
+    features.sort_unstable();
+    features
+}
+
+/// The `features` of a drive progress file: at most 32 strings of 1 to 64 characters. `None` when
+/// the key is missing (an older build) or malformed; the stored features then stay as they are.
+fn peer_features(body: &serde_json::Value) -> Option<Vec<String>> {
+    let list = body.get("features")?.as_array()?;
+    if list.len() > 32 {
+        return None;
+    }
+    list.iter()
+        .map(|item| item.as_str().filter(|text| !text.is_empty() && text.chars().count() <= 64).map(str::to_owned))
+        .collect()
 }
 
 fn load(state: &ManagedState) -> Result<Context> {
@@ -284,6 +429,8 @@ fn load(state: &ManagedState) -> Result<Context> {
     // only from what members announced over Wi-Fi. Uploads are a broadcast mailbox and cannot be
     // filtered per reader; the gate is what keeps appearance changes away from older builds.
     crate::appearance::flush_installed(vault, &identity_store);
+    crate::site_icon_sync::flush_installed(vault, &identity_store);
+    crate::sign_in_sync::flush_installed(vault, &identity_store);
     let revision = u64::from(vault.local_change_count().map_err(storage_error)?);
     let blobs = vault.photo_blobs();
     let db = vault.connection();
@@ -293,6 +440,9 @@ fn load(state: &ManagedState) -> Result<Context> {
         })
         .map_err(|_| "Pair this PC with your phone first")?;
     let (transport, content_key) = (Zeroizing::new(transport), Zeroizing::new(content));
+    // One prefix per rotated epoch: the newest random transport secret at or below the current epoch.
+    let epoch = membership::verify(&read_membership(db, &vault_id)?).map(|verified| verified.key_epoch).unwrap_or(1);
+    let random = crate::epoch_keys::random_secrets_in(db, &vault_id).map_err(storage_error)?;
     let keys = CloudKeys::derive(&transport, &vault_id).ok_or("Invalid sync keys")?;
     if content_key.len() != 32 {
         return Err("Invalid sync keys".into());
@@ -314,16 +464,36 @@ fn load(state: &ManagedState) -> Result<Context> {
         .optional()
         .map_err(storage_error)?
         .unwrap_or_default();
-    Ok(Context { events: read_membership(db, &vault_id)?, vault_id, keys, content_key, local, blobs, files, cursor, progress_digest, revision })
+    let freeze = crate::merge_join::lost_freeze(db, &vault_id).map_err(storage_error)?;
+    let mut context = Context { events: read_membership(db, &vault_id)?, vault_id, keys, content_key, local, blobs, files, cursor,
+        progress_digest, revision, freeze, ring: Vec::new(), keys_epoch: 1, root: transport };
+    context.rebuild(epoch, &random)?;
+    Ok(context)
 }
 
 /// Saves the file list and where the next listing starts. `last_sync` is set when a pass ends well.
+/// Only rows that differ are written: the folder only grows, and a pass runs every 15 seconds by
+/// default, so rewriting every row rewrote megabytes of the vault each time.
 fn save(state: &ManagedState, context: &Context, finished: bool) -> Result<()> {
     let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
     let vault = app.unlocked.as_mut().ok_or("Vault locked. Unlock and retry sync.")?;
     let tx = vault.connection().transaction().map_err(storage_error)?;
-    tx.execute("DELETE FROM cloud_sync_files WHERE vault_id = ?1", [&context.vault_id]).map_err(storage_error)?;
-    for file in &context.files {
+    let stored: std::collections::HashMap<String, CloudFile> = tx
+        .prepare("SELECT file_id, name, size, modified FROM cloud_sync_files WHERE vault_id = ?1")
+        .map_err(storage_error)?
+        .query_map([&context.vault_id], |row| {
+            Ok(CloudFile { id: row.get(0)?, name: row.get(1)?, size: counter(row, 2)?, modified: row.get(3)? })
+        })
+        .map_err(storage_error)?
+        .map(|file| file.map(|file| (file.id.clone(), file)))
+        .collect::<std::result::Result<_, _>>()
+        .map_err(storage_error)?;
+    let kept: std::collections::HashSet<&str> = context.files.iter().map(|file| file.id.as_str()).collect();
+    for id in stored.keys().filter(|id| !kept.contains(id.as_str())) {
+        tx.execute("DELETE FROM cloud_sync_files WHERE vault_id = ?1 AND file_id = ?2", params![context.vault_id, id])
+            .map_err(storage_error)?;
+    }
+    for file in context.files.iter().filter(|file| stored.get(&file.id) != Some(*file)) {
         tx.execute(
             "INSERT OR REPLACE INTO cloud_sync_files (vault_id, file_id, name, size, modified) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![context.vault_id, file.id, file.name, integer(file.size)?, file.modified],
@@ -473,12 +643,12 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
 
     // 1. List.
     let since = (!full && !context.files.is_empty()).then(|| relist_from(&context.cursor)).flatten();
-    let prefix = context.keys.prefix();
-    let listed: Vec<CloudFile> = store
+
+    let mut listed: Vec<CloudFile> = store
         .list(since.as_deref())
         .map_err(cloud)?
         .into_iter()
-        .filter(|file| file.name.starts_with(&prefix) && context.keys.parse(&file.name).is_some())
+        .filter(|file| context.parse(&file.name).is_some())
         .collect();
     if since.is_none() {
         context.files.clear();
@@ -488,7 +658,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
     }
     save(state, &context, false)?;
     let parsed = |context: &Context| -> Vec<(CloudFile, CloudName)> {
-        context.files.iter().filter_map(|file| Some((file.clone(), context.keys.parse(&file.name)?))).collect()
+        context.files.iter().filter_map(|file| Some((file.clone(), context.parse(&file.name)?))).collect()
     };
 
     // 2. Membership: take a longer signed history, or publish ours when it is the longest.
@@ -504,11 +674,12 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
     for (_, file) in histories.iter().filter(|(count, _)| *count > context.events.len() as u64).take(3) {
         let Some(remote) = download_bytes(store, &file.id, MEMBERSHIP_BYTES)
             .ok()
-            .and_then(|sealed| context.keys.open(&file.name, &sealed))
+            .and_then(|sealed| context.open(&file.name, &sealed))
             .and_then(|plain| serde_json::from_slice::<Vec<MembershipEvent>>(&plain).ok())
         else {
             continue;
         };
+        let remote = crate::merge_join::cap(context.freeze.as_ref(), remote);
         let Ok(accepted) = merge_membership(&context.events, &remote) else { continue };
         if remote.len() <= context.events.len() {
             continue;
@@ -525,17 +696,88 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         published = true;
         break;
     }
-    if !published {
+    let mut report = SyncReport { local_revision_at_start: context.revision, ..Default::default() };
+    let mut complete = true;
+    // 2b. Key rotation (`epoch_keys.rs`): publish this PC's signed key statement; read the others'
+    // and the sealed package sets addressed to this PC, under any prefix it holds.
+    let statement_name = context.keys.statement_name(&context.local.device_id);
+    if !context.files.iter().any(|file| file.name == statement_name) {
+        let statement = {
+            let app = state.lock().map_err(|_| "Vault state unavailable")?;
+            app.store.identity_store().key_statement(&context.vault_id).ok()
+        };
+        if let Some(statement) = statement {
+            let sealed = context.keys.seal(&statement_name, &serde_json::to_vec(&statement).map_err(storage_error)?)?;
+            let file = upload_bytes(store, &statement_name, &sealed).map_err(cloud)?;
+            remember(&mut context, file);
+        }
+    }
+    let mut statements = Vec::new();
+    let mut sets = Vec::new();
+    for (file, name) in parsed(&context) {
+        let own = context.keys_for(&file.name).map(|keys| keys.device_tag(&context.local.device_id));
+        let wanted = match &name {
+            CloudName::Statement { device } => own.as_ref() != Some(device),
+            CloudName::Packages { recipient, .. } => own.as_ref() == Some(recipient),
+            _ => false,
+        };
+        if !wanted {
+            continue;
+        }
+        let Some(plain) = download_bytes(store, &file.id, PROGRESS_BYTES).ok().and_then(|sealed| context.open(&file.name, &sealed)) else {
+            continue;
+        };
+        match name {
+            CloudName::Statement { .. } => statements.extend(serde_json::from_slice::<crate::epoch_keys::KeyStatement>(&plain).ok()),
+            _ => sets.extend(serde_json::from_slice::<crate::epoch_keys::PackageSet>(&plain).ok()),
+        }
+    }
+    if !statements.is_empty() || !sets.is_empty() {
+        let private = {
+            let app = state.lock().map_err(|_| "Vault state unavailable")?;
+            app.store.identity_store().x25519_private().map_err(storage_error)?
+        };
+        let local_id = context.local.device_id.clone();
+        let opened = with_vault(state, &context.vault_id, &membership.head, |vault| {
+            let db = vault.connection();
+            for statement in &statements {
+                crate::epoch_keys::accept_statement(db, &membership, statement).map_err(storage_error)?;
+            }
+            crate::epoch_keys::accept_packages(db, &context.events, &membership, &local_id, &private, &sets).map_err(storage_error)
+        })?;
+        // New keys apply in this same pass (M1): the newest prefix from now on, and the folder listed
+        // again whole, because files under that prefix could not be read when it was listed.
+        if opened > 0 {
+            complete = false;
+            let random = with_vault(state, &context.vault_id, &membership.head, |vault| {
+                crate::epoch_keys::random_secrets_in(vault.connection(), &context.vault_id).map_err(storage_error)
+            })?;
+            context.rebuild(membership.key_epoch, &random)?;
+            let again: Vec<CloudFile> = store.list(None).map_err(cloud)?.into_iter().filter(|file| context.parse(&file.name).is_some()).collect();
+            context.files.clear();
+            for file in &again {
+                remember(&mut context, file.clone());
+            }
+            listed = again;
+        }
+    }
+    // Waiting for a package (H1): this pass only reads. Nothing goes under the old prefix, which the
+    // removed device can read, until the new keys arrive.
+    let stranded = with_vault(state, &context.vault_id, &membership.head, |vault| {
+        crate::epoch_keys::stranded(vault.connection(), &context.events, &membership, &context.local.device_id).map_err(storage_error)
+    })?;
+    report.waiting_for_keys = stranded;
+    if !published && !stranded
+        && !context.files.iter().any(|file| file.name == context.keys.membership_name(context.events.len() as u64, &membership.head))
+    {
         let name = context.keys.membership_name(context.events.len() as u64, &membership.head);
         let sealed = context.keys.seal(&name, &serde_json::to_vec(&context.events).map_err(storage_error)?)?;
         let file = upload_bytes(store, &name, &sealed).map_err(cloud)?;
         remember(&mut context, file);
     }
-
-    let mut report = SyncReport { local_revision_at_start: context.revision, ..Default::default() };
-    let mut complete = true;
-    let authors: BTreeMap<String, String> =
-        membership.members.keys().map(|device| (context.keys.device_tag(device), device.clone())).collect();
+    let authors: BTreeMap<String, String> = context.ring.iter()
+        .flat_map(|(_, keys)| membership.members.keys().map(|device| (keys.device_tag(device), device.clone())))
+        .collect();
     // Per author: the files that hold its changes.
     let mut segments: BTreeMap<String, Vec<(u64, u64, CloudFile)>> = BTreeMap::new();
     for (file, name) in parsed(&context) {
@@ -578,7 +820,6 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                 Err(error) => return Err(cloud(error)),
             };
             let operations = context
-                .keys
                 .open(&file.name, &sealed)
                 .and_then(|plain| serde_json::from_slice::<Vec<serde_json::Value>>(&plain).ok())
                 .filter(|operations| operations.len() as u64 == last - first + 1 && operations.len() <= DOWNLOAD_OPERATIONS);
@@ -614,6 +855,28 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         with_vault(state, &context.vault_id, &membership.head, |vault| apply_waiting(vault, &context.vault_id, &context.content_key))?;
     }
 
+    // Floor markers (`compaction.rs` `drive`), counted only at or below this PC's own floor(A).
+    let own_floors = with_vault(state, &context.vault_id, &membership.head, |vault| {
+        crate::compaction::own_floors(vault.connection(), &context.vault_id, &context.local.device_id, &membership).map_err(storage_error)
+    })?;
+    let mut markers: BTreeMap<String, u64> = BTreeMap::new();
+    for (file, name) in parsed(&context) {
+        let CloudName::Floor { author } = name else { continue };
+        let Some(author) = authors.get(&author) else { continue };
+        let Some(marker) = download_bytes(store, &file.id, 4_096).ok()
+            .and_then(|sealed| context.open(&file.name, &sealed))
+            .and_then(|plain| serde_json::from_slice::<crate::compaction::drive::Marker>(&plain).ok())
+            .filter(|marker| marker.author == *author && membership.members.contains_key(&marker.writer))
+        else {
+            continue;
+        };
+        let entry = markers.entry(author.clone()).or_default();
+        *entry = (*entry).max(marker.floor);
+    }
+    let counted: BTreeMap<String, u64> = markers.iter()
+        .map(|(author, floor)| (author.clone(), crate::compaction::drive::counted_floor(Some(*floor), own_floors.get(author).copied().unwrap_or(0))))
+        .collect();
+
     // 4. Upload what the drive lacks, for every author this PC holds changes of.
     tracker.set_phase(Phase::Sending);
     let local_authors: Vec<String> = with_vault(state, &context.vault_id, &membership.head, |vault| {
@@ -627,7 +890,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             .map_err(storage_error)
     })?;
     let mut uploaded_files = 0usize;
-    'authors: for author in local_authors {
+    'authors: for author in local_authors.into_iter().filter(|_| !stranded) {
         let limit = match membership.members.get(&author) {
             Some(member) if member.active => u64::MAX,
             Some(member) => match &member.removal_cutoff {
@@ -636,9 +899,10 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             },
             None => continue,
         };
-        let mut ranges: Vec<(u64, u64)> =
+        let ranges: Vec<(u64, u64)> =
             segments.get(&author).map(|files| files.iter().map(|(first, last, _)| (*first, *last)).collect()).unwrap_or_default();
-        let mut covered = coverage(&mut ranges);
+        // Coverage starts after a floor marker this PC counts: a deleted range is never uploaded again.
+        let mut covered = crate::compaction::drive::coverage(&ranges, counted.get(&author).copied().unwrap_or(0));
         loop {
             let (pending, remaining) = with_vault(state, &context.vault_id, &membership.head, |vault| {
                 pending_operations(
@@ -699,10 +963,13 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         Ok((wanted, held))
     })?;
     let blobs = context.blobs.clone();
+    // Under a rotated prefix a blob is sealed like every other file (a removed device holds the keys
+    // of older epochs, so a raw blob there could be one it reads); under the root prefix it is raw.
+    let sealed_size = |file: &CloudFile, size: u64| if context.epoch_for(&file.name).unwrap_or(1) >= 2 { size + BLOB_ENVELOPE } else { size };
     let missing: Vec<(String, u64, CloudFile)> = wanted
         .into_iter()
         .filter(|(hash, size)| !blobs.has(hash, *size))
-        .filter_map(|(hash, size)| cloud_blobs.get(&hash).filter(|file| file.size == size).map(|file| (hash, size, file.clone())))
+        .filter_map(|(hash, size)| cloud_blobs.get(&hash).filter(|file| file.size == sealed_size(file, size)).map(|file| (hash, size, file.clone())))
         .collect();
     complete &= missing.len() <= PHOTOS_PER_PASS;
     if !missing.is_empty() {
@@ -712,6 +979,23 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         tracker.photo_expected(size);
         blobs.discard_partial(&hash).map_err(storage_error)?;
         let mut position = 0u64;
+        if context.epoch_for(&file.name).unwrap_or(1) >= 2 {
+            let plain = download_bytes(store, &file.id, size + BLOB_ENVELOPE).ok().and_then(|sealed| context.open(&file.name, &sealed));
+            let stored = plain.filter(|plain| plain.len() as u64 == size).is_some_and(|plain| {
+                plain.chunks(photo_blobs::CHUNK_BYTES).all(|chunk| {
+                    let written = blobs.append(&hash, position, chunk).is_ok();
+                    position += chunk.len() as u64;
+                    written
+                }) && blobs.finish(&hash, size).is_ok()
+            });
+            if stored {
+                tracker.photo_moved(size);
+                report.photos_received += 1;
+            } else {
+                let _ = blobs.discard_partial(&hash);
+            }
+            continue;
+        }
         let downloaded = store.download(&file.id, size, &mut |bytes| {
             for chunk in bytes.chunks(photo_blobs::CHUNK_BYTES) {
                 blobs.append(&hash, position, chunk).map_err(|error| CloudError::Other(error.to_string()))?;
@@ -728,9 +1012,13 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             Err(error) => return Err(cloud(error)),
         }
     }
+    let seal_blobs = context.keys_epoch >= 2;
     let to_upload: Vec<(String, u64)> = held
         .into_iter()
+        .filter(|_| !stranded)
         .filter(|(hash, size)| photo_blobs::valid_hash(hash) && !cloud_blobs.contains_key(hash) && blobs.has(hash, *size))
+        // A blob too large to seal in memory travels over Wi-Fi only.
+        .filter(|(_, size)| !seal_blobs || *size <= SEALED_BLOB_BYTES)
         .collect();
     complete &= to_upload.len() <= PHOTOS_PER_PASS;
     if !to_upload.is_empty() {
@@ -739,7 +1027,14 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
     for (hash, size) in to_upload.into_iter().take(PHOTOS_PER_PASS) {
         tracker.photo_expected(size);
         let mut file = blobs.open_at(&hash, 0).map_err(storage_error)?;
-        let uploaded = store.upload(&context.keys.blob_name(&hash), size, &mut file).map_err(cloud)?;
+        let name = context.keys.blob_name(&hash);
+        let uploaded = if seal_blobs {
+            let mut plain = Zeroizing::new(Vec::with_capacity(size as usize));
+            file.read_to_end(&mut plain).map_err(storage_error)?;
+            upload_bytes(store, &name, &context.keys.seal(&name, &plain)?).map_err(cloud)?
+        } else {
+            store.upload(&name, size, &mut file).map_err(cloud)?
+        };
         tracker.photo_moved(size);
         remember(&mut context, uploaded);
         report.photos_sent += 1;
@@ -751,15 +1046,20 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         apply_waiting(vault, &context.vault_id, &context.content_key)?;
         progress(vault.connection(), &context.vault_id)?.encode().map_err(storage_error)
     })?;
-    let digest = hex::encode(Sha256::digest(&own_progress));
+    // The features are part of the digest, so an update that adds one rewrites the file at once.
+    let digest = hex::encode(Sha256::digest([own_progress.as_slice(), format!("|{}|", context.keys_epoch).as_bytes(),
+        crate::protocol::SYNC_FEATURES.join(",").as_bytes()].concat()));
     let own_name = context.keys.progress_name(&context.local.device_id);
     let own_file = context.files.iter().find(|file| file.name == own_name).cloned();
-    if digest != context.progress_digest || own_file.is_none() {
-        let body = serde_json::json!({
-            "deviceId": context.local.device_id,
-            "updatedAt": crate::activity::now_millis(),
-            "progress": serde_json::from_slice::<serde_json::Value>(&own_progress).map_err(storage_error)?,
-        });
+    if !stranded && (digest != context.progress_digest || own_file.is_none()) {
+        // Signed by this PC's identity (H2): only a signed report counts for what may be deleted.
+        let key_epoch = with_vault(state, &context.vault_id, &membership.head, |vault| {
+            Ok(crate::epoch_keys::stored_keys(vault.connection(), &context.vault_id).map_err(storage_error)?.keys().next_back().copied().unwrap_or(1))
+        })?;
+        let identity = state.lock().map_err(|_| "Vault state unavailable")?.store.identity_store();
+        let text = String::from_utf8(own_progress.clone()).map_err(storage_error)?;
+        let body = drive_progress::body(&context.vault_id, &context.local.device_id, context.keys_epoch,
+            crate::activity::now_millis() as i64, key_epoch, &text, &sorted_features(), |bytes| identity.sign(bytes).ok())?;
         let sealed = context.keys.seal(&own_name, &serde_json::to_vec(&body).map_err(storage_error)?)?;
         let file = match own_file {
             Some(file) => match store.replace(&file.id, &sealed) {
@@ -773,32 +1073,94 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         context.progress_digest = digest;
     }
     for file in &listed {
-        let Some(CloudName::Progress { device }) = context.keys.parse(&file.name) else { continue };
+        let Some(CloudName::Progress { device }) = context.parse(&file.name) else { continue };
         let Some(peer) = authors.get(&device).filter(|peer| **peer != context.local.device_id) else { continue };
-        if !membership.members.get(peer).is_some_and(|member| member.active) {
+        let Some(member) = membership.members.get(peer).filter(|member| member.active) else {
             continue;
-        }
+        };
         let Some(body) = download_bytes(store, &file.id, PROGRESS_BYTES)
             .ok()
-            .and_then(|sealed| context.keys.open(&file.name, &sealed))
+            .and_then(|sealed| context.open(&file.name, &sealed))
             .and_then(|plain| serde_json::from_slice::<serde_json::Value>(&plain).ok())
             .filter(|body| body["deviceId"].as_str() == Some(peer.as_str()))
         else {
             continue;
         };
-        let Some(peer_progress) = serde_json::to_vec(&body["progress"]).ok().and_then(|bytes| SyncProgress::parse(&bytes).ok()) else {
-            continue;
-        };
+        // Progress and features count only when the peer signed the report for the newest prefix (H2):
+        // they decide what may be deleted and which gates open. Unsigned (an older build) or from an
+        // older prefix, it is unknown progress: nothing more is deleted because of it.
         let seen_at = body["updatedAt"].as_i64().unwrap_or(0).min(crate::activity::now_millis() as i64);
+        let signed = (context.epoch_for(&file.name) == Some(context.keys_epoch))
+            .then(|| drive_progress::verify(&body, &context.vault_id, peer, &member.public_key, context.keys_epoch))
+            .flatten();
         // A report older than one this PC got over Wi-Fi is refused there and simply skipped here.
         let _ = with_vault(state, &context.vault_id, &membership.head, |vault| {
             let db = vault.connection();
-            validate_peer_progress(db, &context.vault_id, &context.local.device_id, peer, &peer_progress)?;
             if seen_at > 0 {
                 crate::membership_exit::record_peer_seen(db, peer, seen_at).map_err(storage_error)?;
             }
-            Ok(())
+            let Some((peer_progress, features)) = &signed else { return Ok(()) };
+            if let Some(features) = features {
+                crate::appearance::record_peer_features(db, &context.vault_id, peer, features).map_err(storage_error)?;
+            }
+            validate_peer_progress(db, &context.vault_id, &context.local.device_id, peer, peer_progress)
         });
+    }
+
+    // 7. Drive cleanup (`compaction.rs` `drive`): once a day, after a complete pass, and only when
+    // every active member reads floor markers. An offline member pins floor(A); a removed one does not.
+    let gate = with_vault(state, &context.vault_id, &membership.head, |vault| {
+        let db = vault.connection();
+        let due = db.query_row("SELECT drive_compacted_at FROM cloud_sync_compaction WHERE vault_id = ?1", [&context.vault_id], |row| row.get::<_, i64>(0))
+            .optional().map_err(storage_error)?
+            .is_none_or(|at| !(0..crate::compaction::drive::INTERVAL_MS).contains(&(crate::activity::now_millis() as i64 - at)));
+        Ok(due && crate::appearance::gate_open_for(db, &membership, &context.local.device_id, crate::compaction::drive::FEATURE))
+    })?;
+    if complete && gate && !stranded {
+        let mut deletes = 0;
+        for (author, files) in &segments {
+            if deletes >= crate::compaction::drive::MAX_DELETES {
+                break;
+            }
+            let Some(floor) = own_floors.get(author).copied() else { continue };
+            let ranges: Vec<(u64, u64)> = files.iter().map(|(first, last, _)| (*first, *last)).collect();
+            let (new_floor, gone) = crate::compaction::drive::cleanup(&ranges, counted.get(author).copied().unwrap_or(0), floor);
+            if gone.is_empty() {
+                continue;
+            }
+            // The marker first: a stop before the deletes leaves extra files, never a gap.
+            let name = context.keys.floor_name(author);
+            let marker = crate::compaction::drive::Marker { author: author.clone(), floor: new_floor, hash: String::new(),
+                writer: context.local.device_id.clone(), at: crate::activity::now_millis() as i64 };
+            let sealed = context.keys.seal(&name, &serde_json::to_vec(&marker).map_err(storage_error)?)?;
+            let existing = context.files.iter().find(|file| file.name == name).map(|file| file.id.clone());
+            let file = match existing {
+                Some(id) => store.replace(&id, &sealed).or_else(|_| upload_bytes(store, &name, &sealed)).map_err(cloud)?,
+                None => upload_bytes(store, &name, &sealed).map_err(cloud)?,
+            };
+            remember(&mut context, file);
+            for (first, last) in gone {
+                for (_, _, file) in files.iter().filter(|(f, l, _)| *f == first && *l == last) {
+                    if deletes >= crate::compaction::drive::MAX_DELETES {
+                        break;
+                    }
+                    match store.delete(&file.id) {
+                        Ok(()) | Err(CloudError::NotFound) => {}
+                        Err(error) => return Err(cloud(error)),
+                    }
+                    context.files.retain(|known| known.id != file.id);
+                    deletes += 1;
+                }
+            }
+        }
+        with_vault(state, &context.vault_id, &membership.head, |vault| {
+            vault.connection().execute(
+                "INSERT INTO cloud_sync_compaction (vault_id, drive_compacted_at) VALUES (?1, ?2)
+                 ON CONFLICT(vault_id) DO UPDATE SET drive_compacted_at = excluded.drive_compacted_at",
+                params![context.vault_id, crate::activity::now_millis() as i64],
+            ).map_err(storage_error)?;
+            Ok(())
+        })?;
     }
 
     with_vault(state, &context.vault_id, &membership.head, |vault| {
@@ -880,6 +1242,13 @@ pub(crate) mod tests {
             file.size = content.len() as u64;
             file.modified = stamp;
             Ok(file.clone())
+        }
+
+        fn delete(&mut self, id: &str) -> Cloud<()> {
+            let mut files = self.files.lock().unwrap();
+            let before = files.len();
+            files.retain(|(file, _)| file.id != id);
+            if files.len() == before { Err(CloudError::NotFound) } else { Ok(()) }
         }
     }
 
@@ -1000,9 +1369,9 @@ pub(crate) mod tests {
         ] {
             assert_eq!(keys.parse(&name), None, "{name}");
         }
-        assert_eq!(coverage(&mut [(1, 10), (11, 20), (5, 12)]), 20);
-        assert_eq!(coverage(&mut [(1, 10), (12, 20)]), 10, "a gap stops the coverage");
-        assert_eq!(coverage(&mut [(2, 10)]), 0);
+        assert_eq!(crate::compaction::drive::coverage(&[(1, 10), (11, 20), (5, 12)], 0), 20);
+        assert_eq!(crate::compaction::drive::coverage(&[(1, 10), (12, 20)], 0), 10, "a gap stops the coverage");
+        assert_eq!(crate::compaction::drive::coverage(&[(2, 10)], 0), 0);
     }
 
     #[test]
@@ -1062,6 +1431,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_saved_file_list_changes_only_where_the_drive_changed() {
+        let (a, b, _) = group();
+        let drive = MemoryDrive::default();
+        stage(&a, &[phone_change()]);
+        pass(&a, &drive);
+        // Counts every row written to or removed from the saved list (a TEMP trigger on this connection).
+        let sql = |device: &Synthetic, statement: &str| -> i64 {
+            let mut app = device.state.lock().unwrap();
+            let db = app.unlocked.as_mut().unwrap().connection();
+            db.query_row(statement, [], |row| row.get(0)).unwrap()
+        };
+        {
+            let mut app = a.state.lock().unwrap();
+            app.unlocked.as_mut().unwrap().connection().execute_batch(
+                "CREATE TEMP TABLE list_writes (n INTEGER NOT NULL); INSERT INTO list_writes VALUES (0);
+                 CREATE TEMP TRIGGER list_insert AFTER INSERT ON cloud_sync_files BEGIN UPDATE list_writes SET n = n + 1; END;
+                 CREATE TEMP TRIGGER list_delete AFTER DELETE ON cloud_sync_files BEGIN UPDATE list_writes SET n = n + 1; END;").unwrap();
+        }
+        let remembered = sql(&a, "SELECT count(*) FROM cloud_sync_files");
+        assert_eq!(remembered as usize, drive.names().len(), "every file of the group is remembered");
+        // An idle pass writes no row of the list.
+        assert_eq!(pass(&a, &drive).sent, 0);
+        assert_eq!(sql(&a, "SELECT n FROM list_writes"), 0, "an idle pass rewrote the saved file list");
+        // A file gone from the drive is forgotten on a full listing, with a few writes, not one per file.
+        let gone = drive.files.lock().unwrap().iter().find(|(file, _)| file.name.contains(".o.")).unwrap().0.id.clone();
+        drive.files.lock().unwrap().retain(|(file, _)| file.id != gone);
+        run(&a.state, &mut drive.clone(), &SyncTracker::default(), true).unwrap();
+        assert_eq!(sql(&a, &format!("SELECT count(*) FROM cloud_sync_files WHERE file_id = '{gone}'")), 0);
+        assert_eq!(sql(&a, "SELECT count(*) FROM cloud_sync_files") as usize, drive.names().len());
+        assert!(sql(&a, "SELECT n FROM list_writes") < remembered, "the full pass rewrote every row");
+        cleanup([a, b]);
+    }
+
+    #[test]
     fn forged_reordered_and_foreign_files_change_nothing() {
         let (a, b, _) = group();
         let drive = MemoryDrive::default();
@@ -1093,6 +1496,71 @@ pub(crate) mod tests {
         // The real file then arrives and is accepted next to the bad ones.
         drive.put(&name, keys.seal(&name, &real).unwrap());
         assert_eq!(run(&b.state, &mut drive.clone(), &SyncTracker::default(), true).unwrap().received, 1);
+        cleanup([a, b]);
+    }
+
+    #[test]
+    fn drive_cleanup_waits_for_every_active_member_and_nothing_is_uploaded_again() {
+        let (a, b, _) = group();
+        let drive = MemoryDrive::default();
+        let mut previous = GENESIS_HASH.to_owned();
+        let mut chain = Vec::new();
+        for sequence in 1..=300u64 {
+            let id = format!("login-{sequence}");
+            let change = phone_op(sequence, &previous, "entry", &id, RecordVersion::from_entries([("phone", 1)]), 0,
+                serde_json::json!({"entry": login_entry(&id, &format!("Login {sequence}")), "groupIds": []}));
+            previous = change.hash.clone();
+            chain.push(change);
+        }
+        let apply = |device: &Synthetic| {
+            let mut app = device.state.lock().unwrap();
+            apply_waiting(app.unlocked.as_mut().unwrap(), "vault-a", &[4u8; 32]).unwrap();
+        };
+        stage(&a, &chain);
+        apply(&a);
+        pass(&a, &drive);
+        let keys = CloudKeys::derive(&[5; 32], "vault-a").unwrap();
+        let phone_files = || drive.names().iter().filter(|name| matches!(keys.parse(name),
+            Some(CloudName::Operations { device, .. }) if device == keys.device_tag("phone"))).count();
+        assert_eq!(phone_files(), 2);
+        let head = (300u64, previous.clone());
+        let report = |db: &Connection, peer: &str, applied: bool| {
+            let heads: BTreeMap<String, (u64, String)> = if applied { BTreeMap::from([("phone".to_owned(), head.clone())]) } else { BTreeMap::new() };
+            let progress = crate::progress::SyncProgress { received: heads.clone(), applied: heads };
+            db.execute("CREATE TABLE IF NOT EXISTS sync_peer_progress (vault_id TEXT NOT NULL, peer_device_id TEXT NOT NULL, progress_json TEXT NOT NULL, PRIMARY KEY (vault_id, peer_device_id))", []).unwrap();
+            db.execute("INSERT OR REPLACE INTO sync_peer_progress VALUES ('vault-a', ?1, ?2)",
+                params![peer, String::from_utf8(progress.encode().unwrap()).unwrap()]).unwrap();
+        };
+        let features = vec![crate::compaction::drive::FEATURE.to_owned()];
+        let b_id = b.local.device_id.clone();
+        let reset = |device: &Synthetic| device.state.lock().unwrap().unlocked.as_mut().unwrap().connection()
+            .execute("DELETE FROM cloud_sync_compaction", []).unwrap();
+        // Everyone announced the feature, but the PC `b` applied nothing (it is offline): nothing goes.
+        {
+            let mut app = a.state.lock().unwrap();
+            let db = app.unlocked.as_mut().unwrap().connection();
+            for peer in ["phone", b_id.as_str()] {
+                crate::appearance::record_peer_features(db, "vault-a", peer, &features).unwrap();
+            }
+            report(db, "phone", true);
+            report(db, &b_id, false);
+        }
+        pass(&a, &drive);
+        assert_eq!(phone_files(), 2, "an offline member holds the cleanup back");
+        // `b` catches up: the files go, after the marker.
+        reset(&a);
+        report(a.state.lock().unwrap().unlocked.as_mut().unwrap().connection(), &b_id, true);
+        pass(&a, &drive);
+        assert_eq!(phone_files(), 0);
+        assert!(drive.names().contains(&keys.floor_name("phone")));
+        // `b` counts the marker and uploads nothing again.
+        stage(&b, &chain);
+        apply(&b);
+        report(b.state.lock().unwrap().unlocked.as_mut().unwrap().connection(), "phone", true);
+        report(b.state.lock().unwrap().unlocked.as_mut().unwrap().connection(), &a.local.device_id, true);
+        // Only its own note goes up: none of the phone's deleted range.
+        assert_eq!(pass(&b, &drive).sent, 1);
+        assert_eq!(phone_files(), 0);
         cleanup([a, b]);
     }
 
@@ -1148,6 +1616,97 @@ pub(crate) mod tests {
         // PC A adopts the same history and goes on.
         assert_eq!(pass(&a, &drive).received, 0);
         assert_eq!(a.state.lock().unwrap().unlocked.as_ref().unwrap().stored_membership().unwrap().len(), removed.len());
+        cleanup([a, b]);
+    }
+
+    #[test]
+    fn drive_progress_matches_the_shared_vector() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!("../fixtures/epoch-keys-v1.json")).unwrap();
+        let file = &vectors["progressFile"];
+        let vault = vectors["vaultId"].as_str().unwrap();
+        let text = file["progressText"].as_str().unwrap();
+        let features: Vec<String> = file["features"].as_array().unwrap().iter().map(|f| f.as_str().unwrap().to_owned()).collect();
+        let at = file["updatedAt"].as_i64().unwrap();
+        assert_eq!(hex::encode(drive_progress::signing_bytes(vault, "dev-pc", 2, at, 2, text, &features)), file["signingHex"]);
+        let seed: [u8; 32] = hex::decode(vectors["devices"]["dev-pc"]["ed25519Seed"].as_str().unwrap()).unwrap().try_into().unwrap();
+        let key = SigningKey::from_bytes(&seed);
+        let refs: Vec<&str> = features.iter().map(String::as_str).collect();
+        let body = drive_progress::body(vault, "dev-pc", 2, at, 2, text, &refs, |m| Some(ed25519_dalek::Signer::sign(&key, m).to_bytes())).unwrap();
+        assert_eq!(body["signature"], file["signature"]);
+        let public = key.verifying_key().to_bytes();
+        assert_eq!(drive_progress::verify(&body, vault, "dev-pc", &public, 2).unwrap().0.applied.get("dev-pc").map(|head| head.0), Some(3));
+        assert!(drive_progress::verify(&body, vault, "dev-pc", &public, 1).is_none(), "another prefix");
+        assert!(drive_progress::verify(&body, "other", "dev-pc", &public, 2).is_none(), "another vault");
+        let mut changed = body.clone();
+        changed["progressText"] = text.replace("[1,", "[3,").into();
+        assert!(drive_progress::verify(&changed, vault, "dev-pc", &public, 2).is_none(), "a changed report");
+        let mut unsigned = body.clone();
+        unsigned.as_object_mut().unwrap().remove("signature");
+        assert!(drive_progress::verify(&unsigned, vault, "dev-pc", &public, 2).is_none(), "unsigned (an older build)");
+        // A photo blob under a rotated prefix is sealed like every other file.
+        let blob = &vectors["blobFile"];
+        let keys = CloudKeys::derive(&hex::decode(vectors["transportSecretHex"].as_str().unwrap()).unwrap(), vault).unwrap();
+        let sealed = hex::decode(blob["sealedHex"].as_str().unwrap()).unwrap();
+        assert_eq!(keys.open(blob["name"].as_str().unwrap(), &sealed).unwrap(), hex::decode(blob["blobHex"].as_str().unwrap()).unwrap());
+        assert_eq!(sealed.len() as u64, hex::decode(blob["blobHex"].as_str().unwrap()).unwrap().len() as u64 + BLOB_ENVELOPE);
+    }
+
+    /// End to end on a drive in memory (H1, H2, M1): the phone removes PC B with new keys and seals a
+    /// package for PC A. B, removed but holding the root key and a Google sign-in, withholds A's `e.`
+    /// file and forges progress. A learns the REMOVE, sends nothing while it waits, takes its package
+    /// once the file is there, and from then on writes only under the new prefix, which B can't open.
+    #[test]
+    fn a_removed_pc_that_tampers_with_drive_files_cant_strand_or_read_a_survivor() {
+        use crate::epoch_keys::{KeyStatement, PackageSet, seal_package_with, x25519_private, x25519_public};
+        use ed25519_dalek::Signer;
+        let (a, b, history) = group();
+        let drive = MemoryDrive::default();
+        pass(&a, &drive);
+        let root = CloudKeys::derive(&[5; 32], "vault-a").unwrap();
+        let phone = SigningKey::from_bytes(&[17; 32]);
+        let phone_x = x25519_private(&[17; 32]);
+        let phone_statement = KeyStatement::create("vault-a", "phone", &x25519_public(&phone_x), |m| Some(phone.sign(m).to_bytes())).unwrap();
+        let name = root.statement_name("phone");
+        drive.put(&name, root.seal(&name, &serde_json::to_vec(&phone_statement).unwrap()).unwrap());
+        let mut removed = history.clone();
+        removed.push(remove_event(history.last().unwrap(), &b.local.device_id, true));
+        let name = root.membership_name(removed.len() as u64, &removed.last().unwrap().hash);
+        drive.put(&name, root.seal(&name, &serde_json::to_vec(&removed).unwrap()).unwrap());
+        // B forges an unsigned progress report of the phone under the old prefix (it would raise floors).
+        let forged = serde_json::json!({"deviceId": "phone", "updatedAt": 1, "progress": {"received": {"phone": [900, "ab".repeat(32)]},
+            "applied": {"phone": [900, "ab".repeat(32)]}}, "features": ["history-compaction-v1"]});
+        let name = root.progress_name("phone");
+        drive.put(&name, root.seal(&name, &serde_json::to_vec(&forged).unwrap()).unwrap());
+        // A writes a change while the package is withheld: it waits and sends nothing.
+        a.state.lock().unwrap().unlocked.as_mut().unwrap().save_note(None, "While waiting", "Secret", None).unwrap();
+        let before = drive.names().len();
+        let report = run(&a.state, &mut drive.clone(), &SyncTracker::default(), true).unwrap();
+        assert!(report.waiting_for_keys);
+        assert_eq!(report.sent, 0);
+        let a_tag = root.device_tag(&a.local.device_id);
+        assert!(drive.names()[before..].iter().all(|name| !matches!(root.parse(name),
+            Some(CloudName::Operations { ref device, .. } | CloudName::Progress { ref device }) if *device == a_tag)), "{:?}", &drive.names()[before..]);
+        let peer_rows = |device: &Synthetic| -> i64 { device.state.lock().unwrap().unlocked.as_mut().unwrap().connection()
+            .query_row("SELECT count(*) FROM sync_peer_progress WHERE peer_device_id = 'phone'", [], |row| row.get(0)).unwrap_or(0) };
+        assert_eq!(peer_rows(&a), 0, "unsigned progress is unknown progress");
+        // The phone uploads the package (again): A opens it and uploads under the new prefix only.
+        let statement = a.state.lock().unwrap().store.identity_store().key_statement("vault-a").unwrap();
+        let (s2, p2) = ([0x5C; 32], [0x6D; 32]);
+        let sealed = seal_package_with("vault-a", 2, &a.local.device_id, &statement.public_key().unwrap(), &s2, &p2, &[0x41; 32], &[0x51; 12]);
+        let mut set = PackageSet { vault_id: "vault-a".into(), epoch: 2, remove_hash: removed.last().unwrap().hash.clone(),
+            packages: BTreeMap::from([(a.local.device_id.clone(), URL_SAFE_NO_PAD.encode(&sealed))]), signature: String::new() };
+        set.signature = URL_SAFE_NO_PAD.encode(phone.sign(&set.signing_bytes()).to_bytes());
+        let name = root.package_name(2, &a.local.device_id);
+        drive.put(&name, root.seal(&name, &serde_json::to_vec(&set).unwrap()).unwrap());
+        let before = drive.names().len();
+        let report = pass(&a, &drive);
+        assert!(!report.waiting_for_keys);
+        assert!(report.sent >= 1);
+        let new = CloudKeys::derive(&s2, "vault-a").unwrap();
+        let after = drive.names()[before..].to_vec();
+        assert!(after.iter().all(|name| root.parse(name).is_none()), "nothing new under the old prefix: {after:?}");
+        assert!(after.iter().any(|name| matches!(new.parse(name), Some(CloudName::Operations { .. }))));
+        assert!(after.iter().any(|name| matches!(new.parse(name), Some(CloudName::Progress { .. }))));
         cleanup([a, b]);
     }
 }

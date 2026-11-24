@@ -89,6 +89,8 @@ pub struct SyncReport {
     pub peers_waiting: usize,
     /// This pass also exchanged changes through the cloud drive.
     pub cloud: bool,
+    /// This PC knows a REMOVE that made new keys but its package has not arrived: it only reads.
+    pub waiting_for_keys: bool,
 }
 
 #[derive(Serialize)]
@@ -98,6 +100,9 @@ pub struct SyncStatus {
     waiting_to_apply: usize,
     /// Part of `waiting_to_apply`: changes this PC could not read (set aside, retried each pass).
     set_aside: usize,
+    /// Waiting for new sync keys after a removal (`epoch_keys::stranded`): changes made here stay
+    /// on this PC until they arrive.
+    waiting_for_keys: bool,
     conflicts: usize,
     pub phone_address: String,
     pub automatic: bool,
@@ -429,8 +434,13 @@ pub(crate) fn status(vault: &mut UnlockedVault) -> Result<SyncStatus> {
         .map_err(storage_error)?
         .unwrap_or_default();
     let (phone_address, automatic) = configuration(vault)?;
+    let local = vault.local_device_id();
     let db = vault.connection();
+    let events = read_membership(db, &id).unwrap_or_default();
+    let waiting_for_keys = membership::verify(&events).ok().zip(local)
+        .is_some_and(|(verified, local)| crate::epoch_keys::stranded(db, &events, &verified, &local).unwrap_or(false));
     Ok(SyncStatus {
+        waiting_for_keys,
         last_sync,
         phone_address,
         automatic,
@@ -671,7 +681,7 @@ fn exchange_role(
     if !helper.is_file() {
         return Err("The pairing helper is missing. Rebuild or reinstall Nuvori.".into());
     }
-    let (vault_id, events, secret, content_key, signer, blobs) = {
+    let (vault_id, events, secret, content_key, signer, blobs, freeze, key_sets, random) = {
         let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
         let signer = app.store.identity_store();
         let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
@@ -679,6 +689,8 @@ fn exchange_role(
         let _ = vault.publish_unsynced_photos();
         // An appearance choice waiting for the write gate is written now if the gate is open.
         crate::appearance::flush_installed(vault, &signer);
+        crate::site_icon_sync::flush_installed(vault, &signer);
+        crate::sign_in_sync::flush_installed(vault, &signer);
         let blobs = vault.photo_blobs();
         let db = vault.connection();
         let (id, transport, content): (String, Vec<u8>, Vec<u8>) = db
@@ -688,6 +700,12 @@ fn exchange_role(
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(|_| "Pair this PC with your phone first")?;
+        // "Mark as lost" on this PC (`merge_join.rs`): the old group's membership stays as it was.
+        let freeze = crate::merge_join::lost_freeze(db, &id).map_err(storage_error)?;
+        // Sealed key packages this PC holds, relayed to peers (`epoch_keys.rs`).
+        let key_sets = crate::epoch_keys::package_sets(db, &id).map_err(storage_error)?;
+        // Random secrets of rotated epochs, from the vault (never from memory: C1).
+        let random = crate::epoch_keys::random_secrets_in(db, &id).map_err(storage_error)?;
         (
             id.clone(),
             read_membership(db, &id)?,
@@ -695,6 +713,9 @@ fn exchange_role(
             Zeroizing::new(content),
             signer,
             blobs,
+            freeze,
+            key_sets,
+            random,
         )
     };
     if secret.len() != 32 || content_key.len() != 32 {
@@ -712,7 +733,7 @@ fn exchange_role(
     let timeout_handle = stream.try_clone().map_err(network_error)?;
     let reader = stream.try_clone().map_err(network_error)?;
     let mut frames = SyncFrames::new(reader, PacedWriter { stream });
-    let mut epoch_secret = crate::membership_exit::transport_epoch_secret(&secret, &vault_id, membership.key_epoch)
+    let mut epoch_secret = crate::membership_exit::transport_epoch_secret(&secret, &vault_id, membership.key_epoch, &random)
         .ok_or("Invalid sync keys")?;
     let challenge;
     if server {
@@ -724,7 +745,7 @@ fn exchange_role(
             // PC confirms a removal it already knows, or says that it is not the manager.
             use crate::membership_exit::{LeaveAnswer, answer_leave};
             let now = crate::activity::now_millis() as i64;
-            let reply: &[u8] = match answer_leave(&supplied, &challenge, &secret, &events, &local.device_id, now) {
+            let reply: &[u8] = match answer_leave(&supplied, &challenge, &secret, &random, &events, &local.device_id, now) {
                 LeaveAnswer::Left => b"left1",
                 LeaveAnswer::NotManager => b"notmanager1",
                 LeaveAnswer::Reject => return Err(REJECTED.into()),
@@ -739,20 +760,39 @@ fn exchange_role(
             mac.verify_slice(&supplied).is_ok()
         };
         let accepted = (membership.key_epoch..=membership.key_epoch + 4).find_map(|epoch| {
-            let key = crate::membership_exit::transport_epoch_secret(&secret, &vault_id, epoch)?;
+            let key = crate::membership_exit::transport_epoch_secret(&secret, &vault_id, epoch, &random)?;
             matches(&key).then_some(key)
         });
         if let Some(key) = accepted { epoch_secret = key; }
         else {
             // A device on an earlier epoch was removed or missed a removal: show it the signed
             // history up to the event that ended its epoch. Nothing else is sent before authentication.
+            // Rule shared with Android (`TransportEpochs.retained`): the last 4 previous epochs, with
+            // no time limit. A time limit would strand an active device that was away during a
+            // removal (it catches up only through this answer), while the notice holds nothing
+            // the Google Drive `m.` file does not already show without a limit.
             let prior = (membership.key_epoch.saturating_sub(4).max(1)..membership.key_epoch).rev().find(|epoch| {
-                crate::membership_exit::transport_epoch_secret(&secret, &vault_id, *epoch).is_some_and(|key| matches(&key))
+                crate::membership_exit::transport_epoch_secret(&secret, &vault_id, *epoch, &random).is_some_and(|key| matches(&key))
             });
-            if let Some(epoch) = prior.filter(|_| crate::membership_exit::removal_notice_allowed(Instant::now())) {
-                let history = crate::membership_exit::history_for_epoch(&events, epoch);
+            // A survivor that knows a rotated epoch but not its package proves the secret derived for
+            // it (as Android `LockedSyncStore.strandedEpochFor`): it gets the history up to that
+            // REMOVE, which it already holds, and the sealed packages.
+            let stranded = if prior.is_some() { None } else {
+                random.keys().copied().find(|epoch| {
+                    let below: BTreeMap<u64, Zeroizing<[u8; 32]>> = random.range(..*epoch).map(|(epoch, secret)| (*epoch, secret.clone())).collect();
+                    crate::epoch_keys::transport_secret(&secret, &vault_id, *epoch, &below).is_some_and(|key| matches(&key))
+                })
+            };
+            let notice = prior.map(|epoch| (epoch, epoch)).or(stranded.map(|epoch| (epoch - 1, 1)));
+            if let Some((shown, after)) = notice.filter(|_| crate::membership_exit::removal_notice_allowed(Instant::now())) {
+                let history = crate::membership_exit::history_for_epoch(&events, shown);
                 frames.send(b"removed1", 4096).map_err(network_error)?;
                 frames.send(&serde_json::to_vec(history).map_err(storage_error)?, 1_000_000).map_err(network_error)?;
+                // Then the sealed packages of later epochs: a survivor that missed a rotation opens its own.
+                let later: Vec<_> = key_sets.iter().filter(|set| set.epoch > after).cloned().collect();
+                if !later.is_empty() {
+                    let _ = frames.send(&crate::epoch_keys::encode_frame(None, &later), 1_000_000);
+                }
             }
             return Err(REJECTED.into());
         }
@@ -765,7 +805,7 @@ fn exchange_role(
         mac.update(b"nuvori-lan-probe-v1"); mac.update(&challenge);
         frames.send(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()).as_bytes(), 4096).map_err(network_error)?;
         let reply = frames.receive(4096).map_err(|error| closed_as(error, REJECTED))?;
-        if reply == b"removed1" { return Err(accept_removal(state, &mut frames, &events, &local.device_id)); }
+        if reply == b"removed1" { return Err(accept_removal(state, &mut frames, &events, &local.device_id, freeze.as_ref())); }
         if reply != b"ok" { return Err(REJECTED.into()); }
     }
 
@@ -793,6 +833,7 @@ fn exchange_role(
     }
     let remote: Vec<MembershipEvent> =
         serde_json::from_slice(&remote).map_err(|_| "Invalid membership history")?;
+    let remote = crate::merge_join::cap(freeze.as_ref(), remote);
     let accepted = merge_membership(&events, &remote)?;
     require_member(&accepted, &local.device_id, &local.public_key).map_err(|_| REMOVED)?;
     require_member(&accepted, &session.peer.device_id, &session.peer.public_key)?;
@@ -824,6 +865,25 @@ fn exchange_role(
     ) {
         return Err("Peer identity proof failed".into());
     }
+    // Key statements and sealed key packages, when the peer announced epoch-keys-v1 (this build
+    // always does, so both sides send one frame and receive one), as Android `LanSyncExchange`.
+    if session.peer_features.iter().any(|feature| feature == crate::epoch_keys::FEATURE) {
+        let statement = signer.key_statement(&vault_id).ok();
+        channel.send(&crate::epoch_keys::encode_frame(statement.as_ref(), &key_sets)).map_err(network_error)?;
+        let frame = channel.receive().map_err(|error| closed_as(error, REJECTED))?;
+        if let Some((statement, sets)) = crate::epoch_keys::parse_frame(&frame) {
+            let private = signer.x25519_private().map_err(storage_error)?;
+            let _ = with_vault(state, &vault_id, &accepted.head, |vault| {
+                let db = vault.connection();
+                if let Some(statement) = statement.filter(|statement| statement.device_id == session.peer.device_id) {
+                    crate::epoch_keys::accept_statement(db, &accepted, &statement).map_err(storage_error)?;
+                }
+                let events = read_membership(db, &vault_id)?;
+                crate::epoch_keys::accept_packages(db, &events, &accepted, &local.device_id, &private, &sets).map_err(storage_error)?;
+                Ok(())
+            });
+        }
+    }
     if server { tracker.begin(); }
     let relay_removed = session.peer_features.iter().any(|feature| feature == crate::protocol::REMOVAL_CUTOFF_FEATURE);
     // Appearance changes are relayed to every peer, also one without `appearance-v1`: a chain is
@@ -837,6 +897,8 @@ fn exchange_role(
         crate::appearance::record_peer_features(vault.connection(), &vault_id, &session.peer.device_id, &session.peer_features)
             .map_err(storage_error)?;
         crate::appearance::flush_installed(vault, &signer);
+        crate::site_icon_sync::flush_installed(vault, &signer);
+        crate::sign_in_sync::flush_installed(vault, &signer);
         Ok(())
     });
     let rounds = exchange_rounds_role(
@@ -901,6 +963,10 @@ fn exchange_role(
                 .format(&time::format_description::well_known::Rfc3339)
                 .map_err(storage_error)?;
             db.execute("INSERT INTO sync_exchange_state (vault_id, last_sync_utc) VALUES (?1, ?2) ON CONFLICT(vault_id) DO UPDATE SET last_sync_utc = excluded.last_sync_utc", params![vault_id, now]).map_err(storage_error)?;
+            // At most once a day after a complete exchange: drop history every active member applied.
+            if let Err(error) = crate::compaction::run(db, &vault_id, &local.device_id, &accepted, false) {
+                crate::activity::diagnostic(crate::activity::Category::Sync, "Could not clean up old sync history", error);
+            }
         }
         Ok(())
     })?;
@@ -1077,6 +1143,21 @@ fn persist_membership(
     remote: &[MembershipEvent],
     verified: &VerifiedMembership,
 ) -> Result<()> {
+    // A frozen group ("Mark as lost") keeps the history it had, whatever path offers more.
+    let freeze = crate::merge_join::lost_freeze(db, id).map_err(storage_error)?;
+    let capped;
+    let (remote, verified) = match &freeze {
+        Some(freeze) if remote.len() as u64 > freeze.membership_count => {
+            let kept = freeze.cap(remote.to_vec());
+            if kept.len() <= local.len() {
+                return Ok(());
+            }
+            capped = membership::verify(&kept).map_err(storage_error)?;
+            (kept, &capped)
+        }
+        _ => (remote.to_vec(), verified),
+    };
+    let remote = remote.as_slice();
     if remote.len() <= local.len() {
         return Ok(());
     }
@@ -1131,9 +1212,15 @@ pub(crate) fn progress(db: &Connection, id: &str) -> Result<SyncProgress> {
     let mut applied = received.clone();
     // Snapshot and local operations are already materialized. A received marker
     // distinguishes new remote operations until dependency checks can apply them.
+    let first_waiting: BTreeMap<String, i64> = db
+        .prepare(&format!("SELECT o.device_id, min(o.sequence) FROM {UNAPPLIED_RECEIVED} AND o.vault_id = ?1 GROUP BY o.device_id"))
+        .map_err(storage_error)?
+        .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(storage_error)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(storage_error)?;
     for (device, (seq, _)) in &received {
-        let first: Option<i64> = db.query_row("SELECT min(o.sequence) FROM sync_operations o JOIN sync_received_operations r ON r.mutation_id = o.mutation_id LEFT JOIN sync_applied_operations a ON a.mutation_id = o.mutation_id WHERE o.vault_id = ?1 AND o.device_id = ?2 AND a.mutation_id IS NULL", params![id, device], |r| r.get(0)).map_err(storage_error)?;
-        if let Some(first) = first {
+        if let Some(&first) = first_waiting.get(device) {
             let before = u64::try_from(first - 1).map_err(storage_error)?;
             let hash = if before == 0 {
                 GENESIS_HASH.into()
@@ -1227,11 +1314,18 @@ fn read_operations(
     .collect()
 }
 
+/// FROM and WHERE for received operations (`o`) that are not applied yet; callers append `AND ...`.
+/// It reads the small received marks first (CROSS JOIN fixes that order) and opens a stored change
+/// only when it still waits. Led by `sync_operations`, SQLite read every stored change for each
+/// status poll and pass: with 44,000 changes about 2.9 s instead of 40 ms (debug build).
+const UNAPPLIED_RECEIVED: &str = "sync_received_operations r CROSS JOIN sync_operations o ON o.mutation_id = r.mutation_id
+    WHERE NOT EXISTS (SELECT 1 FROM sync_applied_operations a WHERE a.mutation_id = r.mutation_id)";
+
 /// Received operations that are not applied yet, in per-device chain order.
 fn waiting(db: &Connection, id: &str) -> Result<Vec<ChangeRecord>> {
     read_operations(
         db,
-        &format!("SELECT {OPERATION_COLUMNS} FROM sync_operations o JOIN sync_received_operations r ON r.mutation_id = o.mutation_id LEFT JOIN sync_applied_operations a ON a.mutation_id = o.mutation_id WHERE o.vault_id = ?1 AND a.mutation_id IS NULL ORDER BY o.device_id, o.sequence"),
+        &format!("SELECT {OPERATION_COLUMNS} FROM {UNAPPLIED_RECEIVED} AND o.vault_id = ?1 ORDER BY o.device_id, o.sequence"),
         [id],
     )
 }
@@ -1242,9 +1336,8 @@ const SET_ASIDE_SCHEMA: &str =
 
 fn set_aside_count(db: &Connection, id: &str) -> usize {
     db.query_row(
-        "SELECT count(*) FROM sync_set_aside_operations s JOIN sync_operations o ON o.mutation_id = s.mutation_id
-         LEFT JOIN sync_applied_operations a ON a.mutation_id = o.mutation_id
-         WHERE o.vault_id = ?1 AND a.mutation_id IS NULL",
+        "SELECT count(*) FROM sync_set_aside_operations s CROSS JOIN sync_operations o ON o.mutation_id = s.mutation_id
+         WHERE o.vault_id = ?1 AND NOT EXISTS (SELECT 1 FROM sync_applied_operations a WHERE a.mutation_id = s.mutation_id)",
         [id],
         |row| row.get::<_, u32>(0),
     )
@@ -1265,7 +1358,9 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
                         .map_err(storage_error)?;
                 }
                 Err(
-                    ApplyError::MissingGroupDependency
+                    // A change of a rotated epoch waits for its key package (`epoch_keys.rs`).
+                    ApplyError::Payload(crate::payload::PayloadError::MissingEpochKey(_))
+                    | ApplyError::MissingGroupDependency
                     | ApplyError::MissingEntryDependency
                     | ApplyError::MissingPhotoBlob
                     | ApplyError::MissingPhotoDependency
@@ -1280,7 +1375,9 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
                     | ApplyError::Payload(_)
                     | ApplyError::Json(_)
                     | ApplyError::Passkey(_)
-                    | ApplyError::PasskeyIdConflict,
+                    | ApplyError::PasskeyIdConflict
+                    // By a managing device marked as lost after it arrived.
+                    | ApplyError::FrozenAuthor,
                 ) => {
                     db.execute("INSERT OR IGNORE INTO sync_set_aside_operations (mutation_id) VALUES (?1)", [&operation.mutation_id])
                         .map_err(storage_error)?;
@@ -1311,12 +1408,21 @@ fn store_received(state: &ManagedState, membership: &VerifiedMembership, operati
         .ok_or("Unknown operation author")?;
     with_vault(state, &membership.vault_id, &membership.head, |vault| {
         let db = vault.connection();
+        // A managing device marked as lost here: nothing after its last known change.
+        if crate::merge_join::lost_freeze(db, &membership.vault_id).map_err(storage_error)?
+            .is_some_and(|freeze| !freeze.allows(&operation.device_id, operation.sequence, &operation.hash))
+        {
+            return Err("That device was marked as lost".into());
+        }
         initialize_received(db)?;
         let head = progress(db, &membership.vault_id)?
             .received
             .get(&operation.device_id)
             .cloned()
             .unwrap_or((0, GENESIS_HASH.into()));
+        if old_resend(db, &membership.vault_id, operation, &head)? {
+            return Ok(());
+        }
         let verifier = IncomingVerifier::new(
             &membership.vault_id,
             &member.device_id,
@@ -1331,6 +1437,40 @@ fn store_received(state: &ManagedState, membership: &VerifiedMembership, operati
         IncomingStore::persist_batch(db, &batch).map_err(storage_error)?;
         Ok(())
     })
+}
+
+/// True for a change at or below the received head that is acknowledged without storing it:
+/// the same change again, or an older one this PC no longer holds (below a checkpoint or a
+/// compacted floor). It could not apply anyway: the chain check accepts only head + 1. Another
+/// change at a place this PC still holds is a fork and is refused.
+fn old_resend(db: &Connection, id: &str, operation: &ChangeRecord, head: &(u64, String)) -> Result<bool> {
+    if operation.sequence == 0 || operation.sequence > head.0 {
+        return Ok(false);
+    }
+    let held: Option<String> = if operation.sequence == head.0 {
+        Some(head.1.clone())
+    } else {
+        db.query_row(
+            "SELECT hash FROM sync_operations WHERE vault_id = ?1 AND device_id = ?2 AND sequence = ?3",
+            params![id, operation.device_id, integer(operation.sequence)?],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+    };
+    match held {
+        Some(hash) if hash == operation.hash => Ok(true),
+        Some(_) => Err("Peer sent a conflicting change".into()),
+        None => {
+            crate::activity::global().record_coalesced(
+                crate::activity::Level::Info,
+                crate::activity::Category::Sync,
+                "An older change was sent again. It is already part of this PC's history".to_owned(),
+                Duration::from_secs(15 * 60),
+            );
+            Ok(true)
+        }
+    }
 }
 
 fn receive_batch<R: Read, W: Write>(
@@ -1390,9 +1530,12 @@ fn validate_peer_progress(
         } else {
             tx.query_row("SELECT hash FROM sync_operations WHERE vault_id = ?1 AND device_id = ?2 AND sequence = ?3", params![id, author, integer(*seq)?], |r| r.get(0)).optional().map_err(storage_error)?
         };
-        if known.as_ref().is_some_and(|known| known != hash)
-            || author == local_id && known.is_none()
-        {
+        // A missing own change is unknown only above this PC's head: below it, history
+        // compaction may have deleted it after every member applied it.
+        let unknown_own = author == local_id
+            && known.is_none()
+            && *seq > local_head(&tx, id, local_id)?;
+        if known.as_ref().is_some_and(|known| known != hash) || unknown_own {
             return Err("Peer reported a conflicting change head".into());
         }
     }
@@ -1411,6 +1554,14 @@ fn validate_peer_progress(
     tx.execute("INSERT INTO sync_peer_progress (vault_id, peer_device_id, progress_json) VALUES (?1, ?2, ?3) ON CONFLICT(vault_id, peer_device_id) DO UPDATE SET progress_json = excluded.progress_json",
         params![id, peer, encoded]).map_err(storage_error)?;
     tx.commit().map_err(storage_error)
+}
+
+fn local_head(db: &Connection, id: &str, local_id: &str) -> Result<u64> {
+    let head: Option<i64> = db
+        .query_row("SELECT sequence FROM sync_device_heads WHERE vault_id = ?1 AND device_id = ?2", params![id, local_id], |r| r.get(0))
+        .optional()
+        .map_err(storage_error)?;
+    Ok(head.map_or(0, |head| head.max(0) as u64))
 }
 
 /// Operations the peer lacks, in `(device_id, sequence)` order, bounded by count and bytes.
@@ -1440,13 +1591,11 @@ fn pending_operations(
         let Some(limit) = relay_limit(&device) else { continue };
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let after = integer(frontier.get(&device).map_or(0, |head| head.0))?;
-        let missing: i64 = db
-            .query_row(
-                "SELECT count(*) FROM sync_operations WHERE vault_id = ?1 AND device_id = ?2 AND sequence > ?3 AND sequence <= ?4",
-                params![id, device, after, limit],
-                |r| r.get(0),
-            )
-            .map_err(storage_error)?;
+        // Only the gap-free run right after the peer's frontier is counted and sent. Below a
+        // checkpoint or a compacted floor this PC holds gaps on purpose, and a receiver refuses a
+        // change that does not continue its chain. The peer gets older changes elsewhere.
+        let limit = gap_free_end(db, id, &device, after)?.min(limit);
+        let missing = (limit - after).max(0);
         remaining += usize::try_from(missing).map_err(storage_error)?;
         if full || missing == 0 {
             continue;
@@ -1477,6 +1626,30 @@ fn pending_operations(
     Ok((batch, remaining))
 }
 
+/// The last sequence of `device`'s gap-free run that starts right after `after`; `after` when
+/// this PC lacks `after + 1`. Both lookups use the unique (vault, device, sequence) index.
+fn gap_free_end(db: &Connection, id: &str, device: &str, after: i64) -> Result<i64> {
+    let next: bool = db
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sync_operations WHERE vault_id = ?1 AND device_id = ?2 AND sequence = ?3)",
+            params![id, device, after + 1],
+            |r| r.get(0),
+        )
+        .map_err(storage_error)?;
+    if !next {
+        return Ok(after);
+    }
+    db.query_row(
+        "SELECT o.sequence FROM sync_operations o WHERE o.vault_id = ?1 AND o.device_id = ?2 AND o.sequence > ?3
+           AND NOT EXISTS (SELECT 1 FROM sync_operations n
+                           WHERE n.vault_id = o.vault_id AND n.device_id = o.device_id AND n.sequence = o.sequence + 1)
+         ORDER BY o.sequence LIMIT 1",
+        params![id, device, after],
+        |r| r.get(0),
+    )
+    .map_err(storage_error)
+}
+
 fn send_batch<R: Read, W: Write>(
     channel: &mut EncryptedSyncChannel<R, W>,
     state: &ManagedState,
@@ -1492,6 +1665,11 @@ fn send_batch<R: Read, W: Write>(
     let (pending, remaining) = with_vault(state, &membership.vault_id, &membership.head, |vault| {
         let db = vault.connection();
         validate_peer_progress(db, &membership.vault_id, local, peer, &progress)?;
+        // Waiting for new keys (H1): nothing leaves this PC until they arrive.
+        let events = read_membership(db, &membership.vault_id)?;
+        if crate::epoch_keys::stranded(db, &events, membership, local).map_err(storage_error)? {
+            return Ok((Vec::new(), 0));
+        }
         pending_operations(
             db,
             &membership.vault_id,
@@ -1643,12 +1821,15 @@ fn serve_photos<R: Read, W: Write>(
 }
 
 /// Reads and checks a `removed1` history. Only a verified history that extends ours and removes
-/// this device makes Windows leave; anything else counts as an ordinary connection failure.
+/// this device makes Windows leave; anything else counts as an ordinary connection failure. A
+/// "Mark as lost" freeze caps the history first (L1), so the lost manager can't detach this PC. A
+/// history this PC already holds comes with the packages it waits for (H1): it takes them.
 fn accept_removal<R: Read, W: Write>(
     state: &ManagedState,
     frames: &mut SyncFrames<R, W>,
     stored: &[MembershipEvent],
     local_device: &str,
+    freeze: Option<&crate::merge_join::LostFreeze>,
 ) -> String {
     let Ok(history) = frames.receive(1_000_000) else {
         return INTERRUPTED.into();
@@ -1656,7 +1837,31 @@ fn accept_removal<R: Read, W: Write>(
     let Ok(received) = serde_json::from_slice::<Vec<MembershipEvent>>(&history) else {
         return INTERRUPTED.into();
     };
-    adopt_history(state, stored, &received, local_device)
+    let received = crate::merge_join::cap(freeze, received);
+    let known = !received.is_empty() && received.len() <= stored.len()
+        && received.iter().zip(stored).all(|(left, right)| left.hash == right.hash);
+    let outcome = if known { MEMBERSHIP_UPDATED.to_owned() } else { adopt_history(state, stored, &received, local_device) };
+    // A newer server also sends the key packages of the epochs this PC missed (`epoch_keys.rs`).
+    if outcome == MEMBERSHIP_UPDATED
+        && let Ok(frame) = frames.receive(1_000_000)
+        && let Some((_, sets)) = crate::epoch_keys::parse_frame(&frame)
+        && let Ok(mut app) = state.lock()
+    {
+        let identity = app.store.identity_store();
+        if let (Some(vault), Ok(private)) = (app.unlocked.as_mut(), identity.x25519_private()) {
+            if let Ok(events) = vault.stored_membership()
+                && let Ok(verified) = membership::verify(&events)
+            {
+                let opened = crate::epoch_keys::accept_packages(vault.connection(), &events, &verified, local_device, &private, &sets);
+                if known && opened.unwrap_or(0) == 0 {
+                    return REJECTED.into();
+                }
+            }
+        }
+    } else if known {
+        return REJECTED.into();
+    }
+    outcome
 }
 
 /// Acts on a signed history that is longer than ours: leaves the group when it removes this
@@ -1928,6 +2133,49 @@ mod tests {
     }
 
     #[test]
+    fn waiting_changes_are_found_from_the_received_marks() {
+        let mut db = Connection::open_in_memory().unwrap();
+        ChangeStore::initialize(&db).unwrap();
+        let signer = SigningKey::from_bytes(&[17; 32]);
+        let mut previous = GENESIS_HASH.to_owned();
+        let mut operations = Vec::new();
+        for sequence in 1..=3u64 {
+            let mutation = format!("phone-change-{sequence}");
+            let payload = crate::payload::encrypt(&[4; 32], "group", "vault-a", &mutation, "phone-folder", b"{}").unwrap();
+            let operation = ChangeRecord::create_signed_with("vault-a", "phone", sequence, previous.as_str(), mutation.as_str(),
+                "group", "phone-folder", ChangeKind::Upsert, sequence - 1, RecordVersion::from_entries([("phone", sequence)]),
+                "2026-10-02T12:00:00Z", payload.ciphertext, payload.nonce, |bytes| Ok::<_, ()>(signer.sign(bytes).to_bytes()))
+                .unwrap();
+            previous = operation.hash.clone();
+            operations.push(operation);
+        }
+        let key = signer.verifying_key().to_bytes();
+        let verifier = IncomingVerifier::new("vault-a", "phone", key, 0, GENESIS_HASH).unwrap();
+        IncomingStore::persist_batch(&mut db, &verifier.verify_batch(operations.clone()).unwrap()).unwrap();
+        db.execute(
+            "INSERT INTO sync_applied_operations (mutation_id, change_hash, outcome, applied_at_utc) VALUES ('phone-change-1', ?1, 'applied', 'now')",
+            [&operations[0].hash],
+        )
+        .unwrap();
+
+        let ids: Vec<String> = waiting(&db, "vault-a").unwrap().into_iter().map(|operation| operation.mutation_id).collect();
+        assert_eq!(ids, ["phone-change-2", "phone-change-3"], "only unapplied changes, in chain order");
+        assert!(waiting(&db, "vault-b").unwrap().is_empty(), "another group's changes never wait here");
+        let heads = progress(&db, "vault-a").unwrap();
+        assert_eq!(heads.received["phone"], (3, operations[2].hash.clone()));
+        assert_eq!(heads.applied["phone"], (1, operations[0].hash.clone()), "applied stops before the first waiting change");
+        db.execute_batch(SET_ASIDE_SCHEMA).unwrap();
+        db.execute("INSERT INTO sync_set_aside_operations (mutation_id) VALUES ('phone-change-1'), ('phone-change-2')", []).unwrap();
+        assert_eq!(set_aside_count(&db, "vault-a"), 1, "an applied change no longer counts as set aside");
+
+        // The plan starts from the received marks, so a long history is never read in full.
+        let plan: String = db
+            .query_row(&format!("EXPLAIN QUERY PLAN SELECT o.mutation_id FROM {UNAPPLIED_RECEIVED} AND o.vault_id = 'vault-a'"), [], |row| row.get(3))
+            .unwrap();
+        assert!(plan.starts_with("SCAN r"), "{plan}");
+    }
+
+    #[test]
     fn staging_marker_and_operation_roll_back_together() {
         let mut db = Connection::open_in_memory().unwrap();
         ChangeStore::initialize(&db).unwrap();
@@ -2048,6 +2296,10 @@ mod tests {
                         .unwrap(),
                     &signature
                 ));
+                // Both announce epoch-keys-v1: one key frame each way, as Android sends it.
+                channel.send(&crate::epoch_keys::encode_frame(None, &[])).unwrap();
+                let (statement, _) = crate::epoch_keys::parse_frame(&channel.receive().unwrap()).unwrap();
+                assert_eq!(statement.unwrap().device_id, server_local.device_id);
                 let change = server_change;
                 let mut received_local: Option<ChangeRecord> = acknowledged;
                 loop {
@@ -2405,6 +2657,55 @@ mod tests {
     }
 
     #[test]
+    fn outgoing_batches_stop_at_a_gap_in_held_history() {
+        let synthetic = synthetic_vault(6);
+        let mut app = synthetic.state.lock().unwrap();
+        let db = app.unlocked.as_mut().unwrap().connection();
+        let author = synthetic.local.device_id.clone();
+        let all: Vec<ChangeRecord> = pending_operations(db, "vault-a", &BTreeMap::new(), 100, usize::MAX, &|_| Some(u64::MAX))
+            .unwrap().0.into_iter().map(|(op, _)| op).collect();
+        // Change 3 is gone, as below a checkpoint or a compacted floor.
+        db.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+        db.execute("DELETE FROM sync_operations WHERE device_id = ?1 AND sequence = 3", [&author]).unwrap();
+        let (first, remaining) = pending_operations(db, "vault-a", &BTreeMap::new(), 100, usize::MAX, &|_| Some(u64::MAX)).unwrap();
+        assert_eq!(first.iter().map(|(op, _)| op.sequence).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(remaining, 2, "only the gap-free run counts");
+        let at_two = BTreeMap::from([(author.clone(), (2, all[1].hash.clone()))]);
+        let (none, remaining) = pending_operations(db, "vault-a", &at_two, 100, usize::MAX, &|_| Some(u64::MAX)).unwrap();
+        assert_eq!((none.len(), remaining), (0, 0), "a peer below the gap gets nothing of that author from here");
+        let at_three = BTreeMap::from([(author.clone(), (3, all[2].hash.clone()))]);
+        let (rest, remaining) = pending_operations(db, "vault-a", &at_three, 100, usize::MAX, &|_| Some(u64::MAX)).unwrap();
+        assert_eq!(rest.iter().map(|(op, _)| op.sequence).collect::<Vec<_>>(), vec![4, 5, 6]);
+        assert_eq!(remaining, 3);
+        let (capped, _) = pending_operations(db, "vault-a", &at_three, 100, usize::MAX, &|_| Some(5)).unwrap();
+        assert_eq!(capped.iter().map(|(op, _)| op.sequence).collect::<Vec<_>>(), vec![4, 5], "a removal cutoff still applies");
+
+        // Resends at or below the received head.
+        let head = (6, all[5].hash.clone());
+        assert!(old_resend(db, "vault-a", &all[5], &head).unwrap(), "the head again");
+        assert!(old_resend(db, "vault-a", &all[0], &head).unwrap(), "a held older change again");
+        assert!(old_resend(db, "vault-a", &all[2], &head).unwrap(), "an older change this PC no longer holds");
+        let mut fork = all[1].clone();
+        fork.hash = "f".repeat(64);
+        assert!(old_resend(db, "vault-a", &fork, &head).is_err(), "another change at a held place is a fork");
+        let mut next = all[5].clone();
+        next.sequence = 7;
+        assert!(!old_resend(db, "vault-a", &next, &head).unwrap(), "head + 1 goes to the chain check");
+
+        // A peer may report applying an own change this PC no longer holds (compacted); one above
+        // this PC's head is still refused.
+        let report = |sequence: u64, hash: &str| crate::progress::SyncProgress {
+            received: BTreeMap::from([(author.clone(), (sequence, hash.to_owned()))]),
+            applied: BTreeMap::from([(author.clone(), (sequence, hash.to_owned()))]),
+        };
+        validate_peer_progress(db, "vault-a", &author, "phone", &report(3, &all[2].hash)).unwrap();
+        assert!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64))).is_err());
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    #[test]
     fn sessions_continue_until_caught_up_and_stop_without_progress() {
         let mut calls = 0;
         let report = run_sessions(|| {
@@ -2466,7 +2767,7 @@ mod tests {
         tracker.fail(TIMED_OUT);
         tracker.schedule_retry(Some(Instant::now() + Duration::from_secs(30)));
         let mut status = SyncStatus {
-            last_sync: String::new(), waiting_to_apply: 0, set_aside: 0, conflicts: 0,
+            last_sync: String::new(), waiting_to_apply: 0, set_aside: 0, waiting_for_keys: false, conflicts: 0,
             phone_address: String::new(), automatic: true, running: false,
             message: String::new(), phase: "idle", progress_done: 0, progress_total: 0,
             last_error: String::new(), last_attempt: String::new(),
@@ -2899,6 +3200,119 @@ mod tests {
     }
 
     #[test]
+    fn leaving_gives_this_pc_a_new_identity_so_it_can_pair_again() {
+        let synthetic = synthetic_vault(2);
+        let old = synthetic.local.clone();
+        let mut app = synthetic.state.lock().unwrap();
+        app.unlocked.as_mut().unwrap().leave_group(true).unwrap();
+        let new = app.store.identity_store().get_or_create().unwrap();
+        assert_ne!(new.device_id, old.device_id);
+        assert_ne!(new.public_key, old.public_key);
+        // The request names and is signed by the old identity, and still verifies with its key.
+        let pending = app.unlocked.as_ref().unwrap().pending_leave().unwrap().unwrap();
+        assert_eq!(pending.request.device_id, old.device_id);
+        assert!(verify_signature(&old.public_key, &pending.request.signing_bytes(), &pending.signature));
+        // The independent history after the leave is signed by the new identity only.
+        let authors: Vec<String> = app.unlocked.as_mut().unwrap().connection()
+            .prepare("SELECT DISTINCT device_id FROM sync_operations").unwrap()
+            .query_map([], |row| row.get(0)).unwrap().collect::<std::result::Result<_, _>>().unwrap();
+        assert_eq!(authors, vec![new.device_id.clone()]);
+        // Joining again with this identity keeps the old identity's request: it removes the old entry.
+        assert!(!app.unlocked.as_ref().unwrap().forget_own_pending_leave().unwrap());
+        app.unlocked = None;
+        let vault = app.store.unlock("synthetic-test-password").unwrap();
+        assert_eq!(app.store.identity_store().get_or_create().unwrap(), new, "unlocking keeps the new identity");
+        assert!(vault.pending_leave().unwrap().is_some());
+    }
+
+    #[test]
+    fn an_unlock_finishes_an_identity_change_that_stopped_after_the_leave() {
+        let synthetic = synthetic_vault(1);
+        let mut app = synthetic.state.lock().unwrap();
+        app.unlocked.as_mut().unwrap().leave_group(true).unwrap();
+        let current = app.store.identity_store().get_or_create().unwrap();
+        // As if the app stopped after the leave committed but before the identity changed.
+        crate::membership_exit::retire_identity(app.unlocked.as_mut().unwrap().connection(), &current.device_id, 1).unwrap();
+        app.unlocked = None;
+        let _vault = app.store.unlock("synthetic-test-password").unwrap();
+        assert_ne!(app.store.identity_store().get_or_create().unwrap().device_id, current.device_id);
+    }
+
+    /// Two logins from the phone: one applies, one waits for a folder that never arrives. A
+    /// photo waits for its image.
+    fn stage_unapplied(synthetic: &Synthetic) {
+        let applies = phone_op(1, GENESIS_HASH, "entry", "entry-a", RecordVersion::from_entries([("phone", 1)]), 0,
+            serde_json::json!({"entry": login_entry("entry-a", "Applies"), "groupIds": []}));
+        let waits = phone_op(2, &applies.hash, "entry", "entry-w", RecordVersion::from_entries([("phone", 1)]), 0,
+            serde_json::json!({"entry": login_entry("entry-w", "Waits for its folder"), "groupIds": ["missing-folder"]}));
+        let photo = phone_op(3, &waits.hash, "photo", "photo-w", RecordVersion::from_entries([("phone", 1)]), 0,
+            serde_json::json!({"photo": {"id": "photo-w", "entryId": "entry-a", "isCover": true, "addedAt": 5,
+                "blobHash": "a".repeat(64), "blobSize": 10}}));
+        stage(synthetic, &[applies, waits, photo]);
+    }
+
+    #[test]
+    fn a_forced_leave_keeps_unapplied_entries_in_recently_deleted() {
+        let synthetic = synthetic_vault(1);
+        stage_unapplied(&synthetic);
+        let mut app = synthetic.state.lock().unwrap();
+        let vault = app.unlocked.as_mut().unwrap();
+
+        let kept = vault.leave_after_removal("Pixel 8", 1_000).unwrap();
+
+        assert_eq!(kept, crate::vault::RemovalKept { kept_entries: 1, other_changes: 1 });
+        assert!(!vault.is_enrolled().unwrap());
+        // What could apply did apply before the leave.
+        assert!(vault.list_entries().unwrap().iter().any(|entry| entry["title"] == "Applies"));
+        let trash = vault.trashed_items().unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!((trash[0].title.as_str(), trash[0].reason.as_str(), trash[0].item_type.as_str()),
+            ("Waits for its folder", crate::local_recovery::REASON_REMOVAL, "PASSWORD"));
+        assert_eq!(vault.membership_status().unwrap().removed_notice.unwrap().kept, 1, "the banner says what was kept");
+        assert_eq!(kept.message().unwrap(), "1 item that had not finished syncing is in Recently deleted. Restore it there within 30 days. \
+1 other change (folders, passkeys or photos) could not be kept here. The devices that made them still have them.");
+        // It restores as a new item.
+        vault.restore_trashed(&trash[0].id).unwrap();
+        assert!(vault.list_entries().unwrap().iter().any(|entry| entry["title"] == "Waits for its folder"));
+        assert!(vault.trashed_items().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_forced_leave_stays_in_the_group_when_it_cannot_keep_the_unapplied_changes() {
+        let synthetic = synthetic_vault(1);
+        stage_unapplied(&synthetic);
+        let mut app = synthetic.state.lock().unwrap();
+        let vault = app.unlocked.as_mut().unwrap();
+        crate::local_recovery::initialize(vault.connection()).unwrap();
+        vault.connection().execute_batch(
+            "CREATE TRIGGER fail_trash BEFORE INSERT ON local_trash BEGIN SELECT RAISE(ABORT, 'disk full'); END;").unwrap();
+
+        assert!(vault.leave_after_removal("Pixel 8", 1_000).is_err());
+        assert!(vault.is_enrolled().unwrap(), "nothing is lost: the PC stays in the group");
+        assert_eq!(waiting(vault.connection(), "vault-a").unwrap().len(), 2, "the unapplied changes stay");
+
+        // The next removal notice tries again; nothing is kept twice.
+        vault.connection().execute_batch("DROP TRIGGER fail_trash;").unwrap();
+        assert_eq!(vault.leave_after_removal("Pixel 8", 2_000).unwrap().kept_entries, 1);
+        assert!(!vault.is_enrolled().unwrap());
+        assert_eq!(vault.trashed_items().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_removal_copy_is_kept_only_once_and_expires_like_a_deleted_item() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        // `purge` also reads the vault's entries for previous passwords.
+        db.execute_batch("CREATE TABLE local_entries (id TEXT PRIMARY KEY)").unwrap();
+        let data = serde_json::json!({"title": "T"});
+        assert!(crate::local_recovery::keep_removal_copy(&db, "unapplied-h", "e", "entry", "PASSWORD", "T", &data, &[], 0).unwrap());
+        assert!(!crate::local_recovery::keep_removal_copy(&db, "unapplied-h", "e", "entry", "PASSWORD", "T", &data, &[], 0).unwrap());
+        crate::local_recovery::purge(&db, crate::local_recovery::TRASH_DAYS * 24 * 60 * 60 * 1000 - 1).unwrap();
+        assert_eq!(crate::local_recovery::trashed_items(&db).unwrap().len(), 1);
+        crate::local_recovery::purge(&db, crate::local_recovery::TRASH_DAYS * 24 * 60 * 60 * 1000 + 1).unwrap();
+        assert!(crate::local_recovery::trashed_items(&db).unwrap().is_empty());
+    }
+
+    #[test]
     fn leave_request_is_signed_before_leaving_and_retried_until_the_manager_confirms() {
         let synthetic = synthetic_vault(0);
         let head = {
@@ -2965,6 +3379,114 @@ mod tests {
         assert!(endpoint("127.0.0.1:1234", "vault").is_err());
         assert!(endpoint("192.168.1.4:80", "vault").is_err());
     }
+    #[test]
+    fn a_pc_offline_through_a_rotation_gets_its_keys_from_the_package_set() {
+        // Its own group ID: the keyring is process-wide and other tests use "vault-a".
+        const VAULT: &str = "vault-rotation";
+        let directory = std::env::temp_dir().join(format!("nuvori-rotation-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let identity = crate::identity::DeviceIdentityStore::new(directory.join("device-identity-v1.json"));
+        let local = identity.get_or_create().unwrap();
+        let phone_key = SigningKey::from_bytes(&[17; 32]);
+        let sign = |mut event: MembershipEvent| {
+            let bytes = event.signing_bytes().unwrap();
+            event.signature = URL_SAFE_NO_PAD.encode(phone_key.sign(&bytes).to_bytes());
+            let mut digest = Sha256::new();
+            digest.update(&bytes);
+            digest.update(event.signature.as_bytes());
+            event.hash = hex::encode(digest.finalize());
+            event
+        };
+        let event = |sequence: u64, previous: &str, action: MembershipAction, subject: &str, key: String, epoch: u64| MembershipEvent {
+            vault_id: VAULT.into(), sequence, format_version: 1, previous_hash: previous.into(), action,
+            issuer_device_id: "phone".into(), subject_device_id: subject.into(), subject_public_key: key, key_epoch: epoch,
+            signature: String::new(), hash: String::new() };
+        let genesis = sign(event(1, GENESIS_HASH, MembershipAction::Genesis, "phone", URL_SAFE_NO_PAD.encode(phone_key.verifying_key().to_bytes()), 1));
+        let add_pc = sign(event(2, &genesis.hash, MembershipAction::Add, &local.device_id, local.public_key_base64_url(), 1));
+        let add_old = sign(event(3, &add_pc.hash, MembershipAction::Add, "removed",
+            URL_SAFE_NO_PAD.encode(SigningKey::from_bytes(&[55; 32]).verifying_key().to_bytes()), 1));
+        let remove = sign(event(4, &add_old.hash, MembershipAction::Remove, "removed", String::new(), 2));
+        let events = vec![genesis, add_pc, add_old, remove.clone()];
+        let verified = membership::verify(&events).unwrap();
+        // This PC's statement is what the phone sealed to.
+        let statement = identity.key_statement(VAULT).unwrap();
+        assert!(statement.valid(VAULT, &local.public_key));
+        let (s2, k2) = ([0xA2u8; 32], [0xB2u8; 32]);
+        let sealed = crate::epoch_keys::seal_package_with(VAULT, 2, &local.device_id, &statement.public_key().unwrap(),
+            &s2, &k2, &[0x41; 32], &[0x51; 12]);
+        let mut set = crate::epoch_keys::PackageSet { vault_id: VAULT.into(), epoch: 2, remove_hash: remove.hash.clone(),
+            packages: std::collections::BTreeMap::from([(local.device_id.clone(), URL_SAFE_NO_PAD.encode(&sealed))]),
+            signature: String::new() };
+        set.signature = URL_SAFE_NO_PAD.encode(phone_key.sign(&set.signing_bytes()).to_bytes());
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE local_sync_settings (id INTEGER PRIMARY KEY, vault_id TEXT NOT NULL);
+            INSERT INTO local_sync_settings VALUES (1, 'vault-rotation');
+            CREATE TABLE sync_group_state (vault_id TEXT NOT NULL, transport_secret BLOB NOT NULL, content_key BLOB NOT NULL);").unwrap();
+        db.execute("INSERT INTO sync_group_state VALUES (?1, ?2, ?3)", params![VAULT, &[5u8; 32][..], &[4u8; 32][..]]).unwrap();
+        // K(2) is derived from the package key and K(1) (H3): the package alone does not give it.
+        let content2 = crate::epoch_keys::content_key_from(&[4u8; 32], VAULT, 2, &k2);
+        // A change of epoch 2 before the keys: it waits.
+        let plain = br#"{"group":{"id":"g2","name":"After","notes":"","folderType":""}}"#;
+        let payload = crate::payload::encrypt_epoch(&*content2, 2, "group", VAULT, "m2", "g2", plain, [3; 12]).unwrap();
+        let change = ChangeRecord::create(VAULT, "phone", 1, GENESIS_HASH, "m2", "group", "g2", ChangeKind::Upsert, 0,
+            RecordVersion::from_entries([("phone", 1)]), "2026-11-23T00:00:00Z", payload.ciphertext, payload.nonce, "sig");
+        assert!(matches!(crate::payload::decrypt(&[4u8; 32], &change), Err(crate::payload::PayloadError::MissingEpochKey(2))));
+        let private = identity.x25519_private().unwrap();
+        let mut forged = set.clone();
+        forged.signature = URL_SAFE_NO_PAD.encode(SigningKey::from_bytes(&[9; 32]).sign(&forged.signing_bytes()).to_bytes());
+        assert_eq!(crate::epoch_keys::accept_packages(&db, &events, &verified, &local.device_id, &private, &[forged]).unwrap(), 0);
+        assert_eq!(crate::epoch_keys::accept_packages(&db, &events, &verified, &local.device_id, &private, &[set]).unwrap(), 1);
+        assert_eq!(crate::payload::decrypt(&[4u8; 32], &change).unwrap(), plain);
+        // The transport secret of epoch 2 is the random one, not the root's HMAC; epoch 3 chains from it.
+        let random = crate::epoch_keys::random_secrets_in(&db, VAULT).unwrap();
+        assert_eq!(*crate::membership_exit::transport_epoch_secret(&[5u8; 32], VAULT, 2, &random).unwrap(), s2.to_vec());
+        // At the next unlock the stored keys come back into memory, for the vault that loads them.
+        crate::epoch_keys::forget(VAULT);
+        let owner = crate::epoch_keys::KeyringOwner::new();
+        crate::epoch_keys::load(&db, &owner).unwrap();
+        assert_eq!(*crate::epoch_keys::content_key(VAULT, 2).unwrap(), *content2);
+        drop(owner);
+        assert!(crate::epoch_keys::content_key(VAULT, 2).is_none());
+        std::fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_phone_marked_as_lost_adds_no_device_and_no_change_here() {
+        let synthetic = synthetic_vault(0);
+        let key = SigningKey::from_bytes(&[17; 32]);
+        let change = |sequence: u64| {
+            let mutation = uuid::Uuid::new_v4().to_string();
+            let sealed = crate::payload::encrypt(&[4u8; 32], "entry", "vault-a", &mutation, "e1", b"{}").unwrap();
+            ChangeRecord::create_signed_with("vault-a", "phone", sequence, GENESIS_HASH, mutation, "entry", "e1",
+                ChangeKind::Upsert, 0, RecordVersion::from_entries([("phone", 1)]), "2026-11-23T00:00:00Z",
+                sealed.ciphertext, sealed.nonce, |message| Ok::<_, ()>(ed25519_dalek::Signer::sign(&key, message).to_bytes()))
+                .unwrap()
+        };
+        {
+            let mut app = synthetic.state.lock().unwrap();
+            let vault = app.unlocked.as_mut().unwrap();
+            vault.mark_manager_lost().unwrap();
+            assert!(vault.membership_status().unwrap().manager_lost);
+            // The lost phone (or whoever holds it) adds a device: this PC keeps the history it had.
+            let events = read_membership(vault.connection(), "vault-a").unwrap();
+            let rogue = DeviceIdentity { device_id: "rogue".into(),
+                public_key: SigningKey::from_bytes(&[99; 32]).verifying_key().to_bytes() };
+            let mut remote = events.clone();
+            remote.push(signed_member(remote.last(), &rogue));
+            let verified = membership::verify(&remote).unwrap();
+            persist_membership(vault.connection(), "vault-a", &events, &remote, &verified).unwrap();
+            assert_eq!(read_membership(vault.connection(), "vault-a").unwrap().len(), 2);
+            assert_eq!(crate::merge_join::cap(crate::merge_join::lost_freeze(vault.connection(), "vault-a").unwrap().as_ref(), remote).len(), 2);
+        }
+        // A change by the phone after its last known one is refused.
+        let refused = store_received(&synthetic.state, &synthetic.membership, &change(1)).unwrap_err();
+        assert!(refused.contains("marked as lost"), "{refused}");
+        // "It's back": the same change is accepted again.
+        synthetic.state.lock().unwrap().unlocked.as_mut().unwrap().undo_manager_lost().unwrap();
+        store_received(&synthetic.state, &synthetic.membership, &change(1)).unwrap();
+        std::fs::remove_dir_all(&synthetic.directory).ok();
+    }
+
     #[test]
     fn android_operation_wire_round_trips() {
         let fixture: serde_json::Value =

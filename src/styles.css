@@ -173,6 +173,17 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
   .nav-item[data-tooltip]:hover::after, .nav-item[data-tooltip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
   .nav-divider { margin: var(--s2) 6px; }
 }
+/* Short icon rail (e.g. 800x600, or 1280x800 at 125-150% scaling): the rail would be taller than the
+   window, so theme and lock move to the top bar and the items get more compact. */
+@media (max-width: 1099px) and (min-width: 760px) and (max-height: 719px) {
+  .sidebar-footer { display: none; }
+  .narrow-only { display: inline-grid !important; }
+}
+@media (max-width: 1099px) and (min-width: 760px) and (max-height: 579px) {
+  .sidebar { gap: var(--s2); }
+  .nav-item { min-height: 36px; }
+  .nav-divider { margin: 4px 6px; }
+}
 
 /* Narrow: phone layout with a bottom bar. */
 @media (max-width: 759px) {
@@ -211,6 +222,10 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .autotype-match { color: var(--primary); font-weight: 600; font-size: 12px; }
 /* Import from KeePass (pages/KeepassImport.tsx) */
 .file-input { padding: 6px; }
+/* KeePass import: a styled button with the chosen file name, not the browser's file control. */
+.file-picker { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.file-picker .btn { flex: 0 0 auto; }
+.file-picker-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .keepass-counts { display: grid; gap: 4px; padding-left: 20px; }
 /* Recently deleted (pages/TrashPage.tsx) */
 .trash-row { display: flex; align-items: center; gap: 12px; padding: 10px var(--s4); }
@@ -609,6 +624,9 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .dialog-header h2 { font-size: 17px; font-weight: 600; }
 .dialog-description { color: var(--muted); }
 .dialog-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--s2); padding-top: var(--s2); }
+/* In a short window the dialog scrolls; its actions stay in view at the bottom. */
+.dialog-surface:has(> .dialog-footer) { padding-bottom: 0; }
+.dialog-footer { position: sticky; bottom: 0; padding-bottom: var(--s5); background: var(--surface); }
 
 /* ---------- Search palette ---------- */
 .palette { width: min(calc(100vw - 24px), 640px); max-height: min(72vh, 620px); margin: 12vh auto auto; padding: 0; border: 1px solid var(--hairline); border-radius: var(--r-dialog); background: var(--surface); color: var(--text); box-shadow: var(--shadow-float); overflow: hidden; }
@@ -866,6 +884,7 @@ details[open]::details-content { block-size: auto; }
 .device-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--primary-container); color: var(--on-primary-container); font-size: 11.5px; font-weight: 600; }
 .badge svg { width: 12px; height: 12px; }
+.badge-removed { background: var(--warning-bg); color: var(--warning-fg); }
 .banner-action { align-self: center; }
 @media (max-width: 559px) {
   .banner:has(.banner-action) { display: grid; grid-template-columns: auto minmax(0, 1fr); }

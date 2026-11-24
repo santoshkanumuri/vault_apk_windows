@@ -1,0 +1,464 @@
+{
+  "format": "nuvori-sync-sign-in-method-vectors",
+  "version": 1,
+  "feature": "sign-in-methods-v1",
+  "entityType": "sign_in_method",
+  "idPrefix": "nuvori-sync-sign-in-method-id-v1:",
+  "contentKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "vaultId": "vault-sign-in-methods-test",
+  "mutationId": "6f1d2a9c-3b47-4e85-a0c2-91d7e5b3f468",
+  "providers": [
+    "google",
+    "apple",
+    "microsoft",
+    "github",
+    "facebook",
+    "x",
+    "linkedin",
+    "discord",
+    "amazon",
+    "slack"
+  ],
+  "maxAccountChars": 256,
+  "maxUseCount": 1000000000,
+  "entityIds": [
+    {
+      "site": "example.com",
+      "provider": "github",
+      "account": "octocat",
+      "accountKey": "octocat",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86"
+    },
+    {
+      "site": "example.com",
+      "provider": "github",
+      "account": "OctoCat",
+      "accountKey": "octocat",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86"
+    },
+    {
+      "site": "example.com",
+      "provider": "github",
+      "account": "  octocat ",
+      "accountKey": "octocat",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86"
+    },
+    {
+      "site": "example.com",
+      "provider": "github",
+      "account": "",
+      "accountKey": "",
+      "entityId": "cc8b9a5dcbcba191da8a60b5901dc9ba"
+    },
+    {
+      "site": "example.com",
+      "provider": "google",
+      "account": "octocat",
+      "accountKey": "octocat",
+      "entityId": "f76868ccaa657d5ce56e5370e7e88e25"
+    },
+    {
+      "site": "bbc.co.uk",
+      "provider": "apple",
+      "account": "x7k2m9qp4z@privaterelay.appleid.com",
+      "accountKey": "x7k2m9qp4z@privaterelay.appleid.com",
+      "entityId": "7c39b4bdf82441d58bf11c2dbe0d7c25"
+    },
+    {
+      "site": "example.com",
+      "provider": "microsoft",
+      "account": "\u00dcn\u00efcode@Ex\u00e4mple.com",
+      "accountKey": "\u00fcn\u00efcode@ex\u00e4mple.com",
+      "entityId": "2dc1d02568a5e91be172e70dc63c3a57"
+    },
+    {
+      "site": "example.com",
+      "provider": "x",
+      "account": "\u039f\u0394\u03a5\u03a3\u03a3\u0395\u03a5\u03a3",
+      "accountKey": "\u03bf\u03b4\u03c5\u03c3\u03c3\u03b5\u03c5\u03c2",
+      "entityId": "72ee00a5a19a0e525b9075a3f1a10f93"
+    },
+    {
+      "site": "example.com",
+      "provider": "x",
+      "account": "\u0130stanbul",
+      "accountKey": "i\u0307stanbul",
+      "entityId": "09c98f020630781258772b5bf9408f9f"
+    }
+  ],
+  "sites": {
+    "valid": [
+      "example.com",
+      "bbc.co.uk",
+      "alice.github.io",
+      "xn--bcher-kva.example",
+      "a-b.io",
+      "my-bank.example.org"
+    ],
+    "invalid": [
+      "",
+      "Example.com",
+      "example",
+      "https://example.com",
+      "example.com/",
+      "-example.com",
+      "exa_mple.com",
+      "127.0.0.1",
+      "example..com",
+      ".example.com",
+      "example.com.",
+      "example.com:443",
+      "b\u00fccher.example"
+    ]
+  },
+  "accounts": {
+    "valid": [
+      "",
+      "octocat",
+      "@jack",
+      "jamie@example.com",
+      "x7k2m9qp4z@privaterelay.appleid.com",
+      "Jamie Doe",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "  padded@example.com  ",
+      "\u00dcn\u00efcode@Ex\u00e4mple.com"
+    ],
+    "invalid": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "line\nbreak",
+      "tab\tinside",
+      "nul\u0000",
+      "evil\u202emoc.elpmaxe",
+      "zero\u200bwidth",
+      "\ufeffbom"
+    ]
+  },
+  "cases": [
+    {
+      "name": "valid upsert",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"OctoCat\",\"firstUsedAt\":1700000000000,\"lastUsedAt\":1790000000000,\"useCount\":41}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7M4HN7k3mTV5hSy4Mi89-LBUQR46qaeQmaVFvX3PchgPRHool1O01oUoYULOQk7ng9CWYKYl5r02U9gyFnLcP9_XhVKAilBlIOf1FL8uIKMRfAKISdgoOW-Th1SJpznk0",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": true,
+      "expected": {
+        "site": "example.com",
+        "provider": "github",
+        "account": "OctoCat",
+        "firstUsedAt": 1700000000000,
+        "lastUsedAt": 1790000000000,
+        "useCount": 41
+      }
+    },
+    {
+      "name": "unknown account is an empty string",
+      "kind": "upsert",
+      "entityId": "cc8b9a5dcbcba191da8a60b5901dc9ba",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MjTwtmlOAUM4rmoAvwNjdagZYpYePKEf-EA6DrbMzivZbsMw2cixrRpsUW61w90QAw_BHeVRKE5_sSRZcdSmp",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": true,
+      "expected": {
+        "site": "example.com",
+        "provider": "github",
+        "account": "",
+        "firstUsedAt": 1,
+        "lastUsedAt": 2,
+        "useCount": 1
+      }
+    },
+    {
+      "name": "extra keys are ignored",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"OctoCat\",\"firstUsedAt\":1700000000000,\"lastUsedAt\":1790000000000,\"useCount\":41,\"icon\":\"x\"},\"v\":2}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7M4HN7k3mTV5hSy4Mi89-LBUQR46qaeQmaVFvX3PchgPRHool1O01oUoYULOQk7ng9CWYKYl5r02U9gyFnLcP9_XhVKAilBlIOf1FL8uJbbgafej_zeZx3qvUDDjDdtxxVvxyEqvckPTuLUlEwo6AdUA",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": true,
+      "expected": {
+        "site": "example.com",
+        "provider": "github",
+        "account": "OctoCat",
+        "firstUsedAt": 1700000000000,
+        "lastUsedAt": 1790000000000,
+        "useCount": 41
+      }
+    },
+    {
+      "name": "entity id of another account",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"hubot\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7Mx2Vtk07QD5gYgJc49fmMNVM188nUah-JDwqUmJJi1aA25pt_JUMmRoYFOvg05E1rEW1GKNZ1drOb_W5lXCbi359Cjic",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "entity id of another provider",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"google\",\"account\":\"octocat\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgUMX4i848HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmaT0mLjbRl5bcS9vgxNVU2H9cVCvIC5UwnX34BZBom0NC7tFoi-blLx-38_1C4yA",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "unknown provider",
+      "kind": "upsert",
+      "entityId": "4d22464685511432e2dc99d55d6dcc87",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"gitlab\",\"account\":\"octocat\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt7zhsk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmaT0mLjbRl5bcS9vgxNVU2H9cVCvIC5UwnX34BZBomj_wKJ58-r00NoIAqY6x9Qw",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "provider id in capitals",
+      "kind": "upsert",
+      "entityId": "7a9cc498a4c903098276de388bb48f8a",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"GitHub\",\"account\":\"octocat\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LAVt7Xksk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmaT0mLjbRl5bcS9vgxNVU2H9cVCvIC5UwnX34BZBom6SYLWIYbrp4bgHxtUXisGQ",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "invalid site",
+      "kind": "upsert",
+      "entityId": "c5f30951f3488491c7f788ecc75bf42c",
+      "plaintext": "{\"signInMethod\":{\"site\":\"Example.com\",\"provider\":\"github\",\"account\":\"octocat\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7FdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmaT0mLjbRl5bcS9vgxNVU2H9cVCvIC5UwnX34BZBomOv5RfC4NkDRBmIzhz5E2Iw",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "account too long",
+      "kind": "upsert",
+      "entityId": "7c5efe7bc023f2518d5ce5e32374c564",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MznFunVuTQtsfiIQq4M2eMVYV5oqPOlLKAgqGjaZw0aUW89gkdg5lUpQBGPYg61goSj1aNAY6gjRs0nA2fJKssDtBOgyHCEYBahIQp7IWLQ6ddDCwIt9u6elOTSee7E9JHJIgk27JfERrKHLlA-b9qbES-XG5vIxjectvoi_1r5jFaAA6iDV1WvPm7PzaDCm2__H2A6k7XM0pUFN6HiL6uf7Iu3E_5l7V3n4Q-AVNTKo6pX7M8Y_SHXkv5mfKK20bu_PWngKaJZjLkqBxdqgNrfHBtn3hScq621W_qVcj29L5Yq2wPJ3blTTO3E_6n56RaSNSbQZ0OShIsOe-CCVm7xzhioS4NmRJ4RK36dosww1o9CYuOqZGmGgfEiucUQiYFAu0ijNnoaK0bLviDZjRB2xbPDXWpvgz5X6_DZyVMWk",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "account with a bidi override",
+      "kind": "upsert",
+      "entityId": "afea533bb0984023d5ce023ec5da645e",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"evil\u202ex\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MymZmkNhyjcJcxcct6N6MJGIH4o-vLxGRUkfFgKZixJEE990EY00-AdlCDOQkyVY8RSgZb1YmnhXn7kirMX-8PJ2-KXlA_HA",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "first use after last use",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"octocat\",\"firstUsedAt\":5,\"lastUsedAt\":4,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmeT0mLjbRl5bcS9vgxNVUwH9cVCvIC5UwnX34BZBomXHMu4nFVkudxW3TtX2fiqQ",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "negative time",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"octocat\",\"firstUsedAt\":-1,\"lastUsedAt\":4,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmGUkfFgKZixJEE990EY00-B9lCDOQkyVY8RSgZb1YmnuUybO4yoAMP-q4GE-w0J8A",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "use count zero",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"octocat\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":0}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmaT0mLjbRl5bcS9vgxNVU2H9cVCvIC5UwnX34BZRomB-xd-gmlKfgfnxIi-KnaLA",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "use count too large",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"octocat\",\"firstUsedAt\":1,\"lastUsedAt\":2,\"useCount\":1000000001}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmaT0mLjbRl5bcS9vgxNVU2H9cVCvIC5UwnX34BZFdr02U9gyFnLI6wpiDUUtkAaANWqYFTgqLIbg",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "time is a string",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signInMethod\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"octocat\",\"firstUsedAt\":\"1\",\"lastUsedAt\":2,\"useCount\":1}}",
+      "payloadCiphertext": "3aXjY7qpoKPHbEX3SVl3ejlFO0vk2ZRm7HdXORkefeqCIby8ql1v_HrLycOZ9fGT06LgVt73ksk8HNynwHT3vxXafn7MwHN7k1mTV5hSy4Mi89-LBUQR46qaeQmJUknLzqtww7Ai4dwhVhsmCcdMW-Iy73omXjJPd11qnig2-iPJMtsq9nJVc-IhdOPi",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "missing signInMethod",
+      "kind": "upsert",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"signIn\":{\"site\":\"example.com\",\"provider\":\"github\",\"account\":\"OctoCat\",\"firstUsedAt\":1700000000000,\"lastUsedAt\":1790000000000,\"useCount\":41}}",
+      "payloadCiphertext": "3aXjY7qpoKOoM0q9VVQhJWBdakfo3dssoncBOxsDM6OOMqG-_hgp6XqGhYia-ffZnOKlE4j-hMhxRZCygS26hRjaMweP2zIj3lybUckKvJYu5e2Lcg1FsNveawObU1vX3PchnOYb88oxQhxhV7QUW61wvQB5G2wLZVdr02U9nzMibpaOvi9OL0_cXRYddixn5g3fjPQEV8qV2L7s3Fk",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    },
+    {
+      "name": "valid delete",
+      "kind": "delete",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"deleted\":true}",
+      "payloadCiphertext": "3aX0b7GinajuKwvrVEgwPZAhzG_fgsychSldrVORI0s",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": true,
+      "expected": {
+        "deleted": true
+      }
+    },
+    {
+      "name": "delete without the flag",
+      "kind": "delete",
+      "entityId": "0e541a44e256d5b075321c762a2bcb86",
+      "plaintext": "{\"deleted\":false}",
+      "payloadCiphertext": "3aX0b7GinajuKwv5R1EmJT9Hl4CgIlpA4x5XmeCQp3L0",
+      "payloadNonce": "AQIDBAUGBwgJCgsM",
+      "valid": false
+    }
+  ],
+  "concurrentUpserts": [
+    {
+      "name": "later writer's spelling, both histories",
+      "current": {
+        "at": "2026-11-20T10:00:00Z",
+        "device": "a",
+        "method": {
+          "site": "example.com",
+          "provider": "github",
+          "account": "octocat",
+          "firstUsedAt": 100,
+          "lastUsedAt": 500,
+          "useCount": 7
+        }
+      },
+      "incoming": {
+        "at": "2026-11-20T10:00:05Z",
+        "device": "b",
+        "method": {
+          "site": "example.com",
+          "provider": "github",
+          "account": "OctoCat",
+          "firstUsedAt": 50,
+          "lastUsedAt": 400,
+          "useCount": 9
+        }
+      },
+      "merged": {
+        "site": "example.com",
+        "provider": "github",
+        "account": "OctoCat",
+        "firstUsedAt": 50,
+        "lastUsedAt": 500,
+        "useCount": 9
+      }
+    },
+    {
+      "name": "same instant: the greater device id writes later",
+      "current": {
+        "at": "2026-11-20T10:00:00Z",
+        "device": "b",
+        "method": {
+          "site": "example.com",
+          "provider": "github",
+          "account": "Octocat",
+          "firstUsedAt": 10,
+          "lastUsedAt": 20,
+          "useCount": 2
+        }
+      },
+      "incoming": {
+        "at": "2026-11-20T10:00:00Z",
+        "device": "a",
+        "method": {
+          "site": "example.com",
+          "provider": "github",
+          "account": "octocat",
+          "firstUsedAt": 15,
+          "lastUsedAt": 30,
+          "useCount": 1
+        }
+      },
+      "merged": {
+        "site": "example.com",
+        "provider": "github",
+        "account": "Octocat",
+        "firstUsedAt": 10,
+        "lastUsedAt": 30,
+        "useCount": 2
+      }
+    },
+    {
+      "name": "offsets compare as instants",
+      "current": {
+        "at": "2026-11-20T11:00:00+01:00",
+        "device": "b",
+        "method": {
+          "site": "example.com",
+          "provider": "google",
+          "account": "me@example.com",
+          "firstUsedAt": 1,
+          "lastUsedAt": 2,
+          "useCount": 1
+        }
+      },
+      "incoming": {
+        "at": "2026-11-20T10:00:00.5Z",
+        "device": "a",
+        "method": {
+          "site": "example.com",
+          "provider": "google",
+          "account": "Me@Example.com",
+          "firstUsedAt": 1,
+          "lastUsedAt": 3,
+          "useCount": 2
+        }
+      },
+      "merged": {
+        "site": "example.com",
+        "provider": "google",
+        "account": "Me@Example.com",
+        "firstUsedAt": 1,
+        "lastUsedAt": 3,
+        "useCount": 2
+      }
+    }
+  ],
+  "upsertVersusDelete": [
+    {
+      "deleteAt": "2026-11-20T10:00:00Z",
+      "deleteDevice": "a",
+      "upsertAt": "2026-11-20T10:00:01Z",
+      "upsertDevice": "b",
+      "result": "upsert"
+    },
+    {
+      "deleteAt": "2026-11-20T10:00:01Z",
+      "deleteDevice": "a",
+      "upsertAt": "2026-11-20T10:00:00Z",
+      "upsertDevice": "b",
+      "result": "deleted"
+    },
+    {
+      "deleteAt": "2026-11-20T10:00:00Z",
+      "deleteDevice": "b",
+      "upsertAt": "2026-11-20T10:00:00Z",
+      "upsertDevice": "a",
+      "result": "deleted"
+    },
+    {
+      "deleteAt": "2026-11-20T10:00:00Z",
+      "deleteDevice": "a",
+      "upsertAt": "2026-11-20T10:00:00Z",
+      "upsertDevice": "b",
+      "result": "upsert"
+    }
+  ]
+}

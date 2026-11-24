@@ -7,6 +7,7 @@ import { PasswordField, Segmented } from "../../components/Field";
 import { ProgressBar, Spinner } from "../../components/Spinner";
 import { StatusBanner } from "../../components/Status";
 import { useToast } from "../../app/toast";
+import { useRouter } from "../../app/router";
 import { useVault } from "../../app/vault";
 import { api, type PairingStatus } from "../../lib/api";
 import { humanError } from "../../lib/errors";
@@ -17,6 +18,7 @@ const idle: PairingStatus = { stage: "", confirmation: "", message: "", invitati
 export function usePairingStatus(enabled: boolean) {
   const { setSnapshot } = useVault();
   const toast = useToast();
+  const router = useRouter();
   const [pairing, setPairing] = useState<PairingStatus>(idle);
   const [error, setError] = useState("");
   const lastStage = useRef("");
@@ -38,7 +40,8 @@ export function usePairingStatus(enabled: boolean) {
           if (status.stage === "paired") setSnapshot(await api.snapshot());
         } else if (status.stage !== lastStage.current) {
           if (status.stage === "paired") {
-            toast.success("Paired with your phone");
+            toast.success("Paired with your phone", status.conflicts ? { action: { label: "Review", run: () => void router.navigate({ page: "conflicts" }) } }
+              : status.needsReview ? { action: { label: "Review", run: () => void router.navigate({ page: "trash" }) } } : undefined);
             setSnapshot(await api.snapshot());
           } else if (status.stage === "failed") {
             toast.error(status.message || "Pairing didn't finish.");
@@ -54,9 +57,42 @@ export function usePairingStatus(enabled: boolean) {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 500);
     return () => { active = false; window.clearInterval(timer); };
-  }, [enabled, setSnapshot, toast]);
+  }, [enabled, setSnapshot, toast, router]);
 
   return { pairing, error, reset: () => setPairing(idle) };
+}
+
+const pairedNoticeKey = "nuvori.pairedNoticeHidden";
+
+/**
+ * After this PC paired in this app session: what happened to the items it already had
+ * (join_match.rs), with a way to review the ones that differ from the phone's. The sync page
+ * replaces the pairing card once paired, so this notice keeps the result in view.
+ */
+export function PairedNotice() {
+  const router = useRouter();
+  const [status, setStatus] = useState<PairingStatus | null>(null);
+  const [hidden, setHidden] = useState<string | null>(() => { try { return sessionStorage.getItem(pairedNoticeKey); } catch { return null; } });
+  useEffect(() => {
+    let live = true;
+    api.pairingStatus().then((next) => { if (live) setStatus(next); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  if (status?.stage !== "paired" || !status.message || hidden === status.message) return null;
+  const dismiss = () => {
+    try { sessionStorage.setItem(pairedNoticeKey, status.message); } catch { /* The notice comes back next visit; harmless. */ }
+    setHidden(status.message);
+  };
+  const review = status.needsReview ?? 0;
+  return (
+    <StatusBanner kind={review ? "info" : "success"} title="Paired with your phone"
+      action={<div className="button-row">
+        {review > 0 && <Button size="sm" variant="primary" onClick={() => void router.navigate({ page: "trash" })}>Review {review === 1 ? "1 item" : `${review} items`}</Button>}
+        <Button size="sm" variant="ghost" onClick={dismiss}>Dismiss</Button>
+      </div>}>
+      {status.message}
+    </StatusBanner>
+  );
 }
 
 function stepFor(stage: string): number {
@@ -91,6 +127,8 @@ export function PairingCard() {
   const [setupLink, setSetupLink] = useState("");
   const [masterPassword, setMasterPassword] = useState("");
   const [error, setError] = useState("");
+  /** Validation next to the field it is about (P4 of the UI checkup), like the item editors. */
+  const [fieldError, setFieldError] = useState<{ link?: string; password?: string }>({});
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanNotice, setScanNotice] = useState("");
@@ -98,6 +136,8 @@ export function PairingCard() {
   const scanner = useRef<IScannerControls | null>(null);
   const qrImageInput = useRef<HTMLInputElement>(null);
   const passwordInput = useRef<HTMLInputElement>(null);
+  const linkInput = useRef<HTMLInputElement>(null);
+  const router = useRouter();
   const stage = pairing.stage;
   const step = stepFor(stage);
 
@@ -108,6 +148,7 @@ export function PairingCard() {
       return false;
     }
     setError("");
+    setFieldError({});
     setSetupLink(link);
     setScanNotice("QR read. Enter your phone's master password to continue.");
     setScanning(false);
@@ -176,11 +217,12 @@ export function PairingCard() {
 
   const start = async (event: FormEvent) => {
     event.preventDefault();
-    if (!setupLink.trim()) { setError("Scan the QR or paste the setup link from your phone."); return; }
-    if (masterPassword.length < 12) { setError("Enter your phone vault's master password."); passwordInput.current?.focus(); return; }
+    if (!setupLink.trim()) { setFieldError({ link: "Scan the QR or paste the setup link from your phone." }); linkInput.current?.focus(); return; }
+    if (masterPassword.length < 12) { setFieldError({ password: "Enter your phone vault's master password." }); passwordInput.current?.focus(); return; }
     setScanning(false);
     setBusy(true);
     setError("");
+    setFieldError({});
     try {
       await api.startPairing(setupLink.trim(), masterPassword);
       toast.info("Connecting to your phone…");
@@ -196,10 +238,11 @@ export function PairingCard() {
   const startReverse = async (event: FormEvent) => {
     event.preventDefault();
     if (masterPassword.length < 12) {
-      setError("Enter your phone vault's master password first.");
+      setFieldError({ password: "Enter your phone vault's master password first." });
       passwordInput.current?.focus();
       return;
     }
+    setFieldError({});
     setScanning(false);
     setBusy(true);
     setError("");
@@ -252,7 +295,7 @@ export function PairingCard() {
         <div className="pairing-offer">
           <div className="qr-frame"><QRCodeSVG value={pairing.invitation} size={240} marginSize={2} role="img" aria-label="Pairing QR for your phone to scan" /></div>
           <div className="pairing-offer-text">
-            <p><strong>On your phone:</strong> open Devices, tap <em>Scan Windows QR</em>, and point it at this code.</p>
+            <p><strong>On your phone:</strong> open Devices &amp; sync, tap <em>Scan Windows QR</em>, and point it at this code.</p>
             <p className="muted small">{pairing.message}</p>
             <Button onClick={() => void action("cancel")} icon={X}>Cancel</Button>
           </div>
@@ -264,14 +307,18 @@ export function PairingCard() {
           <Button disabled={stage === "canceling"} onClick={() => void action("cancel")} icon={X}>Cancel</Button>
         </div>
       ) : stage === "paired" ? (
-        <StatusBanner kind="success" title="Paired">{pairing.message || "This PC and your phone now keep their own copies in sync."}</StatusBanner>
+        <StatusBanner kind="success" title="Paired"
+          action={pairing.conflicts ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>Review {pairing.conflicts === 1 ? "1 conflict" : `${pairing.conflicts} conflicts`}</Button>
+            : pairing.needsReview ? <Button size="sm" onClick={() => void router.navigate({ page: "trash" })}>Review {pairing.needsReview === 1 ? "1 item" : `${pairing.needsReview} items`}</Button> : undefined}>
+          {pairing.message || "This PC and your phone now keep their own copies in sync."}
+        </StatusBanner>
       ) : (
         <>
-          <Segmented label="Pairing method" value={mode} onChange={(value) => { setMode(value); setError(""); setScanning(false); }}
+          <Segmented label="Pairing method" value={mode} onChange={(value) => { setMode(value); setError(""); setFieldError({}); setScanning(false); }}
             options={[{ value: "scan", label: "Scan phone's QR", icon: ScanLine }, { value: "show", label: "Show QR to phone", icon: QrCode }]} />
           {mode === "scan" ? (
             <form className="form-stack" onSubmit={(event) => void start(event)} noValidate>
-              <p className="muted small">On your phone, open <strong>Devices</strong> and choose <strong>Create QR</strong>. Scan it with this PC's camera, or copy the link and paste it below.</p>
+              <p className="muted small">On your phone, open <strong>Devices &amp; sync</strong> and choose <strong>Create QR</strong>. Scan it with this PC's camera, or copy the link and paste it below.</p>
               <div className="button-row">
                 <Button icon={scanning ? CameraOff : Camera} onClick={() => { setScanNotice(""); setScanning((value) => !value); }}>{scanning ? "Stop camera" : "Use camera"}</Button>
                 <Button icon={ImageUp} onClick={() => qrImageInput.current?.click()}>Read QR image</Button>
@@ -279,8 +326,8 @@ export function PairingCard() {
               </div>
               {scanning && <video ref={camera} className="pairing-camera" autoPlay muted playsInline aria-label="Camera preview for the phone's pairing QR" />}
               {scanNotice && <p className="muted small" role="status">{scanNotice}</p>}
-              <PasswordField label="Setup link" value={setupLink} onValue={setSetupLink} autoComplete="off" hint="Starts with nuvori-pair://v3/. It contains a one-time secret." />
-              <PasswordField ref={passwordInput} label="Phone's master password" value={masterPassword} onValue={setMasterPassword} autoComplete="current-password" capsLockWarning />
+              <PasswordField ref={linkInput} label="Setup link" value={setupLink} onValue={(value) => { setSetupLink(value); setFieldError((current) => ({ ...current, link: undefined })); }} autoComplete="off" hint="Starts with nuvori-pair://v3/. It contains a one-time secret." error={fieldError.link} />
+              <PasswordField ref={passwordInput} label="Phone's master password" value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError((current) => ({ ...current, password: undefined })); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
               <div className="form-actions start">
                 <Button variant="primary" type="submit" busy={busy}>Continue</Button>
               </div>
@@ -288,7 +335,7 @@ export function PairingCard() {
           ) : (
             <form className="form-stack" onSubmit={(event) => void startReverse(event)} noValidate>
               <p className="muted small">Use this if your phone can't reach this PC. This PC shows a QR; your phone scans it with <strong>Scan Windows QR</strong>.</p>
-              <PasswordField ref={passwordInput} label="Phone's master password" value={masterPassword} onValue={setMasterPassword} autoComplete="current-password" capsLockWarning />
+              <PasswordField ref={passwordInput} label="Phone's master password" value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError({}); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
               <div className="form-actions start">
                 <Button variant="primary" type="submit" icon={QrCode} busy={busy}>Show QR</Button>
               </div>

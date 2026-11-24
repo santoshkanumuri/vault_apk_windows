@@ -56,6 +56,9 @@ pub struct BrowserRequest {
     /// 16 to 64 pixel PNG, at most 32 KB decoded. The app checks it again (site_icons.rs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// "sign_in_methods": `record_sign_in` only. The provider and the account the extension read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<SignInDetails>,
     /// "startup_browsers": `unlock_prompt` only. True when the browser just started, so the app
     /// skips the prompt when the user turned "ask when the browser starts" off for that browser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,6 +107,11 @@ pub enum BrowserAction {
     /// Keep the page's icon on this PC. Only for a site that has a login or passkey, and only
     /// after `query_credentials` answered `iconWanted`. Never shows a window.
     SaveSiteIcon,
+    /// "sign_in_methods": the remembered sign-in methods of the origin's site (sign_ins.rs).
+    QuerySignIns,
+    /// "sign_in_methods": remember that the user signed in to the origin's site with a provider.
+    /// The extension sends it only after the user chose Save, or for a method already remembered.
+    RecordSignIn,
 }
 
 impl BrowserAction {
@@ -111,6 +119,53 @@ impl BrowserAction {
     pub fn is_window_request(&self) -> bool {
         matches!(self, Self::UnlockPrompt | Self::ShowApp)
     }
+}
+
+/// "sign_in_methods": what `record_sign_in` carries. Never a token, code or URL.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SignInDetails {
+    /// One of the fixed provider ids ("google", "github", ...). The app checks the list.
+    pub provider: String,
+    /// The email address or user name the provider's page showed, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+}
+
+/// "sign_in_methods": the answer to `query_sign_ins` and `record_sign_in`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInsAnswer {
+    /// The registrable domain of the request's origin.
+    pub site: String,
+    /// Most recently used first.
+    pub methods: Vec<SignInMethod>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInMethod {
+    pub provider: String,
+    /// "" when not known.
+    pub account: String,
+    pub last_used_at: i64,
+    pub use_count: i64,
+}
+
+/// Longest provider id the extension may send. The app accepts only its fixed list.
+pub const MAX_SIGN_IN_PROVIDER_CHARS: usize = 32;
+/// Longest account text the extension may send (sign_ins.rs `MAX_ACCOUNT_CHARS`).
+pub const MAX_SIGN_IN_ACCOUNT_CHARS: usize = 256;
+
+/// Shape check of a `record_sign_in` body, for the native host and the app alike. The app's
+/// storage checks the provider list, the site and the account again.
+pub fn valid_sign_in_details(details: &SignInDetails) -> bool {
+    let provider = details.provider.as_str();
+    (1..=MAX_SIGN_IN_PROVIDER_CHARS).contains(&provider.len())
+        && provider.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && details.account.as_deref().is_none_or(|account| {
+            account.chars().count() <= MAX_SIGN_IN_ACCOUNT_CHARS && !account.chars().any(|c| c.is_control() || is_format_char(c))
+        })
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -313,6 +368,9 @@ pub struct BrowserResponse {
     /// so an older app never sends it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub icon_wanted: bool,
+    /// "sign_in_methods": `query_sign_ins` and `record_sign_in` answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_ins: Option<SignInsAnswer>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -331,7 +389,7 @@ impl BrowserResponse {
             credentials: None,
             credential: None,
             sealed_login: None,
-            features: None, appearance: None, item: None, icon_wanted: false,
+            features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
         }
     }
 
@@ -350,7 +408,7 @@ impl BrowserResponse {
             credentials: None,
             credential: None,
             sealed_login: None,
-            features: None, appearance: None, item: None, icon_wanted: false,
+            features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
         }
     }
 }

@@ -75,10 +75,20 @@ impl IncomingApply {
             "photo" => operation.kind == ChangeKind::Delete || blobs.is_some(),
             // A delete is not supported but readable: `validate_payload` sets it aside.
             appearance::ENTITY_TYPE => appearance_store.is_some(),
+            // A delete is not supported but readable: `validate_payload` sets it aside.
+            crate::site_icon_sync::ENTITY_TYPE => true,
+            crate::sign_in_sync::ENTITY_TYPE => true,
             _ => false,
         };
         if !supported {
             return Err(ApplyError::UnsupportedEntity);
+        }
+        // A managing device marked as lost here: nothing after its last known change, even if it
+        // arrived before ("Mark as lost", `merge_join.rs`).
+        if crate::merge_join::lost_freeze(connection, &operation.vault_id)?
+            .is_some_and(|freeze| !freeze.allows(&operation.device_id, operation.sequence, &operation.hash))
+        {
+            return Err(ApplyError::FrozenAuthor);
         }
         if content_key.len() != 32 {
             return Err(ApplyError::InvalidContentKey);
@@ -125,6 +135,36 @@ impl IncomingApply {
             transaction.commit()?;
             if let Some(view) = changed {
                 store.notify(&view);
+            }
+            return Ok(outcome);
+        }
+
+        if operation.entity_type == crate::site_icon_sync::ENTITY_TYPE {
+            // The entity id is an HMAC of the site under the content key: checked here, with the key.
+            let (site, png) = crate::site_icon_sync::parse_payload(&payload, &operation.entity_id, content_key)
+                .ok_or(ApplyError::InvalidPayload)?;
+            let (outcome, stored) = apply_site_icon(&transaction, operation, &site, &png)?;
+            mark_applied(&transaction, operation, outcome)?;
+            transaction.commit()?;
+            if stored {
+                crate::site_icons::notify_saved();
+            }
+            return Ok(outcome);
+        }
+
+        if operation.entity_type == crate::sign_in_sync::ENTITY_TYPE {
+            // The entity id is an HMAC of the site, provider and account: checked here, with the key.
+            let incoming = match operation.kind {
+                ChangeKind::Upsert => Some(
+                    crate::sign_in_sync::parse_payload(&payload, &operation.entity_id, content_key).ok_or(ApplyError::InvalidPayload)?,
+                ),
+                ChangeKind::Delete => None,
+            };
+            let (outcome, changed) = apply_sign_in_method(&transaction, operation, incoming.as_ref(), content_key)?;
+            mark_applied(&transaction, operation, outcome)?;
+            transaction.commit()?;
+            if changed {
+                crate::sign_ins::notify_changed();
             }
             return Ok(outcome);
         }
@@ -267,6 +307,217 @@ fn apply_appearance(
     Ok((ApplyOutcome::Applied, (next.view() != stored.view()).then(|| next.view())))
 }
 
+/// Protocol `site-icons-v1`, as [apply_appearance] for one record per site: a dominating version
+/// applies; an older or equal one is obsolete; a concurrent one is decided by last writer wins against
+/// the stamp in `site_icon_sync_state`. Every applied or concurrent case stores the merged version.
+/// Never a conflict. The bytes are remembered as synced, so [crate::site_icon_sync::flush] never
+/// sends them back. Returns whether the icon was stored, to announce after the commit.
+fn apply_site_icon(
+    transaction: &Transaction<'_>,
+    operation: &ChangeRecord,
+    site: &str,
+    png: &[u8],
+) -> Result<(ApplyOutcome, bool), ApplyError> {
+    let current: Option<(String, i64)> = transaction
+        .query_row(
+            "SELECT record_version_json, revision FROM vault_records WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let current = current
+        .map(|(json, revision)| serde_json::from_str::<RecordVersion>(&json).map(|version| (version, revision)))
+        .transpose()?;
+    let relation = current.as_ref().map(|(version, _)| operation.record_version.relation_to(version));
+    if matches!(relation, Some(VersionRelation::Before | VersionRelation::Equal)) {
+        return Ok((ApplyOutcome::Obsolete, false));
+    }
+    let dominates = relation.is_none_or(|relation| relation == VersionRelation::After);
+    let known = crate::site_icon_sync::synced_state(transaction, site)?;
+    let stored_stamp = appearance::Stamp::new(
+        known.as_ref().map(|(_, at, _)| at.as_str()),
+        known.as_ref().map(|(_, _, device)| device.as_str()),
+    );
+    let incoming = appearance::Stamp::new(Some(&operation.occurred_at_utc), Some(&operation.device_id));
+    let value_wins = dominates || appearance::incoming_wins(&stored_stamp, &incoming);
+
+    let merged = current
+        .as_ref()
+        .map_or_else(|| operation.record_version.clone(), |(version, _)| version.merged(&operation.record_version));
+    let merged_json = serde_json::to_string(&merged)?;
+    if value_wins {
+        let revision = current.as_ref().map_or(0, |(_, revision)| *revision).max(to_i64(operation.base_revision)?);
+        transaction.execute(
+            "INSERT INTO vault_records (entity_type, entity_id, payload_ciphertext, revision, record_version_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(entity_type, entity_id) DO UPDATE SET payload_ciphertext = excluded.payload_ciphertext,
+                 revision = excluded.revision, record_version_json = excluded.record_version_json",
+            params![
+                operation.entity_type,
+                operation.entity_id,
+                operation.payload_ciphertext,
+                revision.checked_add(1).ok_or(ApplyError::IntegerOverflow)?,
+                merged_json
+            ],
+        )?;
+        crate::site_icon_sync::store_received(transaction, site, png, crate::activity::now_millis() as i64)?;
+        crate::site_icon_sync::remember_synced(transaction, site, png, &operation.occurred_at_utc, &operation.device_id)?;
+    } else {
+        transaction.execute(
+            "UPDATE vault_records SET record_version_json = ?3 WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id, merged_json],
+        )?;
+    }
+    Ok((if value_wins { ApplyOutcome::Applied } else { ApplyOutcome::Obsolete }, value_wins && crate::site_icons::enabled()))
+}
+
+/// Protocol `sign-in-methods-v1` (`sign_in_sync.rs`), never a conflict. The version vectors decide first,
+/// against the live record or else the tombstone: older or equal is obsolete, a dominating change applies.
+/// Concurrent upserts merge field by field; an upsert concurrent with a delete goes to the later writer.
+/// A local change that was never written (a re-record, or a delete waiting for the gate) competes like a
+/// concurrent one. Every applied or concurrent case stores the merged version. Returns whether this PC's
+/// list changed, to announce after the commit.
+fn apply_sign_in_method(
+    transaction: &Transaction<'_>,
+    operation: &ChangeRecord,
+    incoming: Option<&crate::sign_in_sync::Method>,
+    content_key: &[u8],
+) -> Result<(ApplyOutcome, bool), ApplyError> {
+    use crate::sign_in_sync::{self as sync, DELETED, Method};
+    let record: Option<(RecordVersion, i64)> = transaction
+        .query_row(
+            "SELECT record_version_json, revision FROM vault_records WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?
+        .map(|(json, revision)| serde_json::from_str::<RecordVersion>(&json).map(|version| (version, revision)))
+        .transpose()?;
+    let tombstone: Option<(RecordVersion, String, String)> = transaction
+        .query_row(
+            "SELECT record_version_json, deleted_at_utc, deleted_by_device_id FROM sync_tombstones WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+        )
+        .optional()?
+        .map(|(json, at, device)| serde_json::from_str::<RecordVersion>(&json).map(|version| (version, at, device)))
+        .transpose()?;
+    // A live record supersedes a stale tombstone (an older snapshot may carry both).
+    let live = record.is_some();
+    let current_version = record.as_ref().map(|(version, _)| version).or(tombstone.as_ref().map(|(version, ..)| version));
+    let relation = current_version.map(|version| operation.record_version.relation_to(version));
+    if matches!(relation, Some(VersionRelation::Before | VersionRelation::Equal)) {
+        return Ok((ApplyOutcome::Obsolete, false));
+    }
+    let dominates = relation.is_none_or(|relation| relation == VersionRelation::After);
+    let merged = current_version.map_or_else(|| operation.record_version.clone(), |version| version.merged(&operation.record_version));
+    let merged_json = serde_json::to_string(&merged)?;
+    let incoming_stamp = appearance::Stamp::new(Some(&operation.occurred_at_utc), Some(&operation.device_id));
+    let state = sync::synced_state(transaction, &operation.entity_id)?;
+    let current_stamp = match (&tombstone, &state) {
+        (Some((_, at, device)), _) if !live => appearance::Stamp::new(Some(at), Some(device)),
+        (_, Some(state)) => state.stamp(),
+        _ => appearance::Stamp::new(None, None),
+    };
+    let local = match incoming {
+        Some(method) => sync::local_by_key(transaction, method)?,
+        None => sync::local_by_entity(transaction, content_key, &operation.entity_id)?,
+    };
+    // A row of this PC that differs from what was last synced holds uses not written yet.
+    let pending_local = local.as_ref().is_some_and(|(_, method)| state.as_ref().is_none_or(|state| state.hash != method.hash()));
+    let revision = record.as_ref().map_or(0, |(_, revision)| *revision).max(to_i64(operation.base_revision)?);
+    let next_revision = revision.checked_add(1).ok_or(ApplyError::IntegerOverflow)?;
+
+    let Some(method) = incoming else {
+        // A delete. A local use after it that was never written competes as a later upsert.
+        let wins = dominates || !live || appearance::incoming_wins(&current_stamp, &incoming_stamp);
+        if !wins {
+            transaction.execute(
+                "UPDATE vault_records SET record_version_json = ?3 WHERE entity_type = ?1 AND entity_id = ?2",
+                params![operation.entity_type, operation.entity_id, merged_json],
+            )?;
+            return Ok((ApplyOutcome::Obsolete, false));
+        }
+        transaction.execute(
+            "DELETE FROM vault_records WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id],
+        )?;
+        transaction.execute(
+            "INSERT INTO sync_tombstones (tombstone_id, entity_type, entity_id, deleted_by_device_id, delete_sequence,
+                 record_version_json, deleted_at_utc, change_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(entity_type, entity_id) DO UPDATE SET tombstone_id = excluded.tombstone_id,
+                 deleted_by_device_id = excluded.deleted_by_device_id, delete_sequence = excluded.delete_sequence,
+                 record_version_json = excluded.record_version_json, deleted_at_utc = excluded.deleted_at_utc,
+                 change_hash = excluded.change_hash",
+            params![operation.mutation_id, operation.entity_type, operation.entity_id, operation.device_id,
+                to_i64(operation.sequence)?, merged_json, operation.occurred_at_utc, operation.hash],
+        )?;
+        let deleted_at = sync::millis(&operation.occurred_at_utc);
+        let mut changed = false;
+        if let Some((id, own)) = &local
+            && !(pending_local && deleted_at.is_some_and(|at| own.last_used_at > at))
+        {
+            changed = transaction.execute("DELETE FROM local_sign_ins WHERE id = ?1", [id])? == 1;
+        }
+        sync::remember_synced(transaction, &operation.entity_id, DELETED, "", &operation.occurred_at_utc, &operation.device_id)?;
+        return Ok((ApplyOutcome::Applied, changed));
+    };
+
+    if !dominates && !live && tombstone.is_some() && !sync::upsert_beats_delete(&current_stamp, &incoming_stamp) {
+        // The delete is the later writer: the method stays deleted.
+        transaction.execute(
+            "UPDATE sync_tombstones SET record_version_json = ?3 WHERE entity_type = ?1 AND entity_id = ?2",
+            params![operation.entity_type, operation.entity_id, merged_json],
+        )?;
+        return Ok((ApplyOutcome::Obsolete, false));
+    }
+    let incoming_later = dominates || appearance::incoming_wins(&current_stamp, &incoming_stamp);
+    // (value for this PC, hash and account to remember as synced, and their stamp)
+    let (value, synced_hash, synced_account, stamp_at, stamp_device) = if !dominates && live {
+        // Concurrent upserts: both sides compute the same merge and write nothing more. A pending local
+        // value keeps the incoming hash, so its extra uses are written later.
+        let current = local.as_ref().map_or_else(|| method.clone(), |(_, own)| own.clone());
+        let value = sync::merge(&current, &current_stamp, method, &incoming_stamp);
+        let (at, device) = match &state {
+            Some(state) if !incoming_later => (state.at.clone(), state.device.clone()),
+            _ => (operation.occurred_at_utc.clone(), operation.device_id.clone()),
+        };
+        let hash = if pending_local { method.hash() } else { value.hash() };
+        let account = value.account.clone();
+        (value, hash, account, at, device)
+    } else {
+        // The incoming change includes everything seen here. Uses this PC never wrote stay (min and max).
+        let value = match &local {
+            Some((_, own)) if pending_local => Method {
+                first_used_at: own.first_used_at.min(method.first_used_at),
+                last_used_at: own.last_used_at.max(method.last_used_at),
+                use_count: own.use_count.max(method.use_count),
+                ..method.clone()
+            },
+            _ => method.clone(),
+        };
+        (value, method.hash(), method.account.clone(), operation.occurred_at_utc.clone(), operation.device_id.clone())
+    };
+    // A delete of this method waiting on this PC competes like a concurrent delete.
+    let waiting_delete = sync::pending_delete(transaction, method)?
+        .is_some_and(|at| !sync::upsert_beats_delete(&appearance::Stamp::new(Some(&at), None), &incoming_stamp));
+    transaction.execute(
+        "INSERT INTO vault_records (entity_type, entity_id, payload_ciphertext, revision, record_version_json)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(entity_type, entity_id) DO UPDATE SET payload_ciphertext =
+             CASE WHEN ?6 THEN excluded.payload_ciphertext ELSE vault_records.payload_ciphertext END,
+             revision = excluded.revision, record_version_json = excluded.record_version_json",
+        params![operation.entity_type, operation.entity_id, operation.payload_ciphertext, next_revision, merged_json, incoming_later],
+    )?;
+    transaction.execute(
+        "DELETE FROM sync_tombstones WHERE entity_type = ?1 AND entity_id = ?2",
+        params![operation.entity_type, operation.entity_id],
+    )?;
+    sync::remember_synced(transaction, &operation.entity_id, &synced_hash, &synced_account, &stamp_at, &stamp_device)?;
+    let changed = !waiting_delete && sync::store_received(transaction, &value)?;
+    Ok((ApplyOutcome::Applied, changed))
+}
+
 /// Materializes an operation that wins, then closes every open conflict for the record whose
 /// two versions it includes (Android resolves conflicts the same way).
 pub(crate) fn materialize_checked(
@@ -297,9 +548,12 @@ pub(crate) fn materialize_checked(
             if !entry_exists(transaction, entry_id)? {
                 return Err(ApplyError::MissingPhotoDependency);
             }
+            // The blob is sealed with the content key of the epoch the photo names (`epoch_keys.rs`).
+            let epoch = details["keyEpoch"].as_u64().unwrap_or(1);
+            let key = crate::payload::key_for(content_key, &operation.vault_id, epoch)?;
             photo = Some(
                 blobs
-                    .decrypt(content_key, &operation.vault_id, &operation.entity_id, hash, size)
+                    .decrypt(&key, &operation.vault_id, &operation.entity_id, hash, size)
                     .map_err(|_| ApplyError::InvalidPayload)?,
             );
         }
@@ -499,6 +753,23 @@ pub(crate) fn resolve_links(
 }
 
 fn validate_payload(operation: &ChangeRecord, payload: &Value) -> Result<(), ApplyError> {
+    if operation.entity_type == crate::sign_in_sync::ENTITY_TYPE {
+        // `sign-in-methods-v1`: an upsert (checked in full, with the id, in `IncomingApply::apply_with_appearance`)
+        // or the entry delete shape.
+        let valid = match operation.kind {
+            ChangeKind::Upsert => crate::sign_in_sync::parse_method(payload).is_some(),
+            ChangeKind::Delete => payload.get("deleted").and_then(Value::as_bool) == Some(true),
+        };
+        return if valid { Ok(()) } else { Err(ApplyError::InvalidPayload) };
+    }
+    if operation.entity_type == crate::site_icon_sync::ENTITY_TYPE {
+        // `site-icons-v1`: always an upsert. The site, the id and the image are checked with the
+        // content key in `IncomingApply::apply_with_appearance`.
+        let valid = operation.kind == ChangeKind::Upsert
+            && payload.pointer("/siteIcon/site").and_then(Value::as_str).is_some()
+            && payload.pointer("/siteIcon/png").and_then(Value::as_str).is_some();
+        return if valid { Ok(()) } else { Err(ApplyError::InvalidPayload) };
+    }
     if operation.entity_type == appearance::ENTITY_TYPE {
         // `appearance-v1`: one record, always an upsert, two ids of the shared shape.
         let valid = operation.kind == ChangeKind::Upsert
@@ -1016,6 +1287,8 @@ pub enum ApplyError {
     Clock,
     #[error("the appearance file could not be saved")]
     AppearanceStorage,
+    #[error("the author was marked as lost on this device")]
+    FrozenAuthor,
 }
 
 #[cfg(test)]
@@ -1862,6 +2135,183 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(members, ["card"]);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn icon_change(device: &str, sequence: u64, previous: &str, version: RecordVersion, at: &str, kind: ChangeKind,
+        entity_id: &str, site: &str, png: &[u8]) -> ChangeRecord {
+        let signer = SigningKey::from_bytes(&[43; 32]);
+        let mutation = format!("icon-{device}-{sequence}");
+        let body = serde_json::to_vec(&crate::site_icon_sync::payload_json(site, png)).unwrap();
+        let encrypted = payload::encrypt(&CONTENT_KEY, "site_icon", "vault-a", &mutation, entity_id, &body).unwrap();
+        ChangeRecord::create_signed_with("vault-a", device, sequence, previous, mutation, "site_icon", entity_id,
+            kind, 0, version, at, encrypted.ciphertext, encrypted.nonce,
+            |bytes| Ok::<_, ()>(signer.sign(bytes).to_bytes()))
+            .unwrap()
+    }
+
+    fn test_png(side: u32, shade: u8) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, side, side);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&vec![shade; (side * side * 4) as usize]).unwrap();
+        bytes
+    }
+
+    fn stored_icon(connection: &Connection, site: &str) -> Option<Vec<u8>> {
+        connection.query_row("SELECT png FROM local_site_icons WHERE site = ?1", [site], |row| row.get(0)).ok()
+    }
+
+    #[test]
+    fn site_icons_apply_merge_by_last_writer_and_refuse_a_forged_id() {
+        let mut connection = connection();
+        crate::site_icons::initialize(&connection).unwrap();
+        let id = crate::site_icon_sync::entity_id(&CONTENT_KEY, "github.com");
+        let (blue, red) = (test_png(32, 40), test_png(32, 200));
+        let apply = |connection: &mut Connection, change: &ChangeRecord| {
+            insert_persisted(connection, change);
+            IncomingApply::apply(connection, change, &CONTENT_KEY)
+        };
+
+        let first = icon_change("pc", 1, GENESIS_HASH, RecordVersion::from_entries([("pc", 1)]), "2026-11-21T10:00:00Z",
+            ChangeKind::Upsert, &id, "github.com", &blue);
+        assert_eq!(apply(&mut connection, &first).unwrap(), ApplyOutcome::Applied);
+        assert_eq!(stored_icon(&connection, "github.com"), Some(blue.clone()));
+        let second = icon_change("pc", 2, &first.hash, RecordVersion::from_entries([("pc", 2)]), "2026-11-21T09:00:00Z",
+            ChangeKind::Upsert, &id, "github.com", &red);
+        assert_eq!(apply(&mut connection, &second).unwrap(), ApplyOutcome::Applied, "a dominating version applies even with an older time");
+        assert_eq!(stored_icon(&connection, "github.com"), Some(red.clone()));
+
+        let concurrent = icon_change("laptop", 1, GENESIS_HASH, RecordVersion::from_entries([("laptop", 1)]),
+            "2026-11-21T08:00:00Z", ChangeKind::Upsert, &id, "github.com", &blue);
+        assert_eq!(apply(&mut connection, &concurrent).unwrap(), ApplyOutcome::Obsolete, "the earlier writer loses");
+        assert_eq!(stored_icon(&connection, "github.com"), Some(red.clone()));
+        let version: String = connection
+            .query_row("SELECT record_version_json FROM vault_records WHERE entity_type = 'site_icon' AND entity_id = ?1", [&id],
+                |row| row.get(0))
+            .unwrap();
+        assert_eq!(serde_json::from_str::<RecordVersion>(&version).unwrap(), RecordVersion::from_entries([("pc", 2), ("laptop", 1)]));
+        assert_eq!(conflict_count(&connection), 0);
+        // A received icon counts as synced, so the writer never sends it back.
+        let (hash, ..) = crate::site_icon_sync::synced_state(&connection, "github.com").unwrap().unwrap();
+        assert_eq!(hash, hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&red)));
+
+        let forged = icon_change("pc", 3, &second.hash, RecordVersion::from_entries([("pc", 3)]), "2026-11-21T11:00:00Z",
+            ChangeKind::Upsert, &id, "gitlab.com", &blue);
+        assert!(matches!(apply(&mut connection, &forged), Err(super::ApplyError::InvalidPayload)));
+        let delete = icon_change("laptop", 2, &concurrent.hash, RecordVersion::from_entries([("pc", 3), ("laptop", 2)]), "2026-11-21T11:00:00Z",
+            ChangeKind::Delete, &id, "github.com", &blue);
+        assert!(matches!(apply(&mut connection, &delete), Err(super::ApplyError::InvalidPayload)));
+        assert_eq!(stored_icon(&connection, "github.com"), Some(red));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn sign_in_change(device: &str, sequence: u64, previous: &str, version: RecordVersion, at: &str, entity_id: &str,
+        method: Option<&crate::sign_in_sync::Method>) -> ChangeRecord {
+        let signer = SigningKey::from_bytes(&[44; 32]);
+        let mutation = format!("sign-in-{device}-{sequence}");
+        let body = serde_json::to_vec(&method.map_or(json!({"deleted": true}), crate::sign_in_sync::payload_json)).unwrap();
+        let encrypted = payload::encrypt(&CONTENT_KEY, "sign_in_method", "vault-a", &mutation, entity_id, &body).unwrap();
+        let kind = if method.is_some() { ChangeKind::Upsert } else { ChangeKind::Delete };
+        ChangeRecord::create_signed_with("vault-a", device, sequence, previous, mutation, "sign_in_method", entity_id,
+            kind, 0, version, at, encrypted.ciphertext, encrypted.nonce,
+            |bytes| Ok::<_, ()>(signer.sign(bytes).to_bytes()))
+            .unwrap()
+    }
+
+    fn sign_in_rows(connection: &Connection) -> Vec<(String, i64, i64, i64)> {
+        crate::sign_ins::list(connection).unwrap().into_iter()
+            .map(|row| (row.account, row.first_used_at, row.last_used_at, row.use_count)).collect()
+    }
+
+    fn entity_version(connection: &Connection, table: &str, entity_id: &str) -> Option<RecordVersion> {
+        connection
+            .query_row(&format!("SELECT record_version_json FROM {table} WHERE entity_type = 'sign_in_method' AND entity_id = ?1"),
+                [entity_id], |row| row.get::<_, String>(0))
+            .ok()
+            .map(|json| serde_json::from_str(&json).unwrap())
+    }
+
+    /// The cross-device scenario of the spec: the PC records, the phone receives and deletes, the PC applies the
+    /// tombstone; a later use on the PC brings the method back and wins over a concurrent delete; concurrent upserts
+    /// merge; a forged id is refused. Never a conflict.
+    #[test]
+    fn sign_in_methods_merge_delete_and_come_back_across_devices() {
+        use crate::sign_in_sync::{self as sync, Method};
+        let mut connection = connection();
+        crate::sign_ins::initialize(&connection).unwrap();
+        connection.execute_batch("CREATE TABLE sync_group_state (vault_id TEXT NOT NULL PRIMARY KEY, content_key BLOB NOT NULL,
+            transport_secret BLOB NOT NULL)").unwrap();
+        connection.execute("INSERT INTO sync_group_state VALUES ('vault-a', ?1, x'00')", [CONTENT_KEY.to_vec()]).unwrap();
+        let directory = std::env::temp_dir().join(format!("nuvori-sign-in-sync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let identity_store = crate::identity::DeviceIdentityStore::new(directory.join("device-identity-v1.json"));
+        let pc = identity_store.get_or_create().unwrap();
+        let apply = |connection: &mut Connection, change: &ChangeRecord| {
+            insert_persisted(connection, change);
+            IncomingApply::apply(connection, change, &CONTENT_KEY)
+        };
+        let t = |at: &str| sync::millis(at).unwrap();
+
+        // The PC records a sign-in and writes it.
+        crate::sign_ins::record(&mut connection, "https://example.com", "github", Some("octocat"), true, t("2026-11-20T09:00:00Z")).unwrap();
+        assert_eq!(sync::write_waiting(&mut connection, &identity_store, &pc, "vault-a", 50, t("2026-11-20T09:00:00Z")).unwrap(), 1);
+        let octo = Method { site: "example.com".into(), provider: "github".into(), account: "octocat".into(),
+            first_used_at: t("2026-11-20T09:00:00Z"), last_used_at: t("2026-11-20T09:00:00Z"), use_count: 1 };
+        let id = octo.entity_id(&CONTENT_KEY);
+        let written = entity_version(&connection, "vault_records", &id).unwrap();
+        assert_eq!(written, RecordVersion::new([(pc.device_id.clone(), 1)].into()));
+
+        // The phone deletes it after receiving it: the delete dominates, the row goes, a tombstone stays.
+        let mut phone_version = written.counters().clone();
+        phone_version.insert("phone".into(), 1);
+        let delete = sign_in_change("phone", 1, GENESIS_HASH, RecordVersion::new(phone_version.clone()), "2026-11-20T10:00:00Z", &id, None);
+        assert_eq!(apply(&mut connection, &delete).unwrap(), ApplyOutcome::Applied);
+        assert!(sign_in_rows(&connection).is_empty());
+        assert!(entity_version(&connection, "vault_records", &id).is_none());
+        assert_eq!(entity_version(&connection, "sync_tombstones", &id), Some(RecordVersion::new(phone_version.clone())));
+        assert_eq!(sync::write_waiting(&mut connection, &identity_store, &pc, "vault-a", 50, t("2026-11-20T10:00:00Z")).unwrap(), 0,
+            "a received delete is never sent back");
+
+        // A laptop's earlier concurrent upsert loses to the later delete; the tombstone takes the merged version.
+        let laptop = sign_in_change("laptop", 1, GENESIS_HASH, RecordVersion::from_entries([("laptop", 1)]), "2026-11-20T09:30:00Z", &id,
+            Some(&Method { account: "OctoCat".into(), use_count: 4, ..octo.clone() }));
+        assert_eq!(apply(&mut connection, &laptop).unwrap(), ApplyOutcome::Obsolete);
+        assert!(sign_in_rows(&connection).is_empty());
+        phone_version.insert("laptop".into(), 1);
+        assert_eq!(entity_version(&connection, "sync_tombstones", &id), Some(RecordVersion::new(phone_version.clone())));
+
+        // The PC uses it again: the upsert dominates the tombstone, so the method comes back everywhere.
+        crate::sign_ins::record(&mut connection, "https://example.com", "github", Some("octocat"), true, t("2026-11-20T11:00:00Z")).unwrap();
+        assert_eq!(sync::write_waiting(&mut connection, &identity_store, &pc, "vault-a", 50, t("2026-11-20T11:00:00Z")).unwrap(), 1);
+        assert!(entity_version(&connection, "sync_tombstones", &id).is_none());
+        let revived = entity_version(&connection, "vault_records", &id).unwrap();
+        assert_eq!(revived.relation_to(&RecordVersion::new(phone_version.clone())), crate::protocol::VersionRelation::After);
+
+        // The phone deleted it again without seeing the re-use, earlier than the PC's write: the re-use wins.
+        let mut concurrent = phone_version.clone();
+        concurrent.insert("phone".into(), 2);
+        let late_delete = sign_in_change("phone", 2, &delete.hash, RecordVersion::new(concurrent), "2026-11-20T10:30:00Z", &id, None);
+        assert_eq!(apply(&mut connection, &late_delete).unwrap(), ApplyOutcome::Obsolete);
+        assert_eq!(sign_in_rows(&connection), [("octocat".to_owned(), t("2026-11-20T11:00:00Z"), t("2026-11-20T11:00:00Z"), 1)]);
+        let kept = entity_version(&connection, "vault_records", &id).unwrap();
+        assert_eq!(kept.counters().get("phone"), Some(&2), "the merged version is stored");
+
+        // A laptop upsert concurrent with the live record merges field by field (the later writer's spelling).
+        let laptop_late = sign_in_change("laptop", 2, &laptop.hash, RecordVersion::from_entries([("laptop", 2)]), "2099-01-01T00:00:00Z", &id,
+            Some(&Method { account: "OctoCat".into(), first_used_at: 5, last_used_at: 6, use_count: 9, ..octo.clone() }));
+        assert_eq!(apply(&mut connection, &laptop_late).unwrap(), ApplyOutcome::Applied);
+        assert_eq!(sign_in_rows(&connection), [("OctoCat".to_owned(), 5, t("2026-11-20T11:00:00Z"), 9)]);
+        assert_eq!(sync::write_waiting(&mut connection, &identity_store, &pc, "vault-a", 50, t("2026-11-20T11:00:00Z")).unwrap(), 0,
+            "both sides compute the same merge: no new write");
+
+        // A forged id (another account's) and a delete without its flag are refused.
+        let forged = sign_in_change("laptop", 3, &laptop_late.hash, RecordVersion::from_entries([("laptop", 3)]), "2099-01-01T00:00:01Z", &id,
+            Some(&Method { account: "hubot".into(), ..octo.clone() }));
+        assert!(matches!(apply(&mut connection, &forged), Err(super::ApplyError::InvalidPayload)));
+        assert_eq!(conflict_count(&connection), 0);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     struct AppearanceFixture {

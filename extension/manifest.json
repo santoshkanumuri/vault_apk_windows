@@ -22,6 +22,7 @@
       "js": [
         "fields.js",
         "appearance-palette.js",
+        "signins.js",
         "suggestions.js"
       ],
       "all_frames": true,
@@ -35,7 +36,8 @@
     "storage",
     "alarms",
     "clipboardWrite",
-    "offscreen"
+    "offscreen",
+    "webRequest"
   ],
   "optional_permissions": [
     "privacy"

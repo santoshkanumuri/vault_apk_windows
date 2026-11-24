@@ -123,6 +123,12 @@ impl IncomingVerifier {
     }
 }
 
+/// Checks one change's format, hash and author signature without a chain position: the changes
+/// of a checkpoint snapshot are witnesses with gaps between them (`checkpoint::validate`).
+pub(crate) fn validate_signed(record: &ChangeRecord, public_key: &[u8; 32]) -> Result<(), IncomingError> {
+    validate_record(record, &record.vault_id, &record.device_id, public_key, record.sequence, &record.previous_hash)
+}
+
 fn validate_record(
     record: &ChangeRecord,
     vault_id: &str,

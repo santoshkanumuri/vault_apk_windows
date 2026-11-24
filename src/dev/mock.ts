@@ -57,6 +57,7 @@ const state = {
   conflicts: [] as SyncConflict[],
   removedNotice: null as MembershipStatus["removedNotice"],
   pendingLeave: false,
+  managerLost: false,
   photos_waiting: 2,
   cloud: { available: true, connected: false, account: "", lastSync: "", lastError: "", connecting: false, needsSignIn: false, checkSeconds: 15 } as CloudStatus
 };
@@ -78,6 +79,31 @@ state.capturedIcons = { "service1.example.com": mockCapturedIcon };
 function siteIconsState() {
   requireUnlocked();
   return { enabled: state.siteIcons, icons: state.siteIcons ? { ...state.capturedIcons } : {} };
+}
+
+// Sign-in methods the extension remembered (sign_ins.rs). Synthetic sites and accounts only.
+// Preview the empty page with ?nosignins, the error state with ?signinserror, and the setting off with ?signinsoff.
+const signInRow = (site: string, provider: string, account: string, daysAgo: number, uses: number) =>
+  ({ id: id(), site, provider, account, firstUsedAt: minutes(60 * 24 * (daysAgo + 40)), lastUsedAt: minutes(60 * 24 * daysAgo + 7), useCount: uses });
+const mockSignIns = {
+  enabled: !window.location.search.includes("signinsoff"),
+  items: window.location.search.includes("nosignins") ? [] : [
+    signInRow("vercel.example", "github", "octocat", 0, 41),
+    signInRow("vercel.example", "google", "jamie@example.com", 12, 3),
+    signInRow("figma.example", "google", "jamie@example.com", 1, 17),
+    signInRow("shop.example", "apple", "x7k2m9qp4z@privaterelay.appleid.com", 3, 5),
+    signInRow("notion.example", "microsoft", "jamie@work.example", 6, 9),
+    signInRow("discord-bots.example", "discord", "", 9, 2),
+    signInRow("jobs.example", "linkedin", "jamie@example.com", 30, 1),
+    signInRow("forum.example", "x", "@jamie", 70, 4),
+    signInRow("github.com", "google", "jamie@example.com", 2, 6),
+  ],
+};
+function signInsState() {
+  requireUnlocked();
+  if (window.location.search.includes("signinserror")) throw "Could not read the sign-in methods.";
+  const githubLogin = state.entries.find((entry) => entry.tertiaryValue.includes("github.com"));
+  return { enabled: mockSignIns.enabled, items: mockSignIns.items.map((item) => ({ ...item })), logins: githubLogin ? { "github.com": [githubLogin.id] } : {} };
 }
 
 function log(level: ActivityEvent["level"], category: ActivityEvent["category"], message: string) {
@@ -117,7 +143,7 @@ const setAppearance = (accent: unknown, surface: unknown): Appearance => {
 // Previous passwords and Recently deleted (local_recovery.rs). Sample data: one login has history,
 // and one item was deleted on the phone.
 const mockHistory = new Map<string, Array<{ password: string; replacedAt: number }>>();
-const mockTrash: Array<{ id: string; itemId: string; kind: "entry" | "note"; itemType: string; title: string; deletedAt: number; deletedElsewhere: boolean; expiresAt: number; data: unknown }> = [];
+const mockTrash: Array<{ id: string; itemId: string; kind: "entry" | "note"; itemType: string; title: string; deletedAt: number; deletedElsewhere: boolean; expiresAt: number; data: unknown; reason?: "" | "join" | "removal" }> = [];
 {
   const now = Date.now();
   const login = state.entries.find((e) => e.type === "PASSWORD");
@@ -128,6 +154,9 @@ const mockTrash: Array<{ id: string; itemId: string; kind: "entry" | "note"; ite
   const gone = { id: "trash-sample-entry", type: "PASSWORD", title: "Old forum account", primaryValue: "reader@example.com", secondaryValue: "forum-pass-1", tertiaryValue: "https://forum.example.net",
     fourthValue: "", notes: "", tags: "", favorite: false, groupIds: [], createdAt: now - 400 * 86_400_000, updatedAt: now - 3 * 86_400_000 };
   mockTrash.push({ id: "trash-sample", itemId: gone.id, kind: "entry", itemType: "PASSWORD", title: gone.title, deletedAt: now - 3 * 86_400_000, deletedElsewhere: true, expiresAt: now + 27 * 86_400_000, data: gone });
+  // A paired device's change that had not applied when this PC was removed from the group (local_recovery.rs).
+  const unapplied = { ...gone, id: "trash-removal-entry", title: "Team wiki", primaryValue: "me@example.com", tertiaryValue: "https://wiki.example.org" };
+  mockTrash.push({ id: "trash-removal", itemId: unapplied.id, kind: "entry", itemType: "PASSWORD", title: unapplied.title, deletedAt: now - 86_400_000, deletedElsewhere: false, expiresAt: now + 29 * 86_400_000, data: unapplied, reason: "removal" });
 }
 
 type MockBrowser = { id: string; name: string; family: "chromium" | "firefox" | "unknown"; connected: boolean; askAtStart: boolean; lastSeen: number | null; registered: boolean };
@@ -238,6 +267,15 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "site_icons": return siteIconsState();
     case "set_site_icons": state.siteIcons = Boolean(args.enabled); if (!state.siteIcons) state.capturedIcons = {}; return siteIconsState();
     case "clear_site_icons": state.capturedIcons = {}; return siteIconsState();
+    case "sign_ins": return signInsState();
+    case "set_sign_ins": mockSignIns.enabled = Boolean(args.enabled); return signInsState();
+    case "delete_sign_in": mockSignIns.items = mockSignIns.items.filter((item) => item.id !== args.id); return signInsState();
+    case "edit_sign_in": {
+      const item = mockSignIns.items.find((entry) => entry.id === args.id);
+      if (!item) throw "This sign-in method was deleted.";
+      item.account = typeof args.account === "string" ? args.account : "";
+      return signInsState();
+    }
     case "list_passkeys": return state.passkeys;
     case "passkey_login_ids": {
       // A simple copy of `browser::passkey_matches_login` for previews: same username, RP ID covers the host.
@@ -280,7 +318,15 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       return null;
     case "approve_pairing":
       state.pairing = { stage: "transferring", confirmation: "", message: "Receiving the encrypted vault copy", invitation: "" };
-      setTimeout(() => { state.pairing = { stage: "paired", confirmation: "", message: "Vault copied.", invitation: "" }; state.enrolled = true; }, 2000);
+      // Like a join that kept this PC's items (join_match.rs): one item differs from the phone's.
+      setTimeout(() => {
+        const mine = { id: "join-copy-entry", type: "PASSWORD", title: "Mail", primaryValue: "jamie.doe@example.com", secondaryValue: "pc-only-pass-7", tertiaryValue: "https://mail.example.com",
+          fourthValue: "", notes: "", tags: "", favorite: false, groupIds: [], createdAt: Date.now() - 90 * 86_400_000, updatedAt: Date.now() - 2 * 86_400_000 };
+        if (!mockTrash.some((item) => item.itemId === mine.id)) mockTrash.unshift({ id: "trash-join", itemId: mine.id, kind: "entry", itemType: "PASSWORD", title: mine.title, deletedAt: Date.now(), deletedElsewhere: false, expiresAt: 0, data: mine, reason: "join" });
+        state.pairing = { stage: "paired", confirmation: "", invitation: "", needsReview: 1,
+          message: "Vault copied. Windows and Android now keep their own local copies. 12 items from this PC were already on your phone. 1 needs review: your phone's version is kept, and this PC's version is in Recently deleted. 3 new items from this PC were added." };
+        state.enrolled = true;
+      }, 2000);
       return null;
     case "cancel_pairing": state.pairing = { stage: "", confirmation: "", message: "", invitation: "" }; return null;
     case "activity_log": return state.activity.slice(0, Number(args.limit ?? 500));
@@ -289,11 +335,7 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "resolve_conflict": {
       state.conflicts = state.conflicts.filter((c) => c.id !== args.id);
       state.sync.conflicts = state.conflicts.length;
-// Preview the "removed from group" notice with ?removed in the URL.
-if (window.location.search.includes("removed")) {
-  state.enrolled = false;
-  state.removedNotice = { by: "Pixel 8", at: minutes(60 * 26) };
-} state.revision++;
+      state.revision++;
       log("success", "sync", `Conflict resolved (kept ${args.keep === "local" ? "this PC's" : "the phone's"} version)`);
       return snapshot();
     }
@@ -308,9 +350,15 @@ if (window.location.search.includes("removed")) {
           { deviceId: "dev-old", name: "Old phone", platform: "android", status: "removed", isManager: false, isThisDevice: false }
         ] : [],
         pendingTransferTo: state.enrolled ? "dev-tab" : "", transferAccepted: false,
-        removedNotice: state.removedNotice, pendingLeave: state.pendingLeave
+        removedNotice: state.removedNotice, pendingLeave: state.pendingLeave, managerLost: state.managerLost
       };
       return status;
+    }
+    case "mark_manager_lost": {
+      requireUnlocked();
+      state.managerLost = Boolean(args.lost);
+      log(state.managerLost ? "warning" : "info", "pairing", state.managerLost ? "Managing phone marked as lost" : "Managing phone trusted again");
+      return mockInvoke("membership_status");
     }
     case "leave_group": state.enrolled = false; state.pendingLeave = true; log("info", "pairing", "Left the sync group; leave request queued for the managing device"); return snapshot();
     case "dismiss_removed_notice": state.removedNotice = null; return null;

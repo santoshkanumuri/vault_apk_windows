@@ -6,17 +6,22 @@ pub mod browser_ipc;
 mod browser_setup;
 mod browsers;
 pub mod change_store;
+pub mod checkpoint;
+pub mod compaction;
 pub mod conflicts;
 mod desktop;
 pub mod dpapi;
 pub mod enrollment;
+pub mod epoch_keys;
 pub mod hello;
 pub mod identity;
 pub mod incoming;
 pub mod incoming_apply;
 pub mod incoming_store;
+pub mod join_match;
 pub mod keepass_import;
 pub mod local_recovery;
+pub mod merge_join;
 mod discovery;
 mod google_drive;
 mod lan_sync;
@@ -32,6 +37,9 @@ pub mod portable_backup;
 pub mod progress;
 pub mod protocol;
 pub mod quick_search;
+pub mod site_icon_sync;
+pub mod sign_in_sync;
+pub mod sign_ins;
 pub mod site_icons;
 pub mod snapshot;
 pub mod snapshot_import;
@@ -112,9 +120,50 @@ impl BrowserCredentialProvider for VaultBrowserProvider {
         let vault = app.unlocked.as_mut().ok_or(BrowserIpcError::VaultLocked)?;
         let now = activity::now_millis() as i64;
         site_icons::save(vault.connection(), origin, png, site_icons::enabled(), now).map_err(|_| BrowserIpcError::InvalidRequest)?;
+        if let Some(site) = site_icons::site_of_origin(origin)
+            && let Err(error) = site_icon_sync::remember_capture(vault.connection(), &site, png)
+        {
+            activity::diagnostic(activity::Category::Sync, "Could not note a captured website icon", error);
+        }
+        // Share it with the sync group now when the gate is open; otherwise the next sync writes it.
+        let identity_store = app.store.identity_store();
+        if let Some(vault) = app.unlocked.as_mut() {
+            site_icon_sync::flush_installed(vault, &identity_store);
+        }
         drop(app);
         site_icons::notify_saved();
         Ok(())
+    }
+
+    fn query_sign_ins(&self, origin: &str) -> Result<Option<browser::SignInsAnswer>, BrowserIpcError> {
+        if !sign_ins::enabled() {
+            return Ok(None);
+        }
+        let mut app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let vault = app.unlocked.as_mut().ok_or(BrowserIpcError::VaultLocked)?;
+        let (site, methods) = sign_ins::for_origin(vault.connection(), origin)
+            .map_err(|_| BrowserIpcError::InvalidRequest)?
+            .ok_or(BrowserIpcError::InvalidRequest)?;
+        Ok(Some(sign_in_answer(site, methods)))
+    }
+
+    fn record_sign_in(&self, origin: &str, details: &browser::SignInDetails) -> Result<browser::SignInsAnswer, BrowserIpcError> {
+        let mut app = self.state.lock().map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let vault = app.unlocked.as_mut().ok_or(BrowserIpcError::VaultLocked)?;
+        let now = activity::now_millis() as i64;
+        let stored = sign_ins::record(vault.connection(), origin, &details.provider, details.account.as_deref(), sign_ins::enabled(), now)
+            .map_err(|_| BrowserIpcError::InvalidRequest)?;
+        let (site, methods) = sign_ins::for_origin(vault.connection(), origin)
+            .map_err(|_| BrowserIpcError::InvalidRequest)?
+            .unwrap_or_else(|| (stored.site.clone(), vec![stored]));
+        // Share it with the sync group now when the gate is open; a quiet re-record waits up to a day.
+        let identity_store = app.store.identity_store();
+        if let Some(vault) = app.unlocked.as_mut() {
+            sign_in_sync::flush_installed(vault, &identity_store);
+        }
+        drop(app);
+        sign_ins::notify_changed();
+        Ok(sign_in_answer(site, methods))
     }
 
     fn load_selected_credential(
@@ -611,6 +660,21 @@ fn membership_status(state: State<'_, ManagedState>) -> Result<membership_exit::
         .ok_or("Unlock the vault first")?
         .membership_status()
         .map_err(public_vault_error)
+}
+
+/// "Mark as lost" for the managing phone (`merge_join.rs`); `lost: false` undoes it.
+#[tauri::command]
+fn mark_manager_lost(lost: bool, state: State<'_, ManagedState>) -> Result<membership_exit::MembershipStatus, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+    if lost {
+        vault.mark_manager_lost().map_err(public_vault_error)?;
+        activity::log(Level::Warning, Category::Pairing, "Managing phone marked as lost. This PC no longer takes its changes");
+    } else {
+        vault.undo_manager_lost().map_err(public_vault_error)?;
+        activity::log(Level::Info, Category::Pairing, "Managing phone trusted again");
+    }
+    vault.membership_status().map_err(public_vault_error)
 }
 
 /// SPEC3: leave on this PC now and send a signed leave request to the managing phone.
@@ -1182,6 +1246,10 @@ struct PairingStatus {
     confirmation: String,
     message: String,
     invitation: String,
+    /// After a join: this PC's items that differ from the group's (now in Recently deleted).
+    needs_review: u32,
+    /// After a join that kept item IDs: items waiting in Sync conflicts (`merge_join.rs`).
+    conflicts: u32,
 }
 
 #[derive(Default)]
@@ -1191,6 +1259,7 @@ struct PairingProgress {
     approved: bool,
     canceled: bool,
     socket: Option<TcpStream>,
+    joined: Option<join_match::JoinSummary>,
 }
 
 struct PairingController {
@@ -1282,7 +1351,7 @@ impl PairingController {
             stage: stage.to_owned(),
             message: message.to_owned(),
             confirmation: confirmation.to_owned(),
-            invitation: String::new(),
+            ..Default::default()
         };
         Ok(())
     }
@@ -1361,16 +1430,33 @@ impl PairingController {
                     ..Default::default()
                 }
             } else {
+                let joined = progress.joined.take().unwrap_or_default();
+                let base = if result == Ok(true) {
+                    "Vault copied. Windows and Android now keep their own local copies."
+                } else {
+                    "Vault copied, but the phone may not have received final confirmation. Check its pairing status."
+                };
                 PairingStatus {
                     stage: "paired".to_owned(),
-                    message: if result == Ok(true) {
-                        "Vault copied. Windows and Android now keep their own local copies."
-                    } else {
-                        "Vault copied, but the phone may not have received final confirmation. Check its pairing status."
-                    }.to_owned(),
+                    message: match joined.describe() {
+                        Some(items) => format!("{base} {items}"),
+                        None => base.to_owned(),
+                    },
+                    needs_review: joined.needs_review + joined.deleted_in_group,
+                    conflicts: joined.conflicts,
                     ..Default::default()
                 }
             };
+        }
+    }
+
+    /// After a join that kept this PC's items: what happened to them (`join_match.rs`).
+    fn note_join(&self, summary: join_match::JoinSummary) {
+        if let Some(items) = summary.describe() {
+            activity::log(Level::Info, Category::Pairing, format!("This PC's items: {items}"));
+        }
+        if let Ok(mut progress) = self.progress.lock() {
+            progress.joined = Some(summary);
         }
     }
 }
@@ -1471,9 +1557,14 @@ fn finish_join(
         .unlocked
         .as_mut()
         .ok_or("Unlock the Windows vault before pairing")?;
-    session
+    let (joined, summary) = session
         .commit(prepared, vault, identity_store)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    // A leave request this same identity signed earlier must not remove it again later.
+    let _ = vault.forget_own_pending_leave();
+    drop(app);
+    controller.note_join(summary);
+    Ok(joined)
 }
 
 #[derive(Serialize)]
@@ -1598,7 +1689,8 @@ fn ensure_pairing_ready(
             .unlocked
             .as_ref()
             .ok_or("Unlock the Windows vault before pairing")?;
-        if vault.is_enrolled().map_err(public_vault_error)? {
+        // After "Mark as lost" this PC may pair with a new managing phone and keep its items.
+        if vault.is_enrolled().map_err(public_vault_error)? && !vault.manager_lost().map_err(public_vault_error)? {
             return Err("This Windows vault is already paired".to_owned());
         }
     }
@@ -2222,6 +2314,70 @@ fn set_site_icons(enabled: bool, state: State<'_, ManagedState>) -> Result<site_
     site_icons_view(state.inner())
 }
 
+// Sign-in methods ("Sign in with Google" and the account): remembered by the extension after the user
+// agrees, kept in the vault on this PC (sign_ins.rs). The Sign-ins page lists, edits and deletes them.
+
+fn sign_in_answer(site: String, methods: Vec<sign_ins::SignIn>) -> browser::SignInsAnswer {
+    browser::SignInsAnswer {
+        site,
+        methods: methods
+            .into_iter()
+            .map(|row| browser::SignInMethod { provider: row.provider, account: row.account, last_used_at: row.last_used_at, use_count: row.use_count })
+            .collect(),
+    }
+}
+
+fn sign_ins_view(state: &ManagedState) -> Result<sign_ins::View, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+    sign_ins::view(vault.connection(), sign_ins::enabled()).map_err(|_| "Could not read the sign-in methods.".to_owned())
+}
+
+#[tauri::command]
+fn sign_ins(state: State<'_, ManagedState>) -> Result<sign_ins::View, String> {
+    sign_ins_view(state.inner())
+}
+
+#[tauri::command]
+fn set_sign_ins(enabled: bool, state: State<'_, ManagedState>) -> Result<sign_ins::View, String> {
+    sign_ins::set_enabled(enabled).map_err(|_| "Could not save the setting.".to_owned())?;
+    sign_ins_view(state.inner())
+}
+
+#[tauri::command]
+fn delete_sign_in(id: String, state: State<'_, ManagedState>) -> Result<sign_ins::View, String> {
+    {
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+        if sign_ins::delete(vault.connection(), &id).map_err(|_| "Could not delete the sign-in method.")? {
+            activity::log(Level::Info, Category::Items, "Deleted a remembered sign-in method");
+        }
+        let identity_store = app.store.identity_store();
+        if let Some(vault) = app.unlocked.as_mut() {
+            sign_in_sync::flush_installed(vault, &identity_store);
+        }
+    }
+    sign_ins_view(state.inner())
+}
+
+#[tauri::command]
+fn edit_sign_in(id: String, account: Option<String>, state: State<'_, ManagedState>) -> Result<sign_ins::View, String> {
+    {
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+        sign_ins::set_account(vault.connection(), &id, account.as_deref()).map_err(|refused| match refused {
+            sign_ins::Refused::BadAccount => format!("Use at most {} characters, without line breaks.", sign_ins::MAX_ACCOUNT_CHARS),
+            sign_ins::Refused::Missing => "This sign-in method was deleted.".to_owned(),
+            _ => "Could not save the account.".to_owned(),
+        })?;
+        let identity_store = app.store.identity_store();
+        if let Some(vault) = app.unlocked.as_mut() {
+            sign_in_sync::flush_installed(vault, &identity_store);
+        }
+    }
+    sign_ins_view(state.inner())
+}
+
 #[tauri::command]
 fn clear_site_icons(state: State<'_, ManagedState>) -> Result<site_icons::View, String> {
     {
@@ -2633,6 +2789,10 @@ pub fn run() {
             site_icons::install(&directory, move || {
                 let _ = icons_handle.emit(site_icons::EVENT, ());
             });
+            let sign_ins_handle = app.handle().clone();
+            sign_ins::install(&directory, move || {
+                let _ = sign_ins_handle.emit(sign_ins::EVENT, ());
+            });
             app.manage(auto_type::AutoType::new(directory.clone()));
             app.state::<auto_type::AutoType>().apply(app.handle());
             let handle = app.handle().clone();
@@ -2683,6 +2843,10 @@ pub fn run() {
             site_icons,
             set_site_icons,
             clear_site_icons,
+            sign_ins,
+            set_sign_ins,
+            delete_sign_in,
+            edit_sign_in,
             auto_type_status,
             set_auto_type,
             auto_type_pending,
@@ -2746,6 +2910,7 @@ pub fn run() {
             resolve_conflict,
             photo_sync_status,
             membership_status,
+            mark_manager_lost,
             leave_group,
             dismiss_removed_notice,
             show_main_window,

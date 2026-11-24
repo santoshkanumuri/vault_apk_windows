@@ -16,7 +16,7 @@ import { formatDateTime, plural, relativeTime } from "../../lib/format";
 import { isSyncing, phaseLabel, syncIndicator } from "../../lib/syncState";
 import { ActivityList } from "../ActivityPage";
 import { useSyncNow } from "../Home";
-import { PairingCard } from "./Pairing";
+import { PairedNotice, PairingCard } from "./Pairing";
 import { CloudCard } from "./Cloud";
 
 export function SyncPage() {
@@ -33,6 +33,7 @@ export function SyncPage() {
   return (
     <div className="page page-narrow">
       <RemovedNoticeBanner membership={membership.data} reload={membership.reload} />
+      {snapshot.enrolled && <PairedNotice />}
       {!snapshot.enrolled && membership.data?.pendingLeave && (
         <StatusBanner kind="info" title="You left the sync group" action={<PendingLeaveChip membership={membership.data} />}>
           This PC keeps its items. Your phone is told the next time this PC reaches it.
@@ -43,7 +44,7 @@ export function SyncPage() {
           <ol className="how-list">
             <li><strong>Connect.</strong> Scan the QR from your phone, or show a QR for your phone to scan. Both must be on the same Wi-Fi.</li>
             <li><strong>Confirm the code.</strong> Make sure both screens show the same code. Same Wi-Fi never grants trust on its own.</li>
-            <li><strong>Import.</strong> This PC receives an encrypted copy and keeps any items it already has.</li>
+            <li><strong>Import.</strong> This PC receives an encrypted copy and keeps any items it already has. Items already on your phone are not added twice.</li>
           </ol>
         </Card>
       )}
@@ -53,7 +54,12 @@ export function SyncPage() {
       {snapshot.enrolled && conflictCount > 0 && (
         <StatusBanner kind="warning" title={`${plural(conflictCount, "change")} need${conflictCount === 1 ? "s" : ""} review`}
           action={conflicts.data ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>Review</Button> : undefined}>
-          {conflicts.data ? "The same item changed on both devices. Both versions are kept until you choose." : "The same item changed on both devices. Both versions are kept; choose one on your phone under Devices."}
+          {conflicts.data ? "The same item changed on both devices. Both versions are kept until you choose." : "The same item changed on both devices. Both versions are kept; choose one on your phone under Devices & sync."}
+        </StatusBanner>
+      )}
+      {snapshot.enrolled && sync.data?.waitingForKeys && (
+        <StatusBanner kind="info" title="Waiting for new sync keys from your phone">
+          A device was removed, so the sync keys changed. Changes made here stay on this PC until its new keys arrive. Open Nuvori on your phone, or put this PC on the same Wi-Fi.
         </StatusBanner>
       )}
       {snapshot.enrolled && sync.data && sync.data.waitingToApply - (sync.data.setAside ?? 0) > 0 && (
@@ -68,7 +74,8 @@ export function SyncPage() {
       )}
       {snapshot.enrolled && <PhotoTransfer />}
 
-      {snapshot.enrolled && membershipShown && <DevicesGroup membership={membership.data!} />}
+      {snapshot.enrolled && membershipShown && <DevicesGroup membership={membership.data!} reload={membership.reload} />}
+      {snapshot.enrolled && membership.data?.managerLost && <PairingCard />}
       {snapshot.enrolled && !membershipShown && (
         <SettingsGroup title="Devices">
           <SettingsRow icon={Laptop} title="This PC" description="Keeps its own encrypted copy and catches up when connected." control={<StatusChip kind="success" label="Paired" />} />

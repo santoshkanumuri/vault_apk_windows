@@ -7,6 +7,7 @@ import { useRouter, type Route } from "../app/router";
 import { useVault } from "../app/vault";
 import type { EntryType } from "../lib/api";
 import { categories, categoryOrder, typeLabel } from "../lib/entries";
+import { iconHints } from "../lib/siteIcons";
 import { cx } from "../lib/format";
 import { buildIndex, fold, highlight, searchDocs, tokenize, type SearchDoc } from "../lib/search";
 import { useEntryActions, type QuickAction } from "./items/actions";
@@ -127,7 +128,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
         <div className="palette-input">
           <Search aria-hidden="true" />
           <input ref={input} type="text" role="combobox" aria-expanded="true" aria-controls="palette-results" aria-activedescendant={flat[active] ? `palette-${active}` : undefined}
-            aria-label="Search your vault" placeholder="Search logins, cards, codes, notes…" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} spellCheck={false} autoComplete="off" />
+            aria-label="Search your vault" placeholder="Search passwords, cards, codes, notes…" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} spellCheck={false} autoComplete="off" />
           <Kbd>Esc</Kbd>
         </div>
         <div className="palette-results" id="palette-results" role="listbox" ref={list} aria-label="Results">
@@ -154,7 +155,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
                   const { doc } = result;
                   return (
                     <div key={result.key} id={`palette-${current}`} data-index={current} role="option" aria-selected={selected} className={cx("palette-item", selected && "is-active")} onMouseMove={() => setActive(current)} onClick={() => choose(result)}>
-                      <Avatar title={doc.title || "?"} size="sm" icon={doc.kind === "note" ? FileText : undefined} site={doc.kind === "entry" && doc.entry.type === "PASSWORD" ? doc.entry.tertiaryValue : undefined} />
+                      <Avatar title={doc.title || "?"} size="sm" icon={doc.kind === "note" ? FileText : undefined} {...(doc.kind === "entry" ? iconHints(doc.entry, entries) : {})} />
                       <span className="palette-text">
                         <span className="palette-title"><Highlighted segments={highlight(doc.title || "Untitled", tokens)} /></span>
                         <span className="palette-subtitle">{doc.kind === "entry" && !tokens.length ? `${typeLabel(doc.entry.type)} · ` : ""}<Highlighted segments={highlight(doc.subtitle, tokens)} /></span>

@@ -15,6 +15,7 @@ import { AccentPicker, AppearancePreview, SurfacePicker } from "../components/Ap
 import { DEFAULT_ACCENT, DEFAULT_SURFACE, useTheme, type ThemePreference } from "../app/theme";
 import { useToast } from "../app/toast";
 import { useSiteIconsSetting } from "../app/siteIcons";
+import { SignInsSettingRow } from "./signins/SignInsPage";
 import { useVault } from "../app/vault";
 import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type AutoTypeStatus, type QuickSearchStatus } from "../lib/api";
 import { humanError } from "../lib/errors";
@@ -107,7 +108,7 @@ export function SettingsPage({ section }: { section?: string }) {
         <SettingsRow icon={Info} title="Nuvori for Windows" description={build ? `Version ${build.version} · ${build.storeBuild ? "Microsoft Store build" : "Installer build"}` : "Nuvori for Windows"} />
         {build?.storeBuild && build.installerBuildInstalled && <InstallerBuildRow />}
         <div className="about-text">
-          <p>Your vault is encrypted with a key derived from your master password and stays on this PC. Your phone keeps its own copy; changes travel directly over your Wi-Fi after you pair with a confirmed code.</p>
+          <p>Your vault is encrypted with a key derived from your master password and stays on this PC. Your phone keeps its own copy; after you pair with a confirmed code, changes travel over your Wi-Fi, or through your own Google Drive if you connect it, encrypted on this PC first.</p>
           <p>The browser extension never sees your master password or the full vault. It gets one login at a time, only after you choose it.</p>
         </div>
       </SettingsGroup>
@@ -230,7 +231,7 @@ function SiteIconsRow() {
   };
   return (
     <SettingsRow icon={Globe} title="Website icons"
-      description={enabled ? "Logos for popular sites are built in. The browser extension adds the icon of a site you sign in to. Nothing is downloaded." : "Off. Items show their first letter."}
+      description={enabled ? "Logos for popular sites are built in. The browser extension adds the icon of a site you sign in to, fetched from that site without cookies, and sync shares it with your other devices." : "Off. Items show their first letter."}
       control={<Toggle label="Website icons" checked={enabled} disabled={busy} onChange={(value) => void run(() => api.setSiteIcons(value), value ? "Website icons on" : "Website icons off")} />}>
       {enabled && <div className="site-icons-extra"><Button size="sm" disabled={busy} onClick={() => void run(() => api.clearSiteIcons(), "Saved icons removed")}>Remove saved icons</Button></div>}
     </SettingsRow>
@@ -410,6 +411,7 @@ function BrowserSection() {
       <SettingsRow icon={PlugZap} title="Connect browsers" description="Lets the Nuvori extension reach this app in the browsers you turn on below. Nuvori does this by itself when it starts."
         control={<Button size="sm" busy={connecting} onClick={() => void connect()}>Reconnect all</Button>} />
       <BrowsersList reloadKey={reloadKey} onAvailable={setBrowserListShown} />
+      <SignInsSettingRow />
       {status && (
         <div className="settings-detail">
           {!browserListShown && <div className="chip-row" aria-label="Registered browsers">

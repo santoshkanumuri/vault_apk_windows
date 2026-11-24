@@ -1,0 +1,447 @@
+{
+  "format": "nuvori-sync-compaction-vectors",
+  "version": 1,
+  "localDeviceId": "dev-phone",
+  "members": [
+    {
+      "deviceId": "dev-phone",
+      "status": "ACTIVE"
+    },
+    {
+      "deviceId": "dev-pc",
+      "status": "ACTIVE"
+    },
+    {
+      "deviceId": "dev-laptop",
+      "status": "ACTIVE"
+    },
+    {
+      "deviceId": "dev-tablet",
+      "status": "REVOKED"
+    }
+  ],
+  "localApplied": {
+    "dev-phone": 16,
+    "dev-pc": 16,
+    "dev-tablet": 8
+  },
+  "history": "checkpoint-v1.json keepSetInput",
+  "scenarios": [
+    {
+      "name": "an offline member holds back compaction",
+      "applied": {
+        "dev-pc": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        },
+        "dev-laptop": {
+          "dev-phone": 4,
+          "dev-pc": 2,
+          "dev-tablet": 3
+        }
+      },
+      "driveCovered": null,
+      "floors": {
+        "dev-pc": 2,
+        "dev-phone": 4,
+        "dev-tablet": 3
+      },
+      "deleted": [
+        "00054ca9d70305ad45eddaa58c38dfdf854dc351e087b4ea3113d1f5880411f9",
+        "30138e9ec4caaf85a59a51d3fd92845f09c5c905d4d7379c4de460c0886d3db6",
+        "58c62e21e264de9974afd975a6cae51c0ed3d5da17e172b6d20c23a951639cc3",
+        "6ec1825554c755bccd187a023ab0687b9d85e665fa2c00a075d02ce6d5faf27e",
+        "a1c60a48ac9da65144194e72e8170ecce5d118d3ddd59699b43596ddc03b5b67",
+        "a6bd14f365022c4dcd32f1029cd404b1a9d5236c30be85e84723ea6a6f3c735b",
+        "e138bb1ba84a409b8997e1f9008a54df700f84057b8bc5ca1e17364f9f9bb362",
+        "e9daad5fd0f46f0ad5424935a117c04c952963afdb457d694a35ee4aa58408cd",
+        "ec7b7518efdc928e8ffc4ea3668ec92db0d75c81ba95045e2a5cf7a0a7d615fc"
+      ],
+      "keptCount": 31
+    },
+    {
+      "name": "a member that never reported pins everything",
+      "applied": {
+        "dev-pc": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        }
+      },
+      "driveCovered": null,
+      "floors": {
+        "dev-pc": 0,
+        "dev-phone": 0,
+        "dev-tablet": 0
+      },
+      "deleted": [],
+      "keptCount": 40
+    },
+    {
+      "name": "every active member applied everything",
+      "applied": {
+        "dev-pc": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        },
+        "dev-laptop": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        }
+      },
+      "driveCovered": null,
+      "floors": {
+        "dev-pc": 16,
+        "dev-phone": 16,
+        "dev-tablet": 8
+      },
+      "deleted": [
+        "00054ca9d70305ad45eddaa58c38dfdf854dc351e087b4ea3113d1f5880411f9",
+        "2208a88ebcab7e0febd8d7e8bde706d9c97c8a8beb59a49106bde46b82723828",
+        "288f6d7cff36d61a029d0b5b076c17c95d2c4da1f8fec5b1f4b6f1249c9b46d7",
+        "30138e9ec4caaf85a59a51d3fd92845f09c5c905d4d7379c4de460c0886d3db6",
+        "44ef88bac254613b9d4e32a5f3671fcc9d55bcf8d7ea03ebd4404e3d37e98c15",
+        "46d5bdc29a180363d25c70ab57d39641bdb6455c182560e8aabfbe336df7544a",
+        "5143718ff943de746e9101186c12ad1d3ab283aa9a5d1ef7aa2c47c06051fe81",
+        "537ddb70f2620edd1d380c5af8d4a7afa699a7876416023eac4d4c1f967d5fbf",
+        "58c62e21e264de9974afd975a6cae51c0ed3d5da17e172b6d20c23a951639cc3",
+        "5ccd0e8e6b042c12dab3f293865f946d2c3ddc009bc64e39251a9365f0564d77",
+        "6ad4021e93e2d1271943d8386aa166dc4936347ab68b14e39770be9c65c580ad",
+        "6ded652ce503b18fe0e46f657512a25c5c66e166d09a6f92a01267adf535352f",
+        "6ec1825554c755bccd187a023ab0687b9d85e665fa2c00a075d02ce6d5faf27e",
+        "84e9e6058873da78ccef1017593affebce7bcaf024295611088072e9d1f72ef5",
+        "86c0bb73db4b7cd9aca68ba633baf976d57d535c7e34c24c63c1ffff08f2455a",
+        "8fe5cd66a5722e9773ed8f830073e0defaa404a46cc1aa7b72c8dc7c88512f39",
+        "9ff1d861fe06f065646be6f5e9e28f1e1a98af29590c256502c0ddbdaf4aca6d",
+        "a1c60a48ac9da65144194e72e8170ecce5d118d3ddd59699b43596ddc03b5b67",
+        "a3f5db6993d9e99e798b8c23816c714a1cc5dbfb2547a7caa671d668d5834721",
+        "a407011c5d01e5a9a2f1eff266437ca96c0b67992f9a9087a7bdf86d37a653f2",
+        "a6410c9ef1e6163701af9d027b7c9d980a3a390fef7d03f8299580b77f6818e6",
+        "a6bd14f365022c4dcd32f1029cd404b1a9d5236c30be85e84723ea6a6f3c735b",
+        "b417e653dfbb2b4d41f58b18c30ee1513788add575ddcf18aee8aae1396e14bd",
+        "cf6e3404dd2016f0fd66d79cc1c990c0127fe559f03cd7f0d4d5b3ac68e159dd",
+        "d78857499b3b708512f153c781db4f2909d96182f2159a54b43945268d091e25",
+        "d8cff526507a0c479f7679a8a8288934d945e4575b566ba0a3671b3bb3368650",
+        "dbd8d7afb0c76ad108d9f805a2d062840b63edc87336c2b1bccd294d4f0c9320",
+        "e138bb1ba84a409b8997e1f9008a54df700f84057b8bc5ca1e17364f9f9bb362",
+        "e8227b50e5a8726d8016ec21b2218373cf28ecc017ac6b340b09c9693d5f8430",
+        "e9daad5fd0f46f0ad5424935a117c04c952963afdb457d694a35ee4aa58408cd",
+        "ec7b7518efdc928e8ffc4ea3668ec92db0d75c81ba95045e2a5cf7a0a7d615fc",
+        "fec26ffc82676887f1a1e0931de2947461d8eada9fae3ac65229479d66f4cec3"
+      ],
+      "keptCount": 8
+    },
+    {
+      "name": "the drive does not hold every change yet",
+      "applied": {
+        "dev-pc": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        },
+        "dev-laptop": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        }
+      },
+      "driveCovered": {
+        "dev-phone": 10,
+        "dev-pc": 16,
+        "dev-tablet": 8
+      },
+      "floors": {
+        "dev-pc": 16,
+        "dev-phone": 10,
+        "dev-tablet": 8
+      },
+      "deleted": [
+        "00054ca9d70305ad45eddaa58c38dfdf854dc351e087b4ea3113d1f5880411f9",
+        "2208a88ebcab7e0febd8d7e8bde706d9c97c8a8beb59a49106bde46b82723828",
+        "288f6d7cff36d61a029d0b5b076c17c95d2c4da1f8fec5b1f4b6f1249c9b46d7",
+        "30138e9ec4caaf85a59a51d3fd92845f09c5c905d4d7379c4de460c0886d3db6",
+        "44ef88bac254613b9d4e32a5f3671fcc9d55bcf8d7ea03ebd4404e3d37e98c15",
+        "46d5bdc29a180363d25c70ab57d39641bdb6455c182560e8aabfbe336df7544a",
+        "537ddb70f2620edd1d380c5af8d4a7afa699a7876416023eac4d4c1f967d5fbf",
+        "58c62e21e264de9974afd975a6cae51c0ed3d5da17e172b6d20c23a951639cc3",
+        "5ccd0e8e6b042c12dab3f293865f946d2c3ddc009bc64e39251a9365f0564d77",
+        "6ad4021e93e2d1271943d8386aa166dc4936347ab68b14e39770be9c65c580ad",
+        "6ec1825554c755bccd187a023ab0687b9d85e665fa2c00a075d02ce6d5faf27e",
+        "84e9e6058873da78ccef1017593affebce7bcaf024295611088072e9d1f72ef5",
+        "8fe5cd66a5722e9773ed8f830073e0defaa404a46cc1aa7b72c8dc7c88512f39",
+        "9ff1d861fe06f065646be6f5e9e28f1e1a98af29590c256502c0ddbdaf4aca6d",
+        "a1c60a48ac9da65144194e72e8170ecce5d118d3ddd59699b43596ddc03b5b67",
+        "a3f5db6993d9e99e798b8c23816c714a1cc5dbfb2547a7caa671d668d5834721",
+        "a407011c5d01e5a9a2f1eff266437ca96c0b67992f9a9087a7bdf86d37a653f2",
+        "a6bd14f365022c4dcd32f1029cd404b1a9d5236c30be85e84723ea6a6f3c735b",
+        "b417e653dfbb2b4d41f58b18c30ee1513788add575ddcf18aee8aae1396e14bd",
+        "cf6e3404dd2016f0fd66d79cc1c990c0127fe559f03cd7f0d4d5b3ac68e159dd",
+        "d78857499b3b708512f153c781db4f2909d96182f2159a54b43945268d091e25",
+        "dbd8d7afb0c76ad108d9f805a2d062840b63edc87336c2b1bccd294d4f0c9320",
+        "e138bb1ba84a409b8997e1f9008a54df700f84057b8bc5ca1e17364f9f9bb362",
+        "e8227b50e5a8726d8016ec21b2218373cf28ecc017ac6b340b09c9693d5f8430",
+        "e9daad5fd0f46f0ad5424935a117c04c952963afdb457d694a35ee4aa58408cd",
+        "ec7b7518efdc928e8ffc4ea3668ec92db0d75c81ba95045e2a5cf7a0a7d615fc",
+        "fec26ffc82676887f1a1e0931de2947461d8eada9fae3ac65229479d66f4cec3"
+      ],
+      "keptCount": 13
+    },
+    {
+      "name": "a removed member pins nothing",
+      "applied": {
+        "dev-pc": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        },
+        "dev-laptop": {
+          "dev-phone": 16,
+          "dev-pc": 16,
+          "dev-tablet": 8
+        },
+        "dev-tablet": {
+          "dev-phone": 1
+        }
+      },
+      "driveCovered": null,
+      "floors": {
+        "dev-pc": 16,
+        "dev-phone": 16,
+        "dev-tablet": 8
+      },
+      "deleted": [
+        "00054ca9d70305ad45eddaa58c38dfdf854dc351e087b4ea3113d1f5880411f9",
+        "2208a88ebcab7e0febd8d7e8bde706d9c97c8a8beb59a49106bde46b82723828",
+        "288f6d7cff36d61a029d0b5b076c17c95d2c4da1f8fec5b1f4b6f1249c9b46d7",
+        "30138e9ec4caaf85a59a51d3fd92845f09c5c905d4d7379c4de460c0886d3db6",
+        "44ef88bac254613b9d4e32a5f3671fcc9d55bcf8d7ea03ebd4404e3d37e98c15",
+        "46d5bdc29a180363d25c70ab57d39641bdb6455c182560e8aabfbe336df7544a",
+        "5143718ff943de746e9101186c12ad1d3ab283aa9a5d1ef7aa2c47c06051fe81",
+        "537ddb70f2620edd1d380c5af8d4a7afa699a7876416023eac4d4c1f967d5fbf",
+        "58c62e21e264de9974afd975a6cae51c0ed3d5da17e172b6d20c23a951639cc3",
+        "5ccd0e8e6b042c12dab3f293865f946d2c3ddc009bc64e39251a9365f0564d77",
+        "6ad4021e93e2d1271943d8386aa166dc4936347ab68b14e39770be9c65c580ad",
+        "6ded652ce503b18fe0e46f657512a25c5c66e166d09a6f92a01267adf535352f",
+        "6ec1825554c755bccd187a023ab0687b9d85e665fa2c00a075d02ce6d5faf27e",
+        "84e9e6058873da78ccef1017593affebce7bcaf024295611088072e9d1f72ef5",
+        "86c0bb73db4b7cd9aca68ba633baf976d57d535c7e34c24c63c1ffff08f2455a",
+        "8fe5cd66a5722e9773ed8f830073e0defaa404a46cc1aa7b72c8dc7c88512f39",
+        "9ff1d861fe06f065646be6f5e9e28f1e1a98af29590c256502c0ddbdaf4aca6d",
+        "a1c60a48ac9da65144194e72e8170ecce5d118d3ddd59699b43596ddc03b5b67",
+        "a3f5db6993d9e99e798b8c23816c714a1cc5dbfb2547a7caa671d668d5834721",
+        "a407011c5d01e5a9a2f1eff266437ca96c0b67992f9a9087a7bdf86d37a653f2",
+        "a6410c9ef1e6163701af9d027b7c9d980a3a390fef7d03f8299580b77f6818e6",
+        "a6bd14f365022c4dcd32f1029cd404b1a9d5236c30be85e84723ea6a6f3c735b",
+        "b417e653dfbb2b4d41f58b18c30ee1513788add575ddcf18aee8aae1396e14bd",
+        "cf6e3404dd2016f0fd66d79cc1c990c0127fe559f03cd7f0d4d5b3ac68e159dd",
+        "d78857499b3b708512f153c781db4f2909d96182f2159a54b43945268d091e25",
+        "d8cff526507a0c479f7679a8a8288934d945e4575b566ba0a3671b3bb3368650",
+        "dbd8d7afb0c76ad108d9f805a2d062840b63edc87336c2b1bccd294d4f0c9320",
+        "e138bb1ba84a409b8997e1f9008a54df700f84057b8bc5ca1e17364f9f9bb362",
+        "e8227b50e5a8726d8016ec21b2218373cf28ecc017ac6b340b09c9693d5f8430",
+        "e9daad5fd0f46f0ad5424935a117c04c952963afdb457d694a35ee4aa58408cd",
+        "ec7b7518efdc928e8ffc4ea3668ec92db0d75c81ba95045e2a5cf7a0a7d615fc",
+        "fec26ffc82676887f1a1e0931de2947461d8eada9fae3ac65229479d66f4cec3"
+      ],
+      "keptCount": 8
+    }
+  ],
+  "drive": {
+    "feature": "history-compaction-v1",
+    "coverage": [
+      {
+        "name": "no marker, gap-free from 1",
+        "ranges": [
+          [
+            1,
+            10
+          ],
+          [
+            11,
+            20
+          ]
+        ],
+        "marker": null,
+        "readerFloor": 30,
+        "coverage": 20
+      },
+      {
+        "name": "no marker, a gap",
+        "ranges": [
+          [
+            1,
+            10
+          ],
+          [
+            12,
+            20
+          ]
+        ],
+        "marker": null,
+        "readerFloor": 30,
+        "coverage": 10
+      },
+      {
+        "name": "a counted marker starts the coverage after it",
+        "ranges": [
+          [
+            41,
+            50
+          ],
+          [
+            51,
+            60
+          ]
+        ],
+        "marker": 40,
+        "readerFloor": 45,
+        "coverage": 60
+      },
+      {
+        "name": "a marker above this reader's floor is not counted",
+        "ranges": [
+          [
+            41,
+            50
+          ]
+        ],
+        "marker": 40,
+        "readerFloor": 39,
+        "coverage": 0
+      },
+      {
+        "name": "a marker and a gap after it",
+        "ranges": [
+          [
+            42,
+            50
+          ]
+        ],
+        "marker": 40,
+        "readerFloor": 45,
+        "coverage": 40
+      }
+    ],
+    "cleanup": [
+      {
+        "name": "files below the floor go; the one across it stays",
+        "ranges": [
+          [
+            1,
+            256
+          ],
+          [
+            257,
+            512
+          ],
+          [
+            513,
+            600
+          ]
+        ],
+        "marker": 0,
+        "floor": 520,
+        "newMarker": 512,
+        "deleted": [
+          [
+            1,
+            256
+          ],
+          [
+            257,
+            512
+          ]
+        ]
+      },
+      {
+        "name": "nothing below the floor",
+        "ranges": [
+          [
+            1,
+            256
+          ]
+        ],
+        "marker": 0,
+        "floor": 100,
+        "newMarker": 0,
+        "deleted": []
+      },
+      {
+        "name": "a gap stops the cleanup at the gap",
+        "ranges": [
+          [
+            1,
+            10
+          ],
+          [
+            20,
+            30
+          ]
+        ],
+        "marker": 0,
+        "floor": 40,
+        "newMarker": 10,
+        "deleted": [
+          [
+            1,
+            10
+          ]
+        ]
+      },
+      {
+        "name": "after an earlier cleanup",
+        "ranges": [
+          [
+            257,
+            512
+          ],
+          [
+            513,
+            600
+          ]
+        ],
+        "marker": 256,
+        "floor": 600,
+        "newMarker": 600,
+        "deleted": [
+          [
+            257,
+            512
+          ],
+          [
+            513,
+            600
+          ]
+        ]
+      },
+      {
+        "name": "an offline member pins the floor",
+        "ranges": [
+          [
+            1,
+            256
+          ],
+          [
+            257,
+            512
+          ]
+        ],
+        "marker": 0,
+        "floor": 0,
+        "newMarker": 0,
+        "deleted": []
+      }
+    ],
+    "marker": {
+      "transportSecretHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "vaultId": "vault-a",
+      "name": "nv1.0996aacd60584570.c.c7bc29101df2b489",
+      "bodyJson": "{\"author\":\"dev-pc\",\"floor\":256,\"hash\":\"abababababababababababababababababababababababababababababababab\",\"writer\":\"dev-phone\",\"at\":1795000000000}",
+      "nonceHex": "717171717171717171717171",
+      "sealedHex": "4e56433171717171717171717171717153bc46e7a24d5e4d182f554d375cfb6cefc104f2a9962f9628e3d01c3e1395977b7b79e3757277252e0773d474948717f557154d3c5fde837a550c76c2b4c8ef2183a8267b06591ccfb4c4dc9deac4eced1e994cda57fa54f9cbe11d36fc261bf2613934e47c1709a52c1e385214b837ffed4981e6df7d7483841b820d25ffef631c0f3ef25f91da34a931a216c983a7505fa35f79b109aa5211a4cb66485696d5"
+    }
+  }
+}

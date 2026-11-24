@@ -9,6 +9,27 @@ use crate::{
 
 pub struct ChangeStore;
 
+/// Per group: the signed enrollment checkpoint this PC joined from (`checkpoint_json`, empty after a
+/// full-history join) and its own history-compaction floor (`floor_json`, author to
+/// `[sequence, "<hash>"]`), as Android's `sync_checkpoints`.
+pub(crate) const CHECKPOINTS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS sync_checkpoints (
+    vault_id TEXT NOT NULL PRIMARY KEY,
+    checkpoint_json TEXT NOT NULL,
+    floor_json TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL
+)";
+
+/// Stores the checkpoint of a v4 join, keeping a compaction floor already recorded for the group.
+pub(crate) fn save_checkpoint(connection: &Connection, vault_id: &str, checkpoint_json: &str) -> rusqlite::Result<()> {
+    connection.execute_batch(CHECKPOINTS_SCHEMA)?;
+    connection.execute(
+        "INSERT INTO sync_checkpoints (vault_id, checkpoint_json, floor_json, updated_at) VALUES (?1, ?2, '{}', ?3)
+         ON CONFLICT(vault_id) DO UPDATE SET checkpoint_json = excluded.checkpoint_json, updated_at = excluded.updated_at",
+        params![vault_id, checkpoint_json, crate::activity::now_millis() as i64],
+    )?;
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredVaultRecord {
     pub entity_type: String,
@@ -129,6 +150,7 @@ impl ChangeStore {
                  PRIMARY KEY (vault_id, peer_device_id)
              );",
         )?;
+        connection.execute_batch(CHECKPOINTS_SCHEMA)?;
         // Device-only: what each member last announced (the appearance write gate reads it).
         connection.execute_batch(crate::appearance::PEER_FEATURES_SCHEMA)?;
         Ok(())

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Fingerprint, LockKeyhole, Moon, ShieldCheck, Sun } from "lucide-react";
 import { Button, IconButton } from "../components/Button";
 import { PasswordField } from "../components/Field";
@@ -27,6 +27,7 @@ export function UnlockPage() {
   const [helloAvailable, setHelloAvailable] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
   const confirmRef = useRef<HTMLInputElement>(null);
+  const helloRef = useRef<HTMLButtonElement>(null);
   const strength = passwordStrength(password);
   const helloReady = configured && snapshot.helloEnabled && helloAvailable;
 
@@ -35,7 +36,18 @@ export function UnlockPage() {
     api.helloAvailable().then(setHelloAvailable).catch(() => setHelloAvailable(false));
   }, [configured, snapshot.helloEnabled]);
 
-  useEffect(() => { if (!helloReady) passwordRef.current?.focus(); }, [helloReady, configured]);
+  useEffect(() => {
+    if (!helloReady) { passwordRef.current?.focus(); return; }
+    // Windows Hello is the default way in and comes first on screen, so it also comes first for
+    // the keyboard: Tab then reaches the password. Not when typing has already started.
+    const field = passwordRef.current;
+    if (field && document.activeElement === field && !field.value) helloRef.current?.focus();
+  }, [helloReady, configured]);
+
+  // Typing while Windows Hello has the focus goes to the password field, so no keystroke is lost.
+  const typeIntoPassword = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key.length === 1 && event.key !== " " && !event.ctrlKey && !event.metaKey && !event.altKey) passwordRef.current?.focus();
+  };
 
   const finish = (message: string) => {
     setPassword(""); setConfirm("");
@@ -100,7 +112,7 @@ export function UnlockPage() {
 
         {helloReady && (
           <>
-            <Button variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void unlockHello()}>Unlock with Windows Hello</Button>
+            <Button ref={helloRef} onKeyDown={typeIntoPassword} variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void unlockHello()}>Unlock with Windows Hello</Button>
             <div className="auth-divider"><span>or use your master password</span></div>
           </>
         )}

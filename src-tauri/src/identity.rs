@@ -63,6 +63,22 @@ impl DeviceIdentityStore {
         result
     }
 
+    /// This PC's X25519 key for epoch-key packages, derived from the identity seed (`epoch_keys.rs`).
+    pub fn x25519_private(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, IdentityError> {
+        let (_, mut private_seed) = self.load_material()?;
+        let private = crate::epoch_keys::x25519_private(&private_seed);
+        private_seed.zeroize();
+        Ok(private)
+    }
+
+    /// This PC's signed key statement for group `vault_id`.
+    pub fn key_statement(&self, vault_id: &str) -> Result<crate::epoch_keys::KeyStatement, IdentityError> {
+        let identity = self.get_or_create()?;
+        let public = crate::epoch_keys::x25519_public(&*self.x25519_private()?);
+        crate::epoch_keys::KeyStatement::create(vault_id, &identity.device_id, &public, |message| self.sign(message).ok())
+            .ok_or(IdentityError::UnsupportedFormat(0))
+    }
+
     pub fn sign(&self, message: &[u8]) -> Result<[u8; 64], IdentityError> {
         let (_, mut private_seed) = self.load_material()?;
         let signature = SigningKey::from_bytes(&private_seed)
@@ -70,6 +86,33 @@ impl DeviceIdentityStore {
             .to_bytes();
         private_seed.zeroize();
         Ok(signature)
+    }
+
+    /// Replaces this PC's identity with a new random one (new device ID and key) in one atomic
+    /// file write. The old private key is gone afterwards, so the old identity can never sign
+    /// again and is never reused. Its signatures still verify: peers check them against the public
+    /// key in the old group's signed membership, which this does not touch.
+    pub fn rotate(&self) -> Result<DeviceIdentity, IdentityError> {
+        let previous = if self.exists() {
+            let (identity, mut seed) = self.load_material()?;
+            seed.zeroize();
+            Some(identity)
+        } else {
+            None
+        };
+        loop {
+            let mut private_seed = [0_u8; PRIVATE_SEED_BYTES];
+            getrandom::fill(&mut private_seed)
+                .map_err(|error| IdentityError::Random(error.to_string()))?;
+            let candidate = SigningKey::from_bytes(&private_seed).verifying_key().to_bytes();
+            if previous.as_ref().is_some_and(|old| old.public_key == candidate) {
+                private_seed.zeroize();
+                continue;
+            }
+            let result = self.create_from_seed(&private_seed);
+            private_seed.zeroize();
+            return result;
+        }
     }
 
     pub fn delete(&self) -> Result<(), IdentityError> {
@@ -362,5 +405,27 @@ mod tests {
 
         store.delete().expect("identity file must be removed");
         fs::remove_dir(&directory).expect("test directory must be removed");
+    }
+
+    #[test]
+    fn rotate_makes_a_new_identity_and_old_signatures_still_verify() {
+        let directory = std::env::temp_dir().join(format!("nuvori-identity-{}", Uuid::new_v4()));
+        let store = DeviceIdentityStore::new(directory.join("device-identity-v1.json"));
+        let old = store.get_or_create().unwrap();
+        let old_signature = store.sign(b"leave request").unwrap();
+
+        let new = store.rotate().unwrap();
+        assert_ne!(new.device_id, old.device_id);
+        assert_ne!(new.public_key, old.public_key);
+        assert_eq!(store.get_or_create().unwrap(), new, "the new identity is the one in use");
+        assert!(verify_signature(&old.public_key, b"leave request", &old_signature),
+            "a request signed before the rotation still verifies with the old public key");
+        let new_signature = store.sign(b"leave request").unwrap();
+        assert!(!verify_signature(&old.public_key, b"leave request", &new_signature),
+            "the old key can no longer sign");
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1, "no temporary file is left");
+
+        store.delete().unwrap();
+        fs::remove_dir(&directory).unwrap();
     }
 }

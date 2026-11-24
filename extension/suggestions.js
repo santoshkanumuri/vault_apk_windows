@@ -87,6 +87,31 @@
   };
 
   // ---------------------------------------------------------------------------
+  // Sign-in methods (signins.js). Read through the captured DOM functions only; never an input's value.
+
+  const SIGNINS = typeof NuvoriSignIns === "object" && NuvoriSignIns ? NuvoriSignIns : null;
+  const HTML_ELEMENT = typeof HTMLElement === "function" ? HTMLElement : null;
+  const innerTextOf = HTML_ELEMENT ? Object.getOwnPropertyDescriptor(HTML_ELEMENT.prototype, "innerText")?.get : undefined;
+  const signInApi = {
+    query: (selector) => { try { return queryIn(doc, selector); } catch { return []; } },
+    within: (node, selector) => { try { return queryIn(node, selector); } catch { return []; } },
+    attr: (node, name) => (node instanceof Element ? DOM.getAttribute.call(node, name) || "" : ""),
+    text: (node) => { try { return HTML_ELEMENT && node instanceof HTML_ELEMENT && innerTextOf ? String(innerTextOf.call(node) || "") : String(node?.textContent || ""); } catch { return ""; } },
+    parent: (node) => (node instanceof Element ? DOM.parentElement.call(node) : null),
+    isElement: (node) => node instanceof Element,
+    matches: (node, selector) => { try { return DOM.matches.call(node, selector); } catch { return false; } },
+    body: () => DOM.body.call(doc),
+  };
+  // Marks are built with the captured createElement, never a method the page could replace.
+  const markDoc = { createElement: (tag) => DOM.createElement.call(doc, tag), createElementNS: (ns, tag) => DOM.createElementNS.call(doc, ns, tag) };
+  const signInMark = (provider, size) => SIGNINS.markNode(markDoc, provider, size);
+  try {
+    if (SIGNINS && !(typeof chrome?.extension?.inIncognitoContext === "boolean" && chrome.extension.inIncognitoContext)) {
+      SIGNINS.watchPage({ send, listen, doc, api: signInApi, hostname: location.hostname, pathname: location.pathname, inFrame: IN_FRAME });
+    }
+  } catch { /* reminders are optional */ }
+
+  // ---------------------------------------------------------------------------
   // Small DOM helpers (no innerHTML: everything is text or static SVG geometry)
 
   const ICONS = {
@@ -217,6 +242,18 @@
 .empty{padding:12px;color:var(--muted);font-size:12px;list-style:none}
 .confirm .title{font-weight:600;margin-bottom:2px}
 .confirm .actions{margin-top:10px}
+.reminders{display:grid;gap:4px;padding:6px 8px;border-bottom:1px solid var(--hairline)}
+.reminder{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-height:30px;padding:4px 8px;border-radius:8px;background:var(--surface2);color:var(--text);font-size:12px;line-height:1.3;cursor:pointer}
+.reminder:hover{background:var(--hover)}
+.reminder:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.reminder-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reminder-label,.reminder-account{color:var(--muted)}
+.reminder-text strong{font-weight:600}
+.reminder-card{padding:8px 8px 4px}
+.reminder-card .reminders{padding:0;border:0}
+.reminder-card .foot{border:0;padding:2px 0 0}
+.signin-title{display:flex;align-items:flex-start;gap:10px}
+.signin-title .signin-mark{margin-top:1px}
 @media (prefers-reduced-motion:reduce){.panel,.spin{animation:none}}
 @media (forced-colors:active){.panel{border-color:CanvasText}.btn{border-color:ButtonText}.option[aria-selected="true"]{outline:2px solid Highlight}}
 `;
@@ -597,7 +634,7 @@
   const dropdown = {
     surface: null, panel: null, body: null, hostLabel: null, kindLabel: null, showAll: null, searchAll: null, field: null, open: false,
     kind: "login", accounts: [], options: [], active: -1, requestId: 0, loadingTimer: 0, blurTimer: 0, frame: 0,
-    frameTarget: null, search: null, every: false,
+    frameTarget: null, search: null, every: false, signIns: [],
   };
 
   function ensureDropdown() {
@@ -972,14 +1009,17 @@
     // Nothing to offer is not worth a popup. An identifier-first page stays quiet in every state;
     // a sign-in form stays quiet when no login is saved, until the user asks (click or the Down key).
     const hasAccounts = response?.status === "ok" && response.accounts?.length > 0;
+    // "Last time: Continue with GitHub": the site's remembered sign-in methods ride along.
+    dropdown.signIns = response?.status === "ok" && Array.isArray(response.signIns) ? response.signIns.slice(0, 3) : [];
+    const hasReminders = dropdown.signIns.length > 0;
     // A contact or checkout form's email box looks like an identifier-first sign-in too. With no
     // login to offer there, offer the saved addresses instead.
-    if (!hasAccounts && quiet && usable(field) && F.detailKind(field, controlsFor(field), DETAILS) === "profile") {
+    if (!hasAccounts && !hasReminders && quiet && usable(field) && F.detailKind(field, controlsFor(field), DETAILS) === "profile") {
       await openItems(field, "profile", { force });
       return;
     }
-    if (!hasAccounts && (quiet || (!force && response?.status === "ok"))) { closeDropdown(); return; }
-    showDropdown(field, () => renderResponse(response));
+    if (!hasAccounts && !hasReminders && (quiet || (!force && response?.status === "ok"))) { closeDropdown(); return; }
+    showDropdown(field, () => { if (hasAccounts || !hasReminders) renderResponse(response); else renderState("neutral", "No login saved for this site."); addReminders(); });
   }
 
   /**
@@ -999,6 +1039,7 @@
     if (["light", "dark", "system"].includes(response?.theme)) theme = response.theme;
     if (response?.status === "disabled") { closeDropdown(); return; }
     const hasAccounts = response?.status === "ok" && response.accounts?.length > 0;
+    dropdown.signIns = [];
     if (!hasAccounts && (quiet || (!force && response?.status === "ok"))) { closeDropdown(); return; }
     dropdown.frameTarget = target;
     showDropdown(element, () => renderResponse(response));
@@ -1203,6 +1244,7 @@
 
   function onListKey(event) {
     if (!event.isTrusted) return;
+    if (DOM.matches.call(eventTarget(event), ".reminder") && ["Enter", " "].includes(event.key)) return;
     const count = dropdown.options.length;
     const field = dropdown.field;
     // Typing in the search box: only the list keys leave it.
@@ -1243,9 +1285,96 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Sign-in reminders: "Last time: GitHub · octocat". Smaller than a login row, in the list's top and
+  // in a small card when the page shows a matching sign-in button. A click points at that button on
+  // the page (scrolls to it, outlines it, focuses it); it never clicks it.
+
+  function reminderRows(methods, surface, onPoint) {
+    return el("div", { class: "reminders", role: "group", "aria-label": "Sign-in methods you used on this site" }, ...methods.map((method) => {
+      const name = SIGNINS?.nameOf(method.provider) || method.provider;
+      const label = el("span", { class: "reminder-text" }, el("span", { class: "reminder-label", text: "Last time: " }), el("strong", { text: name }),
+        method.account ? el("span", { class: "reminder-account", text: ` · ${method.account}` }) : null);
+      const row = el("button", { class: "reminder", type: "button", title: `Show the ${name} sign-in button on this page`,
+        "aria-label": `Last time you signed in with ${name}${method.account ? ` as ${method.account}` : ""}. Show its button on this page.` },
+        signInMark(method.provider, 18), label);
+      row.addEventListener("click", (event) => {
+        if (!surface.canActivate(event, row)) return;
+        if (!pointTo(method.provider)) {
+          label.replaceChildren(el("span", { class: "reminder-label", text: `No ${name} button on this page` }));
+          setTimeout(() => label.replaceChildren(el("span", { class: "reminder-label", text: "Last time: " }), el("strong", { text: name }),
+            method.account ? el("span", { class: "reminder-account", text: ` · ${method.account}` }) : null), FEEDBACK_MS);
+          return;
+        }
+        onPoint?.();
+      });
+      return row;
+    }));
+  }
+
+  /** Adds the reminders above a login list (not for frames, search or other kinds). */
+  function addReminders() {
+    if (!SIGNINS || dropdown.kind !== "login" || dropdown.every || dropdown.frameTarget || !dropdown.signIns?.length) return;
+    // The list now shows the same reminder: the small card would only repeat it.
+    if (card.reminder && !card.prompt) hideCard();
+    dropdown.body.prepend(reminderRows(dropdown.signIns, dropdown.surface, () => closeDropdown()));
+  }
+
+  /** Scrolls to the page's sign-in button for `provider`, outlines it for a moment and focuses it. */
+  function pointTo(provider) {
+    const target = SIGNINS?.findButtons(provider, signInApi)[0];
+    if (!target) return false;
+    const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try { target.scrollIntoView({ block: "center", inline: "nearest", behavior: still ? "auto" : "smooth" }); } catch { /* old engines */ }
+    const accent = PALETTE?.accents[appearance?.accent] || PALETTE?.accents[PALETTE?.defaults?.accent];
+    const color = accent?.[isDark(theme) ? "dark" : "light"]?.primary || "#2E7034";
+    const host = DOM.createElement.call(doc, "div");
+    const root = host.attachShadow({ mode: "closed" });
+    const box = DOM.createElement.call(doc, "div");
+    root.append(box);
+    host.setAttribute("style", "all:initial !important;position:fixed !important;inset:0 auto auto 0 !important;width:0 !important;height:0 !important;z-index:2147483647 !important;pointer-events:none !important;display:block !important;overflow:visible !important;");
+    docRoot().append(host);
+    try { host.setAttribute("popover", "manual"); host.showPopover(); } catch { /* z-index still on top */ }
+    const until = now() + 2600;
+    const draw = () => {
+      const rect = target.getBoundingClientRect();
+      box.setAttribute("style", `position:fixed;pointer-events:none;box-sizing:border-box;left:${rect.left - 5}px;top:${rect.top - 5}px;width:${rect.width + 10}px;height:${rect.height + 10}px;border:3px solid ${color};border-radius:12px;box-shadow:0 0 0 4px ${color}40;opacity:${now() > until - 400 ? 0 : 1};transition:opacity 300ms`);
+      if (now() < until && target.isConnected) requestAnimationFrame(draw);
+      else { try { host.hidePopover(); } catch { /* not open */ } host.remove(); }
+    };
+    draw();
+    try { target.focus({ preventScroll: true }); } catch { /* not focusable */ }
+    return true;
+  }
+
+  /** On a page of a remembered site with a matching sign-in button: a small card, once per page. */
+  let reminderShown = false;
+  async function offerReminder(attempt = 0) {
+    if (!SIGNINS || IN_FRAME || reminderShown || SIGNINS.providerOfPage(location.hostname, location.pathname)) return;
+    const result = await send({ action: "signin_reminders" });
+    if (result?.status !== "ok" || !Array.isArray(result.methods) || !result.methods.length) return;
+    const shown = result.methods.filter((method) => SIGNINS.findButtons(method.provider, signInApi).length > 0);
+    if (!shown.length) {
+      if (attempt < 2) setTimeout(() => void offerReminder(attempt + 1), 2500);
+      return;
+    }
+    if (card.prompt || dropdown.open || reminderShown) return;
+    reminderShown = true;
+    if (["light", "dark", "system"].includes(result.theme)) theme = result.theme;
+    ensureCard();
+    card.reminder = true;
+    card.busy = false;
+    card.surface.setTheme(theme);
+    const close = el("button", { class: "link", type: "button", text: "Dismiss", onclick: (event) => { if (card.surface.canActivate(event, close)) hideCard(); } });
+    card.body.replaceChildren(el("div", { class: "reminder-card" }, reminderRows(shown, card.surface, () => hideCard()), el("div", { class: "foot" }, close)));
+    card.surface.show();
+    clearTimeout(card.hideTimer);
+    card.hideTimer = setTimeout(() => { if (!card.prompt) hideCard(); }, 20000);
+  }
+
+  // ---------------------------------------------------------------------------
   // Save / update card
 
-  const card = { surface: null, prompt: null, busy: false, hideTimer: 0, body: null, nameInput: null, usernameInput: null, choice: null, updateButton: null };
+  const card = { surface: null, prompt: null, busy: false, hideTimer: 0, body: null, nameInput: null, usernameInput: null, accountInput: null, choice: null, updateButton: null };
 
   function ensureCard() {
     if (card.surface) return;
@@ -1332,6 +1461,7 @@
     const nodes = [];
     card.nameInput = null;
     card.usernameInput = null;
+    card.accountInput = null;
     card.choice = null;
     card.updateButton = null;
     if (prompt.kind === "save_card" || prompt.kind === "save_profile") {
@@ -1350,6 +1480,24 @@
         el("div", {}, el("dt", { text: "Username" }), prompt.canEditUsername ? el("dd", {}, usernameField(prompt)) : el("dd", { text: prompt.username || "No username" })),
         el("div", {}, el("dt", { text: "Password" }), el("dd", { text: "••••••••" }))));
       if (prompt.locked) nodes.push(stateBox("warning", "Nuvori is locked. Saving finishes after you unlock it on Windows."));
+      nodes.push(el("div", { class: "actions" }, cardButton("Save", "save", "primary"), cardButton("Not now", "dismiss"), cardButton("Never for this site", "never", "quiet")));
+    } else if (prompt.kind === "signin") {
+      // "sign_in_methods": the provider and the account the provider's page showed, editable. Not a secret.
+      const name = prompt.providerName || prompt.provider;
+      nodes.push(el("div", { class: "signin-title" }, SIGNINS ? signInMark(prompt.provider, 24) : null,
+        el("h2", { text: `Remember that you use ${name} on ${prompt.host}?` })));
+      nodes.push(el("p", { class: "desc", text: "Nuvori reminds you which sign-in button and account you used next time." }));
+      // A normal full-width field under its label, like "Name" in the save prompt: the text starts at the left.
+      const input = el("input", { class: "input", type: "text", maxlength: "256", autocomplete: "off", spellcheck: "false", "aria-label": `Account you used with ${name}`, placeholder: "Not known" });
+      input.value = prompt.account || "";
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        if (!card.busy && card.surface.canActivate(event, input)) void decide("save");
+      });
+      card.accountInput = input;
+      nodes.push(el("label", { class: "name" }, el("span", { class: "name-row" }, el("span", { text: "Account" })), input));
+      if (prompt.locked) nodes.push(stateBox("warning", "Nuvori is locked. Save opens its unlock window."));
       nodes.push(el("div", { class: "actions" }, cardButton("Save", "save", "primary"), cardButton("Not now", "dismiss"), cardButton("Never for this site", "never", "quiet")));
     } else if (prompt.kind === "update") {
       const choices = Array.isArray(prompt.choices) ? prompt.choices : [];
@@ -1380,6 +1528,7 @@
     if (["light", "dark", "system"].includes(nextTheme)) theme = nextTheme;
     ensureCard();
     clearTimeout(card.hideTimer);
+    card.reminder = false;
     card.prompt = prompt;
     card.busy = false;
     card.surface.setTheme(theme);
@@ -1389,6 +1538,7 @@
   }
 
   function hideCard() {
+    card.reminder = false;
     clearTimeout(card.hideTimer);
     card.prompt = null;
     card.surface?.hide();
@@ -1419,6 +1569,7 @@
     const message = { action: "inline_approve", id: prompt.id, decision };
     if (decision === "save" && prompt.canTitle && card.nameInput) message.title = String(card.nameInput.value || "").slice(0, 256);
     if (decision === "save" && prompt.canEditUsername && card.usernameInput) message.username = String(card.usernameInput.value || "").slice(0, 1024);
+    if (decision === "save" && prompt.kind === "signin" && card.accountInput) message.account = String(card.accountInput.value || "").slice(0, 256);
     if (decision === "update" && prompt.choices?.length > 1) {
       if (!card.choice) return; // Pick an account first.
       message.credentialId = card.choice;
@@ -1434,6 +1585,8 @@
       case "queued": return feedback("warning", "Saved for later. Unlock Nuvori on Windows to finish.", 5000);
       case "dismissed": return hideCard();
       case "never": return feedback("neutral", `Nuvori won't offer to save logins on ${prompt.host}.`);
+      case "remembered": return feedback("success", "Remembered ✓ Nuvori reminds you next time.");
+      case "never_signin": return feedback("neutral", `Nuvori won't ask about sign-ins on ${prompt.host}.`);
       case "review":
         if (result.prompt) {
           card.prompt = result.prompt;
@@ -1696,6 +1849,10 @@
       sendResponse({ status: "ok" });
       return false;
     }
+    if (message.action === "signin_point") {
+      sendResponse({ status: typeof message.provider === "string" && pointTo(message.provider) ? "ok" : "missing" });
+      return false;
+    }
     if (message.action === "show_notice") {
       notice("success", "Already saved in Nuvori.", message.theme);
       sendResponse({ status: "ok" });
@@ -1880,6 +2037,8 @@
   if (isInput(initial)) { focusedField = initial; void openFor(initial); }
 
   // Pages usually navigate after a sign-in; the background keeps the prompt for this tab and site.
+  setTimeout(() => void offerReminder().catch(() => {}), 1200);
+
   void send({ action: "inline_pending" }).then((result) => {
     if (result?.status === "ok" && result.prompt && !card.prompt) showCard(result.prompt, result.theme);
     // The login just submitted on the previous page is already in Nuvori.

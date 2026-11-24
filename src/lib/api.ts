@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { SignInsState } from "./signIns";
+
+export type { SignIn, SignInsState } from "./signIns";
 
 export type VaultState = "locked" | "unlocked" | "notConfigured";
 
@@ -58,7 +61,7 @@ export type PreviousPassword = { password: string; replacedAt: number };
 /** The "Website icons" setting and the icons the browser extension saved: site -> `data:image/png;base64,...`. */
 export type SiteIconsState = { enabled: boolean; icons: Record<string, string> };
 
-/** A deleted item kept on this PC for 30 days. */
+/** A deleted item kept on this PC for 30 days, or this PC's version of an item set aside when it joined a group. */
 export type TrashedItem = {
   id: string;
   /** The deleted item's ID. */
@@ -69,7 +72,10 @@ export type TrashedItem = {
   deletedAt: number;
   /** Deleted on a paired device; this PC kept its copy. */
   deletedElsewhere: boolean;
+  /** When it is deleted for good; 0 for a join copy, which stays until the person acts. */
   expiresAt: number;
+  /** "join": the group had another version when this PC joined, so this PC's version waits here for review. */
+  reason?: "" | "join" | "removal";
 };
 export type VaultGroup = { id: string; name: string; notes: string; folderType: string };
 export type PasskeySummary = { id: string; rpId: string; username: string; displayName: string; createdAt: number };
@@ -81,6 +87,8 @@ export type SyncStatus = {
   waitingToApply: number;
   /** Part of waitingToApply: changes this PC could not read. They are retried on each sync. */
   setAside?: number;
+  /** A device was removed with new sync keys and this PC's keys have not arrived: it only receives until they do. */
+  waitingForKeys?: boolean;
   conflicts: number;
   phoneAddress: string;
   automatic: boolean;
@@ -116,7 +124,11 @@ export type CloudStatus = {
   checkSeconds?: number;
 };
 export type PairingStage = "" | "connecting" | "offering" | "confirm" | "transferring" | "canceling" | "paired" | "failed";
-export type PairingStatus = { stage: PairingStage | string; confirmation: string; message: string; invitation: string };
+export type PairingStatus = { stage: PairingStage | string; confirmation: string; message: string; invitation: string;
+  /** After a join: this PC's items that differ from the phone's, now in Recently deleted. */
+  needsReview?: number;
+  /** After a join that kept item IDs: items with the same ID and other content, waiting in Sync conflicts. */
+  conflicts?: number };
 
 export type ActivityLevel = "info" | "success" | "warning" | "error" | "progress";
 export type ActivityCategory = "vault" | "items" | "sync" | "pairing" | "browser" | "security";
@@ -172,10 +184,15 @@ export type MembershipStatus = {
   devices: MemberDevice[];
   pendingTransferTo: string;
   transferAccepted: boolean;
-  removedNotice: null | { by: string; at: number };
+  /** `kept`: received items that had not applied before the removal, now in Recently deleted. */
+  removedNotice: null | { by: string; at: number; kept?: number };
   pendingLeave: boolean;
   /** First address a leave request goes to (typed or last confirmed route); empty when none. */
   leaveAddress?: string;
+  /** "Mark as lost": this PC takes no new changes from the managing phone and may pair with a new one. */
+  managerLost?: boolean;
+  /** [device ID, text]: a device silent for months holds back the cleanup of old sync history. A suggestion only. */
+  cleanupHint?: [string, string] | null;
 };
 
 export type PhotoSyncStatus = { waiting: number; transferredBytes: number; totalBytes: number };
@@ -262,6 +279,13 @@ export function onSiteIconsChanged(handler: () => void): () => void {
   return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
 }
 
+/** Runs `handler` when the browser extension remembered a sign-in method. */
+export function onSignInsChanged(handler: () => void): () => void {
+  if (usingDevMock) return () => {};
+  const pending = listen("sign-ins-changed", handler);
+  return () => { void pending.then((unlisten) => unlisten()).catch(() => {}); };
+}
+
 /** Runs `handler` when the quick search shortcut is pressed. `hadFocus` is true if Nuvori was already in front. */
 export function onQuickSearch(handler: (hadFocus: boolean) => void): () => void {
   if (usingDevMock) return () => {};
@@ -323,6 +347,12 @@ export const api = {
   siteIcons: () => call<SiteIconsState>("site_icons"),
   setSiteIcons: (enabled: boolean) => call<SiteIconsState>("set_site_icons", { enabled }),
   clearSiteIcons: () => call<SiteIconsState>("clear_site_icons"),
+  /** Sign-in methods the extension remembered ("Continue with GitHub" and the account). */
+  signIns: () => call<SignInsState>("sign_ins"),
+  setSignIns: (enabled: boolean) => call<SignInsState>("set_sign_ins", { enabled }),
+  deleteSignIn: (id: string) => call<SignInsState>("delete_sign_in", { id }),
+  /** An empty account means "not known". */
+  editSignIn: (id: string, account: string) => call<SignInsState>("edit_sign_in", { id, account: account.trim() || null }),
   listTrash: () => call<TrashedItem[]>("list_trash"),
   /** Restores as a new item. Returns its kind, new ID and type. */
   restoreTrashed: (id: string) => call<{ kind: "entry" | "note"; id: string; type: EntryType | "NOTE" }>("restore_trashed", { id }),
@@ -380,5 +410,6 @@ export const api = {
   photoSyncStatus: () => call<PhotoSyncStatus>("photo_sync_status"),
   membershipStatus: () => call<MembershipStatus>("membership_status"),
   leaveGroup: (keepItems = true) => call<AppSnapshot>("leave_group", { keepItems }),
-  dismissRemovedNotice: () => call<void>("dismiss_removed_notice")
+  dismissRemovedNotice: () => call<void>("dismiss_removed_notice"),
+  markManagerLost: (lost: boolean) => call<MembershipStatus>("mark_manager_lost", { lost })
 };

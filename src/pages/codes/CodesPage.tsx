@@ -8,6 +8,7 @@ import { useNow, usePolling } from "../../app/hooks";
 import { useRouteState, useRouter } from "../../app/router";
 import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
+import { iconHints } from "../../lib/siteIcons";
 import { api, type PasskeySummary, type VaultEntry } from "../../lib/api";
 import { cx, formatDateTime, groupCode, plural } from "../../lib/format";
 import { buildIndex, matchesFilter } from "../../lib/search";
@@ -46,7 +47,7 @@ export function CodesPage() {
         <div className="card"><EmptyState icon={SearchX} title="No matches" action={<Button onClick={() => setFilter("")}>Clear filter</Button>} /></div>
       ) : (
         <ul className="code-grid" aria-label="Authenticator codes">
-          {visible.map((entry) => <CodeTile key={entry.id} entry={entry} code={live.get(entry.id)} highlighted={router.highlight === entry.id} onOpen={() => void router.navigate({ page: "item", id: entry.id })} />)}
+          {visible.map((entry) => <CodeTile key={entry.id} entry={entry} hints={iconHints(entry, entries)} code={live.get(entry.id)} highlighted={router.highlight === entry.id} onOpen={() => void router.navigate({ page: "item", id: entry.id })} />)}
         </ul>
       )}
 
@@ -55,14 +56,14 @@ export function CodesPage() {
   );
 }
 
-function CodeTile({ entry, code, onOpen, highlighted }: { entry: VaultEntry; code?: LiveCode; onOpen: () => void; highlighted: boolean }) {
+function CodeTile({ entry, hints, code, onOpen, highlighted }: { entry: VaultEntry; hints: { site?: string; brand?: string }; code?: LiveCode; onOpen: () => void; highlighted: boolean }) {
   const copy = useCopy();
   const copyCode = () => void copy(async () => (await totpAt(entry))?.value ?? null, { label: "Code", secret: true, message: "Code copied" });
   const urgent = code ? code.seconds <= 5 : false;
   return (
     <li className={cx("code-tile", highlighted && "is-highlighted", urgent && "is-urgent")} data-row-id={entry.id}>
       <button type="button" className="code-main" onClick={copyCode} aria-label={`Copy code for ${entry.title}`}>
-        <Avatar title={entry.title} size="sm" />
+        <Avatar title={entry.title} size="sm" {...hints} />
         <span className="code-text">
           <span className="code-title truncate">{entry.title}</span>
           {entry.primaryValue && <span className="code-account truncate">{entry.primaryValue}</span>}

@@ -14,7 +14,28 @@ pub const REMOVAL_CUTOFF_FEATURE: &str = "removal-cutoff-v1";
 /// Announced by builds that read the synced vault appearance (`appearance.rs`). A build writes an
 /// appearance change only when every other active member announced it.
 pub const APPEARANCE_FEATURE: &str = "appearance-v1";
-pub const SYNC_FEATURES: [&str; 2] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE];
+/// Announced by builds that read synced website icons (`site_icon_sync.rs`). A build writes an icon
+/// change only when every other active member announced it.
+pub const SITE_ICONS_FEATURE: &str = "site-icons-v1";
+/// Announced by builds that read enrollment snapshot v4 (`checkpoint.rs`), relay only gap-free
+/// chains and acknowledge old resends. The phone sends v4 only to a device that announced it.
+pub const CHECKPOINT_ENROLL_FEATURE: &str = "checkpoint-enroll-v1";
+/// Announced by builds that read synced sign-in methods (`sign_in_sync.rs`). A build writes a
+/// sign-in method change only when every other active member announced it.
+pub const SIGN_IN_METHODS_FEATURE: &str = "sign-in-methods-v1";
+/// Announced in the pairing hello by builds that join a group keeping their items, matched by ID
+/// (`merge_join.rs`). Used only when the phone announced it too.
+pub const MERGE_JOIN_FEATURE: &str = crate::merge_join::FEATURE;
+/// Also written to the Google Drive progress file (`features`), so a member that syncs only
+/// through the drive announces them too (`cloud_sync.rs`).
+/// Announced by builds that read changes of rotated key epochs and send a signed key statement
+/// (`epoch_keys.rs`). The managing phone rotates only on statements, never on this string.
+pub const EPOCH_KEYS_FEATURE: &str = crate::epoch_keys::FEATURE;
+/// Announced by builds that read Google Drive floor markers (`compaction.rs` `drive`). Drive cleanup
+/// runs only when every active member announced it.
+pub const HISTORY_COMPACTION_FEATURE: &str = crate::compaction::drive::FEATURE;
+pub const SYNC_FEATURES: [&str; 8] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE, SITE_ICONS_FEATURE, CHECKPOINT_ENROLL_FEATURE,
+    SIGN_IN_METHODS_FEATURE, MERGE_JOIN_FEATURE, EPOCH_KEYS_FEATURE, HISTORY_COMPACTION_FEATURE];
 
 /// `cutoff1:<sequence>:<hash>` in a REMOVE event's subject key field (Android `RemovalCutoff`).
 /// `Ok(None)` for an empty field; `Err` for anything else that is not a valid cutoff.

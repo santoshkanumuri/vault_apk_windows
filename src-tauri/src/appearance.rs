@@ -284,9 +284,9 @@ fn now_utc() -> Result<String, String> {
     OffsetDateTime::now_utc().format(&Rfc3339).map_err(|_| "The system clock is unavailable".to_owned())
 }
 
-/// Remembers what an active member announced in an authenticated Wi-Fi session. Google Drive
-/// passes exchange no features, so only Wi-Fi sessions update this; a member that only ever syncs
-/// through Google Drive keeps the gate closed (the safe side).
+/// Remembers what an active member announced: in an authenticated Wi-Fi session, or in its sealed
+/// Google Drive progress file (`features`, from 2.3.1 on Windows and 2.3.4 on Android). A member
+/// that announced nothing anywhere keeps the gate closed (the safe side).
 pub(crate) fn record_peer_features(db: &Connection, vault_id: &str, peer: &str, features: &[String]) -> rusqlite::Result<()> {
     db.execute_batch(PEER_FEATURES_SCHEMA)?;
     let encoded = serde_json::to_string(features).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
@@ -318,6 +318,11 @@ pub(crate) fn peer_features(db: &Connection, vault_id: &str, peer: &str) -> Opti
 /// nothing recorded closes the gate. A lone device never writes, so an older build paired later
 /// cannot receive an appearance change in its pairing snapshot.
 pub(crate) fn gate_open(db: &Connection, membership: &VerifiedMembership, local_device: &str) -> bool {
+    gate_open_for(db, membership, local_device, FEATURE)
+}
+
+/// [gate_open] for any optional feature, for example `site-icons-v1` (`site_icon_sync.rs`).
+pub(crate) fn gate_open_for(db: &Connection, membership: &VerifiedMembership, local_device: &str, feature: &str) -> bool {
     let enrolled = db
         .query_row("SELECT EXISTS(SELECT 1 FROM sync_group_state WHERE vault_id = ?1)", [&membership.vault_id], |row| {
             row.get::<_, bool>(0)
@@ -328,7 +333,7 @@ pub(crate) fn gate_open(db: &Connection, membership: &VerifiedMembership, local_
         && others.peek().is_some()
         && others.all(|member| {
             peer_features(db, &membership.vault_id, &member.device_id)
-                .is_some_and(|features| features.iter().any(|feature| feature == FEATURE))
+                .is_some_and(|features| features.iter().any(|announced| announced == feature))
         })
 }
 
@@ -419,7 +424,8 @@ fn write_change(
     *counters.entry(local.device_id.clone()).or_default() += 1;
     let version = RecordVersion::new(counters);
     let mutation_id = uuid::Uuid::new_v4().to_string();
-    let encrypted = payload::encrypt(
+    let encrypted = payload::encrypt_in(
+        db,
         &content_key,
         ENTITY_TYPE,
         vault_id,
@@ -528,7 +534,7 @@ pub(crate) fn set_from_ui(state: &crate::ManagedState, accent: &str, surface: &s
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::membership::VerifiedMember;
 

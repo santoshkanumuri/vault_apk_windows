@@ -41,8 +41,26 @@ pub fn initialize(connection: &Connection) -> rusqlite::Result<()> {
             deleted_at INTEGER NOT NULL,
             deleted_elsewhere INTEGER NOT NULL
         );",
-    )
+    )?;
+    // Added later: why an item is here. "" = deleted; [`REASON_JOIN`] = kept aside at a join.
+    let has_reason = connection
+        .prepare("SELECT 1 FROM pragma_table_info('local_trash') WHERE name = 'reason'")?
+        .exists([])?;
+    if !has_reason {
+        connection.execute("ALTER TABLE local_trash ADD COLUMN reason TEXT NOT NULL DEFAULT ''", [])?;
+    }
+    Ok(())
 }
+
+/// A PC's version that the group already had in another version, kept aside when this PC joined
+/// the group (`join_match.rs`). It stays until the person restores or deletes it.
+pub const REASON_JOIN: &str = "join";
+
+/// A version received from a paired device that had not applied when this PC learned it was
+/// removed (`UnlockedVault::leave_after_removal`). The leave drops the group's key, so the change
+/// could never apply later. It stays [`TRASH_DAYS`] like a deleted item, as on Android
+/// (`RemovalArchive`), and the person can restore it as a new item.
+pub const REASON_REMOVAL: &str = "removal";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,8 +83,10 @@ pub struct TrashedItem {
     pub deleted_at: i64,
     /// Deleted on a paired device; this PC kept its copy.
     pub deleted_elsewhere: bool,
-    /// When the item is deleted for good.
+    /// When the item is deleted for good. A join copy ([`REASON_JOIN`]) never expires: 0.
     pub expires_at: i64,
+    /// "" (deleted) or [`REASON_JOIN`].
+    pub reason: String,
 }
 
 /// Before an entry is written: when a login's password changes, keeps the old one.
@@ -131,9 +151,58 @@ pub fn keep_deleted(connection: &Connection, id: &str, now: i64, elsewhere: bool
     Ok(())
 }
 
+/// Keeps this PC's version of an item that the group holds in another version (a join). The
+/// person compares it with the group's version and restores it (as a new item) or deletes it.
+#[allow(clippy::too_many_arguments)]
+pub fn keep_join_copy(
+    connection: &Connection,
+    item_id: &str,
+    kind: &str,
+    item_type: &str,
+    title: &str,
+    data: &serde_json::Value,
+    group_ids: &[String],
+    now: i64,
+) -> rusqlite::Result<()> {
+    initialize(connection)?;
+    connection.execute(
+        "INSERT INTO local_trash (id, item_id, kind, item_type, title, data_json, group_ids, deleted_at, deleted_elsewhere, reason)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9)",
+        params![Uuid::new_v4().to_string(), item_id, kind, item_type, title, data.to_string(),
+            serde_json::to_string(group_ids).unwrap_or_else(|_| "[]".to_owned()), now, REASON_JOIN],
+    )?;
+    Ok(())
+}
+
+/// Keeps a version that could not apply before this PC left after a removal ([`REASON_REMOVAL`]).
+/// `trash_id` comes from the change, so a retried leave adds no second copy. True when it added one.
+#[allow(clippy::too_many_arguments)]
+pub fn keep_removal_copy(
+    connection: &Connection,
+    trash_id: &str,
+    item_id: &str,
+    kind: &str,
+    item_type: &str,
+    title: &str,
+    data: &serde_json::Value,
+    group_ids: &[String],
+    now: i64,
+) -> rusqlite::Result<bool> {
+    initialize(connection)?;
+    Ok(connection.execute(
+        "INSERT OR IGNORE INTO local_trash (id, item_id, kind, item_type, title, data_json, group_ids, deleted_at, deleted_elsewhere, reason)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9)",
+        params![trash_id, item_id, kind, item_type, title, data.to_string(),
+            serde_json::to_string(group_ids).unwrap_or_else(|_| "[]".to_owned()), now, REASON_REMOVAL],
+    )? == 1)
+}
+
 /// Removes trash older than [`TRASH_DAYS`], and the previous passwords of logins that are gone.
+/// Join copies stay: nobody chose to delete them. Removal copies go after [`TRASH_DAYS`].
 pub fn purge(connection: &Connection, now: i64) -> rusqlite::Result<()> {
-    connection.execute("DELETE FROM local_trash WHERE deleted_at < ?1", [now - TRASH_MILLIS])?;
+    initialize(connection)?;
+    connection.execute("DELETE FROM local_trash WHERE deleted_at < ?1 AND reason IN ('', ?2)",
+        params![now - TRASH_MILLIS, REASON_REMOVAL])?;
     connection.execute(
         "DELETE FROM local_password_history WHERE entry_id NOT IN (SELECT id FROM local_entries)
              AND entry_id NOT IN (SELECT item_id FROM local_trash)",
@@ -160,11 +229,12 @@ pub fn clear_previous_passwords(connection: &Connection, entry_id: &str) -> rusq
 pub fn trashed_items(connection: &Connection) -> rusqlite::Result<Vec<TrashedItem>> {
     connection
         .prepare(
-            "SELECT id, kind, item_type, title, deleted_at, deleted_elsewhere, item_id FROM local_trash
+            "SELECT id, kind, item_type, title, deleted_at, deleted_elsewhere, item_id, reason FROM local_trash
              ORDER BY deleted_at DESC, rowid DESC",
         )?
         .query_map([], |row| {
             let deleted_at: i64 = row.get(4)?;
+            let reason: String = row.get(7)?;
             Ok(TrashedItem {
                 id: row.get(0)?,
                 kind: row.get(1)?,
@@ -173,7 +243,8 @@ pub fn trashed_items(connection: &Connection) -> rusqlite::Result<Vec<TrashedIte
                 deleted_at,
                 deleted_elsewhere: row.get(5)?,
                 item_id: row.get(6)?,
-                expires_at: deleted_at + TRASH_MILLIS,
+                expires_at: if reason == REASON_JOIN { 0 } else { deleted_at + TRASH_MILLIS },
+                reason,
             })
         })?
         .collect()

@@ -166,7 +166,7 @@ async function getFeatures({ refresh = false } = {}) {
 
 async function readSettings() {
   const saved = await chrome.storage.local.get(["inlineSuggestions", "neverSave", "noSuggest", "theme", "unlockOnStartup",
-    "fillCards", "fillProfiles", "fillCodes", "saveDetails"]);
+    "fillCards", "fillProfiles", "fillCodes", "saveDetails", "neverSignIn"]);
   const list = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
   return {
     inlineSuggestions: saved?.inlineSuggestions !== false,
@@ -175,13 +175,14 @@ async function readSettings() {
     saveDetails: saved?.saveDetails !== false,
     neverSave: list(saved?.neverSave),
     noSuggest: list(saved?.noSuggest),
+    neverSignIn: list(saved?.neverSignIn),
     theme: THEMES.includes(saved?.theme) ? saved.theme : "system",
   };
 }
 
 async function addToList(key, origin) {
   const settings = await readSettings();
-  const current = key === "neverSave" ? settings.neverSave : settings.noSuggest;
+  const current = Array.isArray(settings[key]) ? settings[key] : [];
   if (!current.includes(origin)) await chrome.storage.local.set({ [key]: [...current, origin].slice(-500) });
 }
 
@@ -403,6 +404,260 @@ async function captureSiteIcon(tabId, origin) {
     if (!icon) return;
     await native("save_site_icon", origin, { icon });
   } catch { /* Icons are optional: give up silently. */ }
+}
+
+// ---------------------------------------------------------------------------
+// Sign-in methods ("sign_in_methods" hosts; signins.js). Notices a finished "Sign in with <provider>"
+// on a site, asks the user, and reminds them next time. The flow state (provider, sites, at most an
+// account name) lives in chrome.storage.session, in memory only; never a URL, code or token.
+// Nothing happens in private windows, or when the app lists no "sign_in_methods" (setting off).
+
+if (typeof NuvoriSignIns === "undefined" && typeof importScripts === "function") {
+  try { importScripts("signins.js"); } catch { /* reminders stay off */ }
+}
+const SIGNINS = () => (typeof NuvoriSignIns === "object" && NuvoriSignIns ? NuvoriSignIns : null);
+const SIGNIN_FLOWS_KEY = "signInFlows";
+const SIGNIN_CACHE_MS = 30 * 1000;
+const MAX_SIGNIN_REMINDERS = 3;
+let signInTracker = null;
+let signInWork = Promise.resolve();
+// Authorize requests queued but not yet in the tracker: a redirect right behind one must not be skipped.
+let signInQueued = 0;
+/** Nothing under way: events can return at once without waking the queue. */
+const signInIdle = () => signInQueued === 0 && Boolean(signInTracker) && !signInTracker.active();
+const signInCache = new Map(); // origin -> { at, promise }
+
+function signInStep(work) {
+  const result = signInWork.then(work, work);
+  signInWork = result.catch(() => {});
+  return result;
+}
+
+async function signInFlows() {
+  if (!signInTracker) {
+    const saved = (await chrome.storage.session?.get(SIGNIN_FLOWS_KEY))?.[SIGNIN_FLOWS_KEY];
+    signInTracker = signInTracker || SIGNINS().createTracker(saved);
+  }
+  return signInTracker;
+}
+
+const keepSignInFlows = () => chrome.storage.session?.set({ [SIGNIN_FLOWS_KEY]: signInTracker.toJSON() });
+const signInsSupported = async () => (await getFeatures()).includes("sign_in_methods");
+const tabOf = async (tabId) => { try { return await chrome.tabs.get(tabId); } catch { return null; } };
+const originOf = (value) => { try { const url = new URL(value); return url.protocol === "https:" ? url.origin : undefined; } catch { return undefined; } };
+/** "app.example.com" belongs to the site "example.com". */
+const onSite = (origin, site) => { const name = hostOf(origin).toLowerCase(); return Boolean(site) && (name === site || name.endsWith(`.${site}`)); };
+
+/** A tab that a page opened for this sign-in (a popup window, or a new tab with nothing in it yet). */
+async function openerOf(tab, url) {
+  if (!Number.isInteger(tab.openerTabId) || tab.openerTabId === tab.id) return null;
+  let popup = !tab.url || tab.url === "about:blank" || tab.url === url;
+  if (!popup && chrome.windows?.get) { try { popup = (await chrome.windows.get(tab.windowId))?.type === "popup"; } catch { /* a normal tab */ } }
+  return popup ? tab.openerTabId : null;
+}
+
+/** webRequest: a provider's authorize request, or a page request in a tab with a sign-in under way. */
+function onSignInRequest(details) {
+  if (!(details?.tabId >= 0) || !SIGNINS()) return;
+  const authorize = SIGNINS().parseAuthorize(details.url);
+  if (!authorize && signInIdle()) return;
+  if (authorize) signInQueued++;
+  void signInStep(async () => {
+    if (authorize) signInQueued--;
+    const flows = await signInFlows();
+    if (!authorize && !flows.flowOf(details.tabId)) return;
+    if (authorize && !(await signInsSupported())) return;
+    const tab = await tabOf(details.tabId);
+    if (!tab || tab.incognito) { flows.forget(details.tabId); return; }
+    const opener = authorize && details.type === "main_frame" ? await openerOf(tab, details.url) : null;
+    const home = opener === null ? null : await tabOf(opener);
+    flows.request({
+      tabId: details.tabId, url: details.url, type: details.type, at: Date.now(),
+      initiator: details.initiator || originOf(details.originUrl || ""),
+      startUrl: home ? home.url : tab.url, homeTabId: home ? home.id : details.tabId,
+    });
+    await keepSignInFlows();
+  }).catch(() => {});
+}
+
+/** Requests to any site: only the answer of a provider (a form POST it started) matters. */
+function onSignInPage(details) {
+  if (SIGNINS()?.parseAuthorize(details?.url)) return; // the authorize listener has it
+  onSignInRequest(details);
+}
+
+function onSignInRedirect(details) {
+  if (!(details?.tabId >= 0) || !SIGNINS() || signInIdle()) return;
+  void signInStep(async () => {
+    const flows = await signInFlows();
+    if (!flows.flowOf(details.tabId)) return;
+    flows.redirect({ tabId: details.tabId, url: details.url, redirectUrl: details.redirectUrl, at: Date.now() });
+    await keepSignInFlows();
+  }).catch(() => {});
+}
+
+function onSignInTabUpdated(tabId, change, tab) {
+  if (change?.status !== "complete" || !SIGNINS() || signInIdle()) return;
+  void signInStep(async () => {
+    const flows = await signInFlows();
+    const flow = flows.flowOf(tabId);
+    if (!flow) return;
+    const homeUrl = flow.homeTabId === tabId ? tab?.url : (await tabOf(flow.homeTabId))?.url;
+    if (flows.committed({ tabId, url: tab?.url || "", homeUrl, at: Date.now() })) {
+      await keepSignInFlows();
+      setTimeout(() => void settleSignIn(tabId), SIGNINS().SETTLE_MS + 100);
+    }
+  }).catch(() => {});
+}
+
+function settleSignIn(tabId) {
+  return signInStep(async () => {
+    const flows = await signInFlows();
+    const found = flows.settle({ tabId, at: Date.now() });
+    await keepSignInFlows();
+    if (found) await offerSignIn(found);
+  }).catch(() => {});
+}
+
+function onSignInTabRemoved(tabId) {
+  if (!SIGNINS() || signInIdle()) return;
+  void signInStep(async () => {
+    const flows = await signInFlows();
+    const flow = flows.flowOf(tabId);
+    const homeUrl = flow && flow.homeTabId !== tabId ? (await tabOf(flow.homeTabId))?.url : undefined;
+    const found = flows.closed({ tabId, homeUrl, at: Date.now() });
+    await keepSignInFlows();
+    if (found) await offerSignIn(found);
+  }).catch(() => {});
+}
+
+/** Messages from content scripts: a sign-in button click on a site, or an account a provider's page showed. */
+async function handleSignInMessage(sender, message) {
+  const tabId = sender.tab.id;
+  if (sender.tab.incognito === true || !SIGNINS()) return { status: "ignored" };
+  const url = typeof sender.url === "string" && sender.url.startsWith("https://") ? sender.url : "";
+  if (!url) return { status: "ignored" };
+  return signInStep(async () => {
+    const flows = await signInFlows();
+    if (message.action === "signin_click") {
+      if (sender.frameId !== 0 || typeof message.provider !== "string") return { status: "ignored" };
+      flows.click({ tabId, provider: message.provider, at: Date.now() });
+    } else {
+      if (!flows.flowOf(tabId)) return { status: "ignored" };
+      flows.account({ tabId, url, account: typeof message.account === "string" ? message.account.slice(0, 512) : "",
+        chosen: message.chosen === true, cancel: message.cancel === true, homeUrl: sender.tab.url, at: Date.now() });
+      const flow = flows.flowOf(tabId);
+      if (flow?.kind === "onetap" && flow.phase === "returned") setTimeout(() => void settleSignIn(tabId), SIGNINS().SETTLE_MS + 100);
+    }
+    await keepSignInFlows();
+    return { status: "ok" };
+  });
+}
+
+/** The methods remembered for the site of `origin`: { status, site, methods }. Cached for 30 seconds. */
+function querySignIns(origin, { fresh = false } = {}) {
+  const hit = signInCache.get(origin);
+  if (!fresh && hit && Date.now() - hit.at < SIGNIN_CACHE_MS) return hit.promise;
+  const entry = { at: Date.now(), promise: (async () => {
+    try {
+      const response = await native("query_sign_ins", origin);
+      if (response?.status === "ok" && response.signIns && typeof response.signIns.site === "string") {
+        const known = new Set(SIGNINS()?.PROVIDERS.map((provider) => provider.id) || []);
+        const methods = (Array.isArray(response.signIns.methods) ? response.signIns.methods : [])
+          .filter((method) => known.has(method?.provider))
+          .map((method) => ({ provider: method.provider, account: clip(method.account), lastUsedAt: Number(method.lastUsedAt) || 0 }));
+        return { status: "ok", site: clip(response.signIns.site, 253), methods };
+      }
+      if (["disabled", "locked"].includes(response?.status)) return { status: response.status, methods: [] };
+      if (response?.status === "desktop_unavailable") return { status: "offline", methods: [] };
+      return { status: "none", methods: [] };
+    } catch (error) {
+      return { status: hostErrorStatus(error), methods: [] };
+    }
+  })() };
+  signInCache.set(origin, entry);
+  while (signInCache.size > 32) signInCache.delete(signInCache.keys().next().value);
+  return entry.promise;
+}
+
+async function recordSignIn(origin, provider, account) {
+  signInCache.delete(origin);
+  try { return await native("record_sign_in", origin, { signIn: { provider, ...(account ? { account } : {}) } }); }
+  catch { return { status: "desktop_unavailable" }; }
+}
+
+/** Reminders for a page: the most recent methods of its site, or none. */
+async function signInReminders(origin, { fresh = false } = {}) {
+  if (!SIGNINS() || !(await signInsSupported())) return { status: "unsupported", methods: [] };
+  const answer = await querySignIns(origin, { fresh });
+  return { status: answer.status, site: answer.site, methods: answer.methods.slice(0, MAX_SIGNIN_REMINDERS) };
+}
+
+const sameAccount = (left, right) => String(left || "").trim().toLowerCase() === String(right || "").trim().toLowerCase();
+/** Already remembered: the same provider and account, or the provider when the account is not known now. */
+const knownMethod = (methods, provider, account) => methods.some((method) => method.provider === provider && (!account || sameAccount(method.account, account)));
+
+function signInPromptView(prompt) {
+  return { id: prompt.id, kind: "signin", provider: prompt.provider, providerName: SIGNINS()?.nameOf(prompt.provider) || prompt.provider,
+    host: prompt.site, account: prompt.account || "", locked: Boolean(prompt.locked) };
+}
+
+/** A finished sign-in: remember it quietly when it is already known, else ask on the landing page. */
+async function offerSignIn(found) {
+  if (!(await signInsSupported())) return;
+  const tab = await tabOf(found.tabId);
+  if (!tab || tab.incognito) return;
+  let account = found.account;
+  // The account typed on the provider's own sign-in page (sign-in steps), when its page showed none.
+  if (!account && found.providerOrigin) account = SIGNINS().cleanAccount(await stepName({ tabId: found.providerTabId, origin: found.providerOrigin }));
+  const answer = await querySignIns(found.origin, { fresh: true });
+  if (["disabled", "none"].includes(answer.status)) return;
+  const site = answer.site || hostOf(found.origin).replace(/^www\./, "");
+  const settings = await readSettings();
+  if (settings.neverSignIn.includes(site)) return;
+  if (answer.status === "ok" && knownMethod(answer.methods, found.provider, account)) {
+    const saved = await recordSignIn(found.origin, found.provider, account);
+    void logEvent("signin_used", saved?.status || "empty", found.origin);
+    return;
+  }
+  const prompts = await readPrompts();
+  if (prompts[found.tabId] && !prompts[found.tabId].signin) return; // a login or card prompt is open there
+  prompts[found.tabId] = { id: crypto.randomUUID(), signin: true, origin: found.origin, site, provider: found.provider, account,
+    createdAt: Date.now(), locked: answer.status !== "ok" };
+  await writePrompts(prompts);
+  void logEvent("signin_detected", found.evidence, found.origin);
+  if (onSite(tab.url || "", site)) {
+    await chrome.tabs.sendMessage(found.tabId, { target: "nuvori-top", action: "show_prompt", prompt: signInPromptView(prompts[found.tabId]), theme: settings.theme },
+      { frameId: 0 }).catch(() => {});
+  }
+}
+
+/** The answer to the sign-in card: Save (with the account as the user left it), Not now, Never for this site. */
+async function handleSignInApprove(page, message, prompts, prompt) {
+  if (prompt.id !== message.id || !onSite(page.origin, prompt.site)) return { status: "missing", message: "This prompt expired." };
+  const finish = async () => { delete prompts[page.tabId]; await writePrompts(prompts); };
+  if (message.decision === "dismiss" || message.decision === "never") {
+    await finish();
+    if (message.decision === "never") await addToList("neverSignIn", prompt.site);
+    void logEvent(`signin_${message.decision}`, "ok", page.origin);
+    return { status: message.decision === "never" ? "never_signin" : "dismissed" };
+  }
+  if (message.decision !== "save") return { status: "error", message: "Unknown choice." };
+  // The user may type any name here; the app checks it again.
+  const account = typeof message.account === "string" ? message.account.replace(/[\p{Cc}\p{Cf}]/gu, "").trim().slice(0, 256) : prompt.account;
+  const response = await recordSignIn(prompt.origin, prompt.provider, account);
+  void logEvent("signin_save", response?.status || "empty", page.origin);
+  if (response?.status === "saved") { await finish(); return { status: "remembered" }; }
+  if (["locked", "desktop_unavailable"].includes(response?.status)) {
+    prompt.createdAt = Date.now();
+    prompt.account = account;
+    await writePrompts(prompts);
+    void requestUnlock();
+    return { status: "locked_details", message: "Unlock Nuvori in its window, then choose Save again." };
+  }
+  await finish();
+  if (response?.status === "disabled") return { status: "error", message: "Remembering sign-in methods is off in Nuvori's settings." };
+  return { status: "error", message: response?.message || "Nuvori couldn't remember this sign-in." };
 }
 
 // ---------------------------------------------------------------------------
@@ -1226,7 +1481,7 @@ function takeSavedNote(page) {
 
 const PAGE_ACTIONS = ["page_status", "open_popup", "capture_submitted_login", "remember_username", "inline_query", "inline_fill", "inline_pending", "inline_approve",
   "inline_dont_suggest", "inline_unlock", "inline_items", "inline_fill_item", "inline_card_code", "capture_details", "inline_fill_frame",
-  "inline_all_logins", "inline_fill_any"];
+  "inline_all_logins", "inline_fill_any", "signin_reminders"];
 
 // Capture rate limits: page scripts can submit forms (requestSubmit) during a user gesture, so
 // each tab gets one capture per 5 seconds and each site four per minute.
@@ -1296,6 +1551,7 @@ async function handleApprove(page, message) {
   const decision = message.decision;
   if (typeof message.id !== "string" || !["save", "update", "dismiss", "never"].includes(decision)) return { status: "error", message: "Unknown choice." };
   const current = (await readPrompts());
+  if (current[page.tabId]?.signin) return handleSignInApprove(page, message, current, current[page.tabId]);
   if (current[page.tabId]?.details) {
     const prompt = current[page.tabId];
     if (prompt.origin !== page.origin || prompt.id !== message.id) return { status: "missing", message: "This prompt expired." };
@@ -1450,7 +1706,9 @@ async function handlePageMessage(page, message) {
       const scope = scopeOf(page, message, "login");
       if (!scope) return { status: "missing", message: "Click the field again.", theme: settings.theme };
       if (!settings.inlineSuggestions || settings.noSuggest.includes(page.origin) || settings.noSuggest.includes(scope.origin)) return { status: "disabled", theme: settings.theme };
+      const reminders = scope.origin === page.origin ? signInReminders(page.origin).catch(() => null) : null;
       const result = await queryOrigin(page.tabId, scope.origin);
+      const signIns = (await reminders)?.methods || [];
       const text = (value) => typeof value === "string" ? value.slice(0, 256) : "";
       // The login for the account name used on the previous page comes first.
       const name = await stepName(scope);
@@ -1465,7 +1723,12 @@ async function handlePageMessage(page, message) {
           // A passkey for the same account is saved too (hosts with "passkey_mark").
           ...(choice.passkey === true ? { passkey: true } : {}),
         })),
+        ...(signIns.length ? { signIns } : {}),
       };
+    }
+    case "signin_reminders": {
+      const reminders = await signInReminders(page.origin);
+      return { ...reminders, theme: (await readSettings()).theme };
     }
     case "remember_username":
       await rememberStep(page, message.username);
@@ -1519,6 +1782,9 @@ async function handlePageMessage(page, message) {
       return runInOrder(async () => {
         const prompts = await readPrompts();
         const details = prompts[page.tabId];
+        if (details?.signin) {
+          return onSite(page.origin, details.site) ? { status: "ok", prompt: signInPromptView(details), theme: (await readSettings()).theme } : { status: "none" };
+        }
         if (details?.details) {
           const live = details.origin === page.origin && (await readDetailCaptures()).some((entry) => entry.id === details.id);
           return live ? { status: "ok", prompt: detailsPromptView(details), theme: (await readSettings()).theme } : { status: "none" };
@@ -1551,6 +1817,10 @@ async function handlePageMessage(page, message) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target === "offscreen") return false;
+  if ((message?.action === "signin_click" || message?.action === "signin_account") && typeof sender?.tab?.id === "number") {
+    handleSignInMessage(sender, message).then(sendResponse, () => sendResponse({ status: "error" }));
+    return true;
+  }
   if (FRAME_ACTIONS.includes(message?.action) && typeof sender?.frameId === "number" && sender.frameId !== 0) {
     const frame = frameSender(sender);
     if (!frame) return false;
@@ -1686,6 +1956,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handlePopupItems(message).then(sendResponse, () => sendResponse({ status: "error" }));
     return true;
   }
+  // The popup's "Sign-in methods" for the open tab's site.
+  if (message?.action === "popup_sign_ins") {
+    if (sender?.tab) return false;
+    const origin = originOf(typeof message.origin === "string" ? message.origin : "");
+    if (!origin) return false;
+    signInReminders(origin, { fresh: true }).then(sendResponse, () => sendResponse({ status: "error", methods: [] }));
+    return true;
+  }
   if (message?.action === "unlock_app") {
     requestUnlock().then((status) => sendResponse({ status }), () => sendResponse({ status: "error" }));
     return true;
@@ -1779,6 +2057,16 @@ chrome.tabs.onRemoved?.addListener((tabId) => {
     if (kept.length !== items.length) await savePending(kept);
   });
 });
+
+// Sign-in methods: the browser's own navigation events, never page scripts. Firefox and Chrome both
+// offer non-blocking webRequest; without it (or signins.js) the feature stays off.
+if (SIGNINS() && chrome.webRequest?.onBeforeRequest) {
+  chrome.webRequest.onBeforeRequest.addListener(onSignInRequest, { urls: SIGNINS().authorizePatterns(), types: ["main_frame", "sub_frame"] });
+  chrome.webRequest.onBeforeRequest.addListener(onSignInPage, { urls: ["https://*/*"], types: ["main_frame"] });
+  chrome.webRequest.onBeforeRedirect.addListener(onSignInRedirect, { urls: SIGNINS().watchPatterns(), types: ["main_frame", "sub_frame"] });
+  chrome.tabs.onUpdated.addListener(onSignInTabUpdated);
+  chrome.tabs.onRemoved?.addListener(onSignInTabRemoved);
+}
 
 void chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 // Drop unapproved captures that older versions left in chrome.storage.local.

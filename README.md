@@ -152,4 +152,6 @@ Payment-network marks on cards are adapted from [svg-credit-card-payment-icons](
 
 Built-in website icons (`src/lib/site-icons.json`) are the CC0-licensed icons of [Simple Icons](https://simpleicons.org) 16.36.0, matched to domains from the [Tranco](https://tranco-list.eu) top-sites list (ID 46YVX) by `scripts/build-site-icons.py`. Brand names and logos belong to their owners and are shown only to identify a saved site.
 
+Sign-in provider marks (`src/lib/sign-in-marks.json`, and the same block in `extension/signins.js`) are the CC0-licensed Google, Apple, GitHub, Facebook, X and Discord icons of [Simple Icons](https://simpleicons.org) 16.36.0, built by `scripts/build-sign-in-marks.py`. Simple Icons has no Microsoft, LinkedIn, Amazon or Slack mark, so those show a letter in a brand color. The marks only identify the sign-in method the user chose.
+
 The passphrase generator uses the [EFF large word list](https://www.eff.org/dice) (`src/lib/eff-large-wordlist.txt`, the 7,776 words without their dice numbers) by the Electronic Frontier Foundation, under [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/).

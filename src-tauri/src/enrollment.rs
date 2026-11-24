@@ -169,6 +169,8 @@ pub struct JoinSession {
     peer: DeviceIdentity,
     pairing_key: Zeroizing<[u8; 32]>,
     confirmation: String,
+    /// The phone announced `merge-join-v1`: this PC's items keep their IDs (`merge_join.rs`).
+    host_merges: bool,
 }
 
 impl JoinSession {
@@ -272,6 +274,7 @@ impl JoinSession {
             peer: result.peer.clone(),
             pairing_key: Zeroizing::new(result.key),
             confirmation: result.confirmation.clone(),
+            host_merges: result.peer_features.iter().any(|feature| feature == crate::merge_join::FEATURE),
         })
     }
 
@@ -293,12 +296,13 @@ impl JoinSession {
 
     pub fn prepare(&mut self) -> Result<PreparedEnrollment, EnrollmentError> {
         let mut input = ChannelReader::new(&mut self.channel);
-        PreparedEnrollment::read(
+        PreparedEnrollment::read_with(
             &mut input,
             &self.pairing_key,
             &self.invitation.vault,
             &self.local,
             &self.peer,
+            self.host_merges,
         )
         .map_err(|error| match error {
             ImportError::Snapshot(SnapshotError::PhoneFailed(reason)) => {
@@ -316,15 +320,15 @@ impl JoinSession {
         prepared: PreparedEnrollment,
         vault: &mut UnlockedVault,
         identity_store: &DeviceIdentityStore,
-    ) -> Result<bool, EnrollmentError> {
+    ) -> Result<(bool, crate::join_match::JoinSummary), EnrollmentError> {
         self.channel.send(b"ready")?;
         if self.channel.receive()? != b"commit" {
             return Err(EnrollmentError::CommitFailed);
         }
-        prepared.commit_preserving_local(vault.connection(), identity_store)?;
+        let summary = prepared.commit_joining(vault.connection(), identity_store, self.host_merges)?;
         let address = SocketAddr::new(self.socket.peer_addr()?.ip(), crate::lan_sync::sync_port(&self.invitation.vault));
         crate::lan_sync::remember_peer_endpoint(vault, &self.invitation.vault, &self.peer.device_id, address)?;
-        Ok(self.channel.send(b"committed").is_ok())
+        Ok((self.channel.send(b"committed").is_ok(), summary))
     }
 }
 

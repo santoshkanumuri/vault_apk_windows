@@ -51,8 +51,8 @@ use sha2::{Digest, Sha256};
 use crate::browser::{
     BROWSER_PROTOCOL_VERSION, BrowserAction, BrowserRequest, BrowserResponse, CardDetails,
     CredentialChoice, FilledItem, ItemKind, PendingDetails, PendingLogin, ProfileDetails, SelectedCredential,
-    canonical_https_origin, valid_capture_username, valid_card_capture, valid_login_title,
-    valid_profile_capture,
+    SignInDetails, SignInsAnswer, canonical_https_origin, valid_capture_username, valid_card_capture, valid_login_title,
+    valid_profile_capture, valid_sign_in_details,
 };
 use crate::{
     activity::{self, Category, Level},
@@ -78,6 +78,28 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_ACTIVE_CONNECTIONS: usize = 8;
 /// Login checks (review or save) per site per minute, so a page cannot use their outcomes as an oracle.
 const LOGIN_CHECKS_PER_MINUTE: usize = 10;
+
+/// "sign_in_methods": listed on `status` responses only while the app's setting is on, so the
+/// extension does not even watch sign-ins when the user turned the feature off. The native host
+/// never sets it: an unreachable app promises nothing.
+static SIGN_IN_METHODS: AtomicBool = AtomicBool::new(false);
+
+pub fn set_sign_in_methods(enabled: bool) {
+    SIGN_IN_METHODS.store(enabled, Ordering::Relaxed);
+}
+
+/// The static feature list, plus "sign_in_methods" while that setting is on.
+fn with_live_features(response: BrowserResponse) -> BrowserResponse {
+    live_features(response, SIGN_IN_METHODS.load(Ordering::Relaxed))
+}
+
+fn live_features(response: BrowserResponse, sign_ins: bool) -> BrowserResponse {
+    let mut response = response.with_features();
+    if sign_ins && let Some(features) = response.features.as_mut() {
+        features.push("sign_in_methods".to_owned());
+    }
+    response
+}
 
 /// Opens app windows for `unlock_prompt` and `show_app`. Called on a pipe thread with the request
 /// and whether the vault is unlocked; it must return quickly.
@@ -248,6 +270,16 @@ pub trait BrowserCredentialProvider: Send + Sync + 'static {
     /// "save_site_icon": keeps a PNG for the origin's site. `InvalidRequest` means the app
     /// refused it: setting off, no matching login or passkey, or not a valid small PNG.
     fn save_site_icon(&self, _origin: &str, _png: &[u8]) -> Result<(), BrowserIpcError> {
+        Err(BrowserIpcError::InvalidRequest)
+    }
+    /// "sign_in_methods": the site of `origin` and its remembered methods. `Ok(None)` when the
+    /// setting is off. `InvalidRequest` when the origin has no registrable domain.
+    fn query_sign_ins(&self, _origin: &str) -> Result<Option<SignInsAnswer>, BrowserIpcError> {
+        Err(BrowserIpcError::InvalidRequest)
+    }
+    /// "sign_in_methods": remembers one sign-in and returns the site's methods. `InvalidRequest`
+    /// means the app refused it: setting off, unknown provider, the provider's own site, bad account.
+    fn record_sign_in(&self, _origin: &str, _details: &SignInDetails) -> Result<SignInsAnswer, BrowserIpcError> {
         Err(BrowserIpcError::InvalidRequest)
     }
 }
@@ -502,7 +534,8 @@ impl BrowserStats {
         }
         // Status pings and the security-code wait poll are not activity.
         // Icon saves can come with every page visit, so they never reach the activity log.
-        if matches!(action, RequestKind::Status | RequestKind::SiteIcon) || (action == RequestKind::Cvv && status == "pending") {
+        // Sign-in reminder lookups come with sign-in pages, so they are not activity either.
+        if matches!(action, RequestKind::Status | RequestKind::SiteIcon | RequestKind::SignInQuery) || (action == RequestKind::Cvv && status == "pending") {
             return;
         }
         self.requests_since_unlock.fetch_add(1, Ordering::Relaxed);
@@ -539,6 +572,8 @@ enum RequestKind {
     DetailsReview,
     DetailsSave,
     SiteIcon,
+    SignInQuery,
+    SignInRecord,
 }
 
 impl From<&BrowserAction> for RequestKind {
@@ -558,6 +593,8 @@ impl From<&BrowserAction> for RequestKind {
             BrowserAction::SealDetails | BrowserAction::ReviewDetails => Self::DetailsReview,
             BrowserAction::CommitDetails => Self::DetailsSave,
             BrowserAction::SaveSiteIcon => Self::SiteIcon,
+            BrowserAction::QuerySignIns => Self::SignInQuery,
+            BrowserAction::RecordSignIn => Self::SignInRecord,
         }
     }
 }
@@ -574,6 +611,8 @@ fn describe(action: RequestKind, host: Option<&str>, status: &str) -> (Level, St
         (RequestKind::Cvv, "denied") => (Level::Info, format!("Declined a card security code for {site}")),
         (RequestKind::DetailsSave, "saved") => (Level::Success, format!("Saved details from {site}")),
         (RequestKind::DetailsReview, "needs_save") => (Level::Info, format!("Reviewed new details from {site}")),
+        (RequestKind::SignInRecord, "saved") => (Level::Success, format!("Remembered a sign-in method for {site}")),
+        (RequestKind::SignInRecord, "disabled") => (Level::Info, format!("Did not remember a sign-in method for {site}: the setting is off")),
         (_, "locked") => (Level::Info, format!("Browser request from {site} waited for unlock")),
         (_, "invalid_request") => (Level::Warning, "Rejected an invalid browser request".to_owned()),
         (_, "rate_limited") => (Level::Warning, format!("Slowed down repeated login checks from {site}")),
@@ -1007,6 +1046,12 @@ fn handle_request_with(
     if request.icon.is_some() != matches!(request.action, BrowserAction::SaveSiteIcon) {
         return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
     }
+    // "sign_in_methods": a sign-in body belongs to "record_sign_in" only, and that action needs one.
+    if request.sign_in.is_some() != matches!(request.action, BrowserAction::RecordSignIn)
+        || request.sign_in.as_ref().is_some_and(|details| !valid_sign_in_details(details))
+    {
+        return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
+    }
     // Only the native host takes captured fields ("seal_details"); the app never does.
     if request.card.is_some() || request.profile.is_some()
         || (!item_action && request.kind.is_some())
@@ -1056,11 +1101,11 @@ fn handle_request_with(
         .clone();
     let Some(provider) = provider else {
         let locked = locked_response(request.request_id);
-        return Ok(if status_ping { with_appearance(locked.with_features()) } else { locked });
+        return Ok(if status_ping { with_appearance(with_live_features(locked)) } else { locked });
     };
 
     match request.action {
-        BrowserAction::Status => Ok(with_appearance(ok_response(request.request_id, None, None).with_features())),
+        BrowserAction::Status => Ok(with_appearance(with_live_features(ok_response(request.request_id, None, None)))),
         // Answered above, before the vault is consulted.
         BrowserAction::UnlockPrompt | BrowserAction::ShowApp => Ok(ok_response(request.request_id, None, None)),
         BrowserAction::QueryCredentials => {
@@ -1127,6 +1172,35 @@ fn handle_request_with(
                 Err(_) => Ok(refused(request.request_id)),
             }
         }
+        BrowserAction::QuerySignIns | BrowserAction::RecordSignIn => {
+            if request.credential_id.is_some() || request.selection_token.is_some() || request.username.is_some()
+                || request.password.is_some() || request.sealed_login.is_some() || request.title.is_some()
+                || request.all.is_some() || request.kind.is_some()
+            {
+                return Ok(BrowserResponse::invalid(request.request_id, "The browser request is incomplete."));
+            }
+            let answer = match &request.sign_in {
+                Some(details) => provider.record_sign_in(&origin, details).map(Some),
+                None => provider.query_sign_ins(&origin),
+            };
+            match answer {
+                Ok(Some(answer)) => {
+                    let mut response = ok_response(request.request_id, None, None);
+                    if request.sign_in.is_some() {
+                        response.status = "saved".to_owned();
+                    }
+                    response.sign_ins = Some(answer);
+                    Ok(response)
+                }
+                Ok(None) => {
+                    let mut response = ok_response(request.request_id, None, None);
+                    response.status = "disabled".to_owned();
+                    Ok(response)
+                }
+                Err(BrowserIpcError::VaultLocked) => Ok(locked_response(request.request_id)),
+                Err(_) => Ok(BrowserResponse::invalid(request.request_id, "The sign-in method was not accepted.")),
+            }
+        }
         BrowserAction::FillCredential => {
             let (Some(record_id), Some(selection_token)) =
                 (request.credential_id, request.selection_token)
@@ -1155,7 +1229,7 @@ fn handle_request_with(
                     message: "Choose the account again; this selection expired.".to_owned(),
                     credentials: None,
                     credential: None,
-                    sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
+                    sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
                 });
             };
             let loaded = if granted == GrantKind::AnyLogin {
@@ -1179,7 +1253,7 @@ fn handle_request_with(
                         .to_owned(),
                     credentials: None,
                     credential: None,
-                    sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
+                    sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
                 });
             };
             if credential.id != record_id {
@@ -1231,7 +1305,7 @@ fn handle_request_with(
             }
             let status_response = |request_id: String, status: &str, message: &str| BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id, status: status.to_owned(), message: message.to_owned(),
-                credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
+                credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
             };
             let expired = "Choose the item again; this selection expired.";
             match request.action {
@@ -1308,7 +1382,7 @@ fn handle_request_with(
                 return Ok(BrowserResponse {
                     version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                     status: "rate_limited".into(), message: "Too many checks for this site. Try again in a minute.".into(),
-                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
+                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
                 });
             }
             let bytes = URL_SAFE_NO_PAD.decode(sealed).map_err(|_| BrowserIpcError::InvalidRequest)?;
@@ -1335,7 +1409,7 @@ fn handle_request_with(
             };
             Ok(BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id, status: status.to_owned(),
-                message: message.to_owned(), credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
+                message: message.to_owned(), credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
             })
         }
         BrowserAction::CommitLogin | BrowserAction::UpdateLogin | BrowserAction::ReviewLogin => {
@@ -1349,7 +1423,7 @@ fn handle_request_with(
                     version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                     status: "rate_limited".into(),
                     message: "Too many login checks for this site. Try again in a minute.".into(),
-                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
+                    credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
                 });
             }
             let committing = !updating && !reviewing;
@@ -1384,7 +1458,7 @@ fn handle_request_with(
                 let Some(expected) = expected else {
                     return Ok(BrowserResponse { version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                         status: "selection_expired".into(), message: "Review this update again; its approval expired.".into(),
-                        credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, });
+                        credentials: None, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None, });
                 };
                 provider.update_login(&origin, &id, &pending.username, &pending.password, &expected).map(|_| true)
             } else if reviewing { provider.review_login(&origin, &pending.username, &pending.password) }
@@ -1425,7 +1499,7 @@ fn handle_request_with(
             Ok(BrowserResponse {
                 version: BROWSER_PROTOCOL_VERSION, request_id: request.request_id,
                 status: status.to_owned(), message: message.to_owned(),
-                credentials, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false,
+                credentials, credential: None, sealed_login: None, features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
             })
         }
     }
@@ -1440,7 +1514,7 @@ fn locked_response(request_id: String) -> BrowserResponse {
         credentials: None,
         credential: None,
         sealed_login: None,
-        features: None, appearance: None, item: None, icon_wanted: false,
+        features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
     }
 }
 
@@ -1457,7 +1531,7 @@ fn ok_response(
         credentials,
         credential,
         sealed_login: None,
-        features: None, appearance: None, item: None, icon_wanted: false,
+        features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
     }
 }
 
@@ -2252,6 +2326,103 @@ mod tests {
         let response = handle_request(icon_request(Some(STANDARD.encode(png))), &locked, &grants).unwrap();
         assert_eq!(response.status, "locked");
         assert_eq!(icons.saved.lock().unwrap().len(), 1);
+    }
+
+    /// Remembers sign-ins in memory like sign_ins.rs: only GitHub and Google, never on github.com.
+    struct SignInProvider { enabled: bool, stored: Mutex<Vec<(String, SignInDetails)>> }
+
+    impl BrowserCredentialProvider for SignInProvider {
+        fn query_credentials(&self, _: &str) -> Result<Vec<LoginCandidate>, BrowserIpcError> { Ok(Vec::new()) }
+        fn load_selected_credential(&self, _: &str, _: &str) -> Result<Option<SelectedCredential>, BrowserIpcError> { Ok(None) }
+        fn save_new_login(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> Result<bool, BrowserIpcError> { Ok(true) }
+        fn update_login(&self, _: &str, _: &str, _: &str, _: &str, _: &[u8; 32]) -> Result<(), BrowserIpcError> { Ok(()) }
+        fn review_login(&self, _: &str, _: &str, _: &str) -> Result<bool, BrowserIpcError> { Ok(true) }
+        fn query_sign_ins(&self, origin: &str) -> Result<Option<SignInsAnswer>, BrowserIpcError> {
+            if !self.enabled {
+                return Ok(None);
+            }
+            let methods = self.stored.lock().unwrap().iter().filter(|(stored, _)| stored == origin)
+                .map(|(_, details)| crate::browser::SignInMethod { provider: details.provider.clone(),
+                    account: details.account.clone().unwrap_or_default(), last_used_at: 1, use_count: 1 })
+                .collect();
+            Ok(Some(SignInsAnswer { site: origin.trim_start_matches("https://").to_owned(), methods }))
+        }
+        fn record_sign_in(&self, origin: &str, details: &SignInDetails) -> Result<SignInsAnswer, BrowserIpcError> {
+            if !self.enabled || !["github", "google"].contains(&details.provider.as_str()) || origin == "https://github.com" {
+                return Err(BrowserIpcError::InvalidRequest);
+            }
+            self.stored.lock().unwrap().push((origin.to_owned(), details.clone()));
+            self.query_sign_ins(origin)?.ok_or(BrowserIpcError::InvalidRequest)
+        }
+    }
+
+    #[test]
+    fn sign_in_methods_record_and_query_with_strict_fields() {
+        let methods = Arc::new(SignInProvider { enabled: true, stored: Mutex::new(Vec::new()) });
+        let provider: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> = RwLock::new(Some(methods.clone()));
+        let grants = Mutex::new(SelectionGrants::default());
+        let record = |provider_id: &str, account: Option<&str>| {
+            let mut save = request(BrowserAction::RecordSignIn, None, None);
+            save.sign_in = Some(SignInDetails { provider: provider_id.to_owned(), account: account.map(str::to_owned) });
+            save
+        };
+
+        // Nothing yet; then a recorded method comes back on the answer and on the next query.
+        let empty = handle_request(request(BrowserAction::QuerySignIns, None, None), &provider, &grants).unwrap();
+        assert_eq!(empty.status, "ok");
+        assert_eq!(serde_json::to_value(&empty).unwrap()["signIns"], serde_json::json!({"site": "example.com", "methods": []}));
+        let saved = handle_request(record("github", Some("octocat")), &provider, &grants).unwrap();
+        assert_eq!(saved.status, "saved");
+        assert_eq!(saved.sign_ins.as_ref().unwrap().methods[0].account, "octocat");
+        let json = serde_json::to_value(handle_request(request(BrowserAction::QuerySignIns, None, None), &provider, &grants).unwrap()).unwrap();
+        assert_eq!(json["signIns"]["methods"][0], serde_json::json!({"provider": "github", "account": "octocat", "lastUsedAt": 1, "useCount": 1}));
+
+        // Refused by the app (unknown provider, the provider's own site): one generic answer.
+        assert_eq!(handle_request(record("gitlab", None), &provider, &grants).unwrap().status, "invalid_request");
+        let mut own = record("github", None);
+        own.origin = "https://github.com".into();
+        assert_eq!(handle_request(own, &provider, &grants).unwrap().status, "invalid_request");
+
+        // Shape checks before the provider: a bad id or account, a missing or misplaced body, extra fields, HTTP.
+        for (provider_id, account) in [("GitHub", None), ("", None), ("github", Some("a\u{7}b")), ("github", Some("x\u{202E}y"))] {
+            assert_eq!(handle_request(record(provider_id, account), &provider, &grants).unwrap().status, "invalid_request", "{provider_id} {account:?}");
+        }
+        let long = "a".repeat(257);
+        assert_eq!(handle_request(record("github", Some(&long)), &provider, &grants).unwrap().status, "invalid_request");
+        assert_eq!(handle_request(request(BrowserAction::RecordSignIn, None, None), &provider, &grants).unwrap().status, "invalid_request");
+        let mut misplaced = request(BrowserAction::QuerySignIns, None, None);
+        misplaced.sign_in = Some(SignInDetails { provider: "github".into(), account: None });
+        assert_eq!(handle_request(misplaced, &provider, &grants).unwrap().status, "invalid_request");
+        let mut with_secret = record("github", None);
+        with_secret.password = Some("p".into());
+        assert_eq!(handle_request(with_secret, &provider, &grants).unwrap().status, "invalid_request");
+        let mut http = request(BrowserAction::QuerySignIns, None, None);
+        http.origin = "http://example.com".into();
+        assert_eq!(handle_request(http, &provider, &grants).unwrap().status, "invalid_request");
+        assert_eq!(methods.stored.lock().unwrap().len(), 1);
+
+        // The setting off answers "disabled"; a locked vault answers "locked".
+        let off: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> =
+            RwLock::new(Some(Arc::new(SignInProvider { enabled: false, stored: Mutex::new(Vec::new()) })));
+        assert_eq!(handle_request(request(BrowserAction::QuerySignIns, None, None), &off, &grants).unwrap().status, "disabled");
+        let locked: RwLock<Option<Arc<dyn BrowserCredentialProvider>>> = RwLock::new(None);
+        assert_eq!(handle_request(record("github", None), &locked, &grants).unwrap().status, "locked");
+    }
+
+    #[test]
+    fn sign_in_methods_are_listed_only_while_the_setting_is_on() {
+        let on = live_features(ok_response("r".into(), None, None), true).features.unwrap();
+        let off = live_features(ok_response("r".into(), None, None), false).features.unwrap();
+        assert_eq!(on.len(), crate::browser::BROWSER_FEATURES.len() + 1);
+        assert!(on.contains(&"sign_in_methods".to_owned()));
+        assert!(!off.contains(&"sign_in_methods".to_owned()));
+        let parsed: BrowserRequest = serde_json::from_str(
+            r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{"provider":"github","account":"octocat"}}"#,
+        ).unwrap();
+        assert!(matches!(parsed.action, BrowserAction::RecordSignIn));
+        assert_eq!(parsed.sign_in, Some(SignInDetails { provider: "github".into(), account: Some("octocat".into()) }));
+        // The answer is omitted when there is none, so older extensions see the same responses.
+        assert!(serde_json::to_value(ok_response("r".into(), None, None)).unwrap().get("signIns").is_none());
     }
 
     #[test]

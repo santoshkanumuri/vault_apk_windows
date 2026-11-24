@@ -139,7 +139,7 @@ fn unlock_prompt(request: BrowserRequest) -> BrowserResponse {
                 credentials: None,
                 credential: None,
                 sealed_login: None,
-                features: None, appearance: None, item: None, icon_wanted: false,
+                features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
             },
             Err(_) => BrowserResponse::unavailable(request_id),
         },
@@ -218,6 +218,12 @@ fn validate(request: &BrowserRequest) -> Result<(), &'static str> {
     if request.icon.is_some() != matches!(request.action, Action::SaveSiteIcon) {
         return Err("The browser request is incomplete.");
     }
+    // "sign_in_methods": a sign-in body belongs to "record_sign_in" only, and that action needs one.
+    if request.sign_in.is_some() != matches!(request.action, Action::RecordSignIn)
+        || request.sign_in.as_ref().is_some_and(|details| !browser::valid_sign_in_details(details))
+    {
+        return Err("The browser request is incomplete.");
+    }
     // Item kinds, "all" and captured fields belong to their own actions only.
     let item_action = matches!(request.action, Action::QueryItems | Action::FillItem | Action::RequestCvv | Action::FillCvv);
     let sealing_details = matches!(request.action, Action::SealDetails);
@@ -292,6 +298,11 @@ fn validate(request: &BrowserRequest) -> Result<(), &'static str> {
             request.credential_id.is_none() && request.selection_token.is_none() && no_secrets(request)
                 && request.icon.as_ref().is_some_and(|icon| !icon.is_empty() && icon.len() <= 43_692)
         }
+        // "sign_in_methods": the site comes from the origin; nothing else rides along.
+        Action::QuerySignIns | Action::RecordSignIn => {
+            request.credential_id.is_none() && request.selection_token.is_none() && no_secrets(request)
+                && request.title.is_none() && request.all.is_none()
+        }
         // Only a second app launch sends these, never the extension.
         Action::ShowApp | Action::HandOver => false,
     };
@@ -322,7 +333,7 @@ fn seal_login(mut request: BrowserRequest) -> Result<BrowserResponse, Box<dyn st
         message: String::new(),
         credentials: None,
         credential: None,
-        sealed_login: Some(sealed), features: None, appearance: None, item: None, icon_wanted: false,
+        sealed_login: Some(sealed), features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
     })
 }
 
@@ -347,7 +358,7 @@ fn seal_details(mut request: BrowserRequest) -> Result<BrowserResponse, Box<dyn 
         message: String::new(),
         credentials: None,
         credential: None,
-        sealed_login: Some(sealed), features: None, appearance: None, item: None, icon_wanted: false,
+        sealed_login: Some(sealed), features: None, appearance: None, item: None, icon_wanted: false, sign_ins: None,
     })
 }
 
@@ -511,6 +522,26 @@ mod tests {
         assert!(!ok(r#"{"version":2,"requestId":"r","action":"save_site_icon","origin":"https://a.example","icon":"AAAA","username":"u"}"#));
         assert!(!ok(&format!(r#"{{"version":2,"requestId":"r","action":"save_site_icon","origin":"https://a.example","icon":"{}"}}"#, "A".repeat(43_693))));
         assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_credentials","origin":"https://a.example","icon":"AAAA"}"#));
+    }
+
+    #[test]
+    fn sign_in_methods_pass_only_with_their_own_fields() {
+        let ok = |json: &str| validate(&parse(json)).is_ok();
+        assert!(ok(r#"{"version":2,"requestId":"r","action":"query_sign_ins","origin":"https://a.example"}"#));
+        assert!(ok(r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{"provider":"github","account":"octocat"}}"#));
+        assert!(ok(r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{"provider":"google"}}"#));
+        // A body is required on record and refused everywhere else.
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example"}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_sign_ins","origin":"https://a.example","signIn":{"provider":"github"}}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_credentials","origin":"https://a.example","signIn":{"provider":"github"}}"#));
+        // HTTPS only, no secrets, a clean provider id and account.
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"query_sign_ins","origin":"http://a.example"}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{"provider":"github"},"password":"p"}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{"provider":"GitHub"}}"#));
+        assert!(!ok(r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{"provider":"github","account":"a\u0000b"}}"#));
+        assert!(!ok(&format!(r#"{{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{{"provider":"github","account":"{}"}}}}"#, "a".repeat(257))));
+        // Unknown fields in the body are refused by the parser itself.
+        assert!(serde_json::from_str::<BrowserRequest>(r#"{"version":2,"requestId":"r","action":"record_sign_in","origin":"https://a.example","signIn":{"provider":"github","code":"x"}}"#).is_err());
     }
 
     #[test]

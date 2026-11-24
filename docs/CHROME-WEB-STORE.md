@@ -54,7 +54,7 @@ What it does
 
 Private by design
 - Your vault stays in Nuvori for Windows. The extension never receives your master password, your vault key or your vault.
-- It talks only to Nuvori for Windows on your PC, through the browser's native messaging. It makes no network requests.
+- It talks only to Nuvori for Windows on your PC, through the browser's native messaging. Its only network request fetches the icon of a site you have a login for, without cookies, when Website icons is on.
 - It fills only the exact HTTPS website that a login is saved for.
 - Logins waiting to be saved are encrypted by Nuvori for Windows before the extension keeps them.
 - No account, no ads, no analytics.
@@ -119,7 +119,7 @@ This extension works only with the desktop app Nuvori for Windows, which holds t
 2. Open Nuvori and create a vault with any master password. On the Home page, select Add, choose a login, and save one for an HTTPS sign-in page you can open.
 3. Install the extension and restart the browser. Nuvori connects it automatically. Settings > Browser extension then shows a "Last contact" time.
 4. Open a sign-in page on an HTTPS site. Select the username field and choose the account from the Nuvori list.
-No account or sign-in is needed. The extension makes no network requests.
+No account or sign-in is needed. The extension's only network request fetches the icon of a site that has a saved login, without cookies.
 ```
 
 ## Distribution tab

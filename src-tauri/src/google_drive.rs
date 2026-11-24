@@ -368,6 +368,12 @@ impl CloudStore for GoogleDrive {
         file_from(response)
     }
 
+    fn delete(&mut self, id: &str) -> Cloud<()> {
+        let url = format!("{FILES_URL}/{}", percent(id));
+        self.send(&mut |agent, bearer| agent.request("DELETE", &url).set("Authorization", bearer).call())?;
+        Ok(())
+    }
+
     fn replace(&mut self, id: &str, content: &[u8]) -> Cloud<CloudFile> {
         let url = format!("{UPLOAD_URL}/{}", percent(id));
         file_from(self.send(&mut |agent, bearer| {

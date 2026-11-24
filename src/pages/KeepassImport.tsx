@@ -1,13 +1,13 @@
-import { useId, useState, type FormEvent } from "react";
-import { FileKey, Upload } from "lucide-react";
-import { Button } from "../components/Button";
+import { useId, useRef, useState, type FormEvent } from "react";
+import { FileKey, FolderOpen, Upload, X } from "lucide-react";
+import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { PasswordField } from "../components/Field";
 import { StatusBanner } from "../components/Status";
 import { useToast } from "../app/toast";
 import { useVault } from "../app/vault";
 import { api, type KeepassSummary } from "../lib/api";
-import { plural } from "../lib/format";
+import { cx, plural } from "../lib/format";
 
 /** The largest KeePass file the import reads (keepass_import.rs MAX_FILE_BYTES). */
 const MAX_BYTES = 32 * 1024 * 1024;
@@ -19,13 +19,20 @@ async function base64Of(file: File): Promise<string> {
   return btoa(binary);
 }
 
+/** A styled "Choose file" button with the chosen file's name, like the pairing "Read QR image" button. */
 function FilePicker({ label, hint, accept, file, onFile }: { label: string; hint: string; accept: string; file: File | null; onFile: (file: File | null) => void }) {
   const id = useId();
+  const input = useRef<HTMLInputElement>(null);
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
-      <input id={id} className="input file-input" type="file" accept={accept} onChange={(event) => onFile(event.target.files?.[0] ?? null)} />
-      <span className="field-hint">{file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : hint}</span>
+      <div className="file-picker">
+        <Button id={id} icon={FolderOpen} onClick={() => input.current?.click()} aria-describedby={`${id}-name`}>{file ? "Change file" : "Choose file"}</Button>
+        <span id={`${id}-name`} className={cx("file-picker-name", !file && "muted")}>{file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : "No file chosen"}</span>
+        {file && <IconButton label={`Remove ${label.toLowerCase()}`} icon={X} size="sm" onClick={() => { if (input.current) input.current.value = ""; onFile(null); }} />}
+      </div>
+      <input ref={input} type="file" accept={accept} className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(event) => onFile(event.target.files?.[0] ?? null)} />
+      <span className="field-hint">{hint}</span>
     </div>
   );
 }

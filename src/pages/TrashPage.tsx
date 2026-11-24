@@ -2,6 +2,7 @@ import { ArchiveRestore, Trash2 } from "lucide-react";
 import { Button } from "../components/Button";
 import { Avatar, EmptyState } from "../components/Display";
 import { Spinner } from "../components/Spinner";
+import { StatusBanner } from "../components/Status";
 import { useConfirm } from "../app/confirm";
 import { useNow, usePolling } from "../app/hooks";
 import { useRouter } from "../app/router";
@@ -24,6 +25,10 @@ function daysLeft(item: TrashedItem, now: number): string {
 /**
  * Items deleted on this PC or on a paired device, kept on this PC for 30 days. A restore makes a
  * new item that syncs to the other devices; the copy here is not synced.
+ * Also this PC's versions of items that the phone had in another version when this PC joined
+ * (`reason: "join"`). They stay until the person restores or deletes them.
+ * And versions from a paired device that had not applied when this PC was removed from the group
+ * (`reason: "removal"`, local_recovery.rs). They stay 30 days like a deleted item.
  */
 export function TrashPage() {
   const toast = useToast();
@@ -33,6 +38,7 @@ export function TrashPage() {
   const now = useNow(60000);
   const trash = usePolling<TrashedItem[]>(() => api.listTrash(), 10000);
   const items = trash.data ?? [];
+  const joinCopies = items.filter((item) => item.reason === "join").length;
 
   const restore = async (item: TrashedItem) => {
     try {
@@ -42,14 +48,17 @@ export function TrashPage() {
       const open = restored.kind === "note"
         ? () => void router.navigate({ page: "note", id: restored.id })
         : () => void router.navigate({ page: "item", id: restored.id });
-      toast.success(`${label(item)} restored`, { action: { label: "Open", run: open } });
+      toast.success(item.reason === "join" ? `This PC's version restored as a new ${label(item).toLowerCase()}`
+        : item.reason === "removal" ? `That version restored as a new ${label(item).toLowerCase()}`
+        : `${label(item)} restored`, { action: { label: "Open", run: open } });
     } catch (failure) {
       toast.error(failure, "Couldn't restore this item.");
     }
   };
 
   const forget = async (item: TrashedItem) => {
-    if (!(await confirm({ title: `Delete "${item.title || "Untitled"}" for good?`, message: "This PC forgets its copy. You can't undo this.", confirmLabel: "Delete for good", danger: true }))) return;
+    const message = item.reason === "join" ? "This PC forgets its version. Your phone's version stays. You can't undo this." : "This PC forgets its copy. You can't undo this.";
+    if (!(await confirm({ title: `Delete "${item.title || "Untitled"}" for good?`, message, confirmLabel: "Delete for good", danger: true }))) return;
     try {
       await api.forgetTrashed(item.id);
       await trash.reload();
@@ -77,6 +86,11 @@ export function TrashPage() {
           <Button variant="ghost" icon={Trash2} onClick={() => void empty()} disabled={items.length === 0}>Empty</Button>
         </div>
       </div>
+      {joinCopies > 0 && (
+        <StatusBanner kind="info" title={joinCopies === 1 ? "1 item needs review" : `${joinCopies} items need review`}>
+          When this PC joined your phone's vault, your phone had another version of {joinCopies === 1 ? "this item" : "these items"}. Your phone's version is kept. Compare, then restore this PC's version as a new item, or delete it. {joinCopies === 1 ? "It stays" : "They stay"} here until you choose.
+        </StatusBanner>
+      )}
       {trash.loading && !trash.data ? <div className="card card-padded center"><Spinner label="Loading" /></div>
         : items.length === 0 ? <div className="card"><EmptyState icon={ArchiveRestore} title="Nothing deleted recently" body={`Deleted passwords, cards, codes and notes stay here for ${TRASH_DAYS} days.`} /></div>
         : (
@@ -87,8 +101,10 @@ export function TrashPage() {
                 <span className="trash-text">
                   <span className="trash-title">{item.title || "Untitled"}</span>
                   <span className="trash-meta">
-                    {label(item)} · deleted {item.deletedElsewhere ? "on another device " : ""}
-                    <time title={formatDateTime(item.deletedAt)}>{relativeTime(item.deletedAt, now).replace(/^Just/, "just")}</time> · {daysLeft(item, now)}
+                    {item.reason === "join" ? <><span className="badge">Needs review</span> {label(item)} · this PC's version · set aside </>
+                      : item.reason === "removal" ? <><span className="badge badge-removed" title="This PC was removed from the sync group before this change could apply">Removed</span> {label(item)} · a paired device's version, not applied · kept </>
+                      : <>{label(item)} · deleted {item.deletedElsewhere ? "on another device " : ""}</>}
+                    <time title={formatDateTime(item.deletedAt)}>{relativeTime(item.deletedAt, now).replace(/^Just/, "just").replace(/^Yesterday/, "yesterday")}</time>{item.reason === "join" ? "" : ` · ${daysLeft(item, now)}`}
                   </span>
                 </span>
                 <span className="trash-actions">

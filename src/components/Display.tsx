@@ -9,8 +9,9 @@ import { glyphColor, needsBorder } from "../lib/siteIcons";
  * A letter avatar. `cardColor` (a card's own ARGB color) paints it in that card's color.
  * `site` (a login's website or a passkey's RP ID) swaps the letter for the site's icon when one is known.
  */
-export function Avatar({ title, icon: Icon, size = "md", cardColor, site }: { title: string; icon?: LucideIcon; size?: "sm" | "md" | "lg"; cardColor?: number; site?: string }) {
-  const found = useSiteIcon(cardColor === undefined ? site : undefined);
+/** [site]: a website or RP ID whose icon replaces the letter. [brand]: a code's issuer name, tried after [site]. */
+export function Avatar({ title, icon: Icon, size = "md", cardColor, site, brand }: { title: string; icon?: LucideIcon; size?: "sm" | "md" | "lg"; cardColor?: number; site?: string; brand?: string }) {
+  const found = useSiteIcon(cardColor === undefined ? site : undefined, cardColor === undefined ? brand : undefined);
   const tint = hashIndex(title.toLocaleLowerCase(), 6);
   const card = cardColor !== undefined ? { background: css(cardColor), color: inkFor(cardColor) } : undefined;
   if (found?.kind === "captured") {

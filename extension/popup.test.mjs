@@ -346,7 +346,9 @@ test("manifest: least privilege, HTTPS-only hosts, no activeTab", () => {
   }
   assert.match(manifest.key, /^[A-Za-z0-9+/]+=*$/, "a public key fixes the extension ID in every folder");
   assert.deepEqual(manifest.host_permissions, ["https://*/*"]);
-  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "nativeMessaging", "offscreen", "scripting", "storage"]);
+  // "webRequest" (non-blocking, no install warning): sign-in methods see a provider's authorize request even
+  // when it redirects at once and never shows a page. Not "webNavigation", which warns "Read your browsing history".
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "nativeMessaging", "offscreen", "scripting", "storage", "webRequest"]);
   assert.deepEqual(manifest.optional_permissions, ["privacy"], "privacy is asked for only when the user turns the switch on");
   assert.equal(manifest.minimum_chrome_version, "127");
   assert.deepEqual(manifest.content_scripts[0].matches, ["https://*/*"]);

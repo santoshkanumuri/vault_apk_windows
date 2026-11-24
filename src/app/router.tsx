@@ -5,6 +5,7 @@ export type Route =
   | { page: "home" }
   | { page: "list"; category: Exclude<Category, "codes"> }
   | { page: "codes" }
+  | { page: "signins" }
   | { page: "item"; id: string }
   | { page: "edit"; id?: string; category: Category }
   | { page: "notes" }

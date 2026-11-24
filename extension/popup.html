@@ -75,6 +75,13 @@
           <p>Sign in on the page and Nuvori will offer to save it.</p>
         </div>
 
+        <div id="signins-section" hidden>
+          <div class="section-head">
+            <h2>Sign-in methods</h2>
+          </div>
+          <ul id="signins" class="card list" aria-label="Sign-in methods you used on this site"></ul>
+        </div>
+
         <div id="codes-section" hidden>
           <div class="section-head">
             <h2>Authenticator codes</h2>
@@ -229,6 +236,9 @@
           <h3>Don't suggest on</h3>
           <ul id="nosuggest-list" class="site-list" aria-label="Sites without inline suggestions"></ul>
           <p id="nosuggest-empty" class="row-sub">No sites.</p>
+          <h3>Don't ask about sign-in methods on</h3>
+          <ul id="neversignin-list" class="site-list" aria-label="Sites where Nuvori never asks to remember a sign-in method"></ul>
+          <p id="neversignin-empty" class="row-sub">No sites.</p>
         </div>
 
         <div class="card group">
@@ -247,6 +257,7 @@
     </main>
     <script src="appearance-palette.js"></script>
     <script src="appearance.js"></script>
+    <script src="signins.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

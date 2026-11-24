@@ -663,6 +663,50 @@ function accountRow(choice) {
 }
 
 // ---------------------------------------------------------------------------
+// Sign-in methods for this site ("sign_in_methods"): "Last time: GitHub · octocat". "Show" points at
+// the site's matching button on the page; Nuvori never clicks it.
+
+function relativeDay(at) {
+  const days = Math.floor((Date.now() - at) / 86_400_000);
+  return !at ? "" : days <= 0 ? "today" : days === 1 ? "yesterday" : days < 30 ? `${days} days ago` : new Date(at).toLocaleDateString();
+}
+
+function signInRow(method) {
+  const S = typeof NuvoriSignIns === "object" ? NuvoriSignIns : null;
+  const item = document.createElement("li");
+  item.className = "row signin-row";
+  const text = document.createElement("span");
+  text.className = "row-text";
+  const title = document.createElement("span");
+  title.className = "title";
+  title.textContent = `Last time: ${S?.nameOf(method.provider) || method.provider}`;
+  const account = document.createElement("span");
+  account.className = "username";
+  account.textContent = [method.account || "Account not known", relativeDay(method.lastUsedAt)].filter(Boolean).join(" · ");
+  text.append(title, account);
+  const actions = document.createElement("span");
+  actions.className = "row-actions";
+  actions.append(textButton("Show", "btn small", async () => {
+    let result;
+    try { result = await chrome.tabs.sendMessage(tabId, { target: "nuvori-top", action: "signin_point", provider: method.provider }, { frameId: 0 }); } catch { result = null; }
+    showMessage(result?.status === "ok" ? "" : `No ${S?.nameOf(method.provider) || ""} sign-in button found on this page.`);
+  }));
+  item.append(S ? S.markNode(document, method.provider, 32) : iconNode("key", "avatar"), text, actions);
+  return item;
+}
+
+async function loadSignIns() {
+  const section = $("#signins-section");
+  const list = $("#signins");
+  if (!section || !list || !origin) return;
+  let result;
+  try { result = await chrome.runtime.sendMessage({ action: "popup_sign_ins", origin }); } catch { result = null; }
+  const methods = result?.status === "ok" && Array.isArray(result.methods) ? result.methods : [];
+  list.replaceChildren(...methods.map(signInRow));
+  section.hidden = methods.length === 0;
+}
+
+// ---------------------------------------------------------------------------
 // Authenticator codes for this site: copy the current code. The setup key stays in Nuvori.
 
 async function copyCode(code) {
@@ -798,6 +842,7 @@ async function findAccounts() {
         : response?.message || "Could not find matching accounts.");
     }
     retryDelay = 2000;
+    void loadSignIns();
     void loadCodes();
     void loadItems();
     const usable = response.credentials.filter((choice) => typeof choice.id === "string" && typeof choice.selectionToken === "string");
@@ -844,12 +889,13 @@ function siteList(listSelector, emptySelector, key, entries) {
 }
 
 async function loadSettings() {
-  const saved = await chrome.storage.local.get(["inlineSuggestions", "neverSave", "noSuggest", "unlockOnStartup", ...Object.values(SWITCHES)]);
+  const saved = await chrome.storage.local.get(["inlineSuggestions", "neverSave", "noSuggest", "neverSignIn", "unlockOnStartup", ...Object.values(SWITCHES)]);
   inlineToggle.checked = saved?.inlineSuggestions !== false;
   for (const [selector, key] of Object.entries(SWITCHES)) { const toggle = $(selector); if (toggle) toggle.checked = saved?.[key] !== false; }
   if (startupUnlockToggle) startupUnlockToggle.checked = saved?.unlockOnStartup !== false;
   siteList("#never-list", "#never-empty", "neverSave", saved?.neverSave);
   siteList("#nosuggest-list", "#nosuggest-empty", "noSuggest", saved?.noSuggest);
+  if ($("#neversignin-list")) siteList("#neversignin-list", "#neversignin-empty", "neverSignIn", saved?.neverSignIn);
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,7 +1139,7 @@ void refreshPending().catch((error) => showMessage(error.message));
 void loadSettings().catch(() => {});
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.pendingLogins) void refreshPending().catch((error) => showMessage(error.message));
-  if (area === "local" && (changes.inlineSuggestions || changes.neverSave || changes.noSuggest || changes.unlockOnStartup)) void loadSettings().catch(() => {});
+  if (area === "local" && (changes.inlineSuggestions || changes.neverSave || changes.noSuggest || changes.neverSignIn || changes.unlockOnStartup)) void loadSettings().catch(() => {});
   if (area === "session" && changes.diagnostics) void loadDiagnostics();
 });
 

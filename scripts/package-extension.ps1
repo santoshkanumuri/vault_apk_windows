@@ -48,7 +48,7 @@ try {
         foreach ($property in 'key', 'minimum_chrome_version') { $manifest.PSObject.Properties.Remove($property) }
         $manifest.permissions = @($manifest.permissions | Where-Object { $_ -ne 'offscreen' })
         # Firefox runs the background as an event page, not a service worker.
-        $manifest.background = [ordered]@{ scripts = @('background.js') }
+        $manifest.background = [ordered]@{ scripts = @('signins.js', 'background.js') }
         # 140 (ESR): data_collection_permissions; also covers popover (125), sender.origin (126)
         # and match_origin_as_fallback (128).
         # Mozilla counts data "handled outside the add-on or the local browser" as transmitted, and

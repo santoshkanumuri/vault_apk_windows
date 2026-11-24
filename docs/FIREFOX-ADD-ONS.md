@@ -89,7 +89,7 @@ What it does
 
 Private by design
 - Your vault stays in Nuvori for Windows. The add-on never receives your master password, your vault key or your vault.
-- It talks only to Nuvori for Windows on your PC, through Firefox's native messaging. It makes no network requests.
+- It talks only to Nuvori for Windows on your PC, through Firefox's native messaging. Its only network request fetches the icon of a site you have a login for, without cookies, when Website icons is on.
 - It fills only the exact HTTPS website that a login is saved for.
 - No account, no ads, no analytics.
 
@@ -116,7 +116,7 @@ Mozilla counts data "handled outside the add-on or the local browser" as transmi
 ## Notes to reviewer
 
 ```text
-This add-on works only with the desktop app Nuvori for Windows, which holds the user's vault. It talks to that app through native messaging (host "com.nuvori.desktop") and makes no network requests.
+This add-on works only with the desktop app Nuvori for Windows, which holds the user's vault. It talks to that app through native messaging (host "com.nuvori.desktop"). Its only network request fetches the icon of a website that has a saved login (no cookies, no referrer, at most once every 6 hours per site, never in a private window), and only while Website icons is on in Nuvori for Windows.
 
 To test:
 1. Install Nuvori for Windows from https://github.com/santoshkanumuri/vault_apk_windows/releases/latest.

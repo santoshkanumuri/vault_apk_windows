@@ -1,4 +1,4 @@
-import { Activity, ArchiveRestore, CircleHelp, FileText, MonitorSmartphone, LockKeyhole, Settings, UserRound } from "lucide-react";
+import { Activity, ArchiveRestore, CircleHelp, FileText, LogIn, MonitorSmartphone, LockKeyhole, Settings, UserRound } from "lucide-react";
 import { SettingsGroup, SettingsRow } from "../components/Display";
 import { useLock } from "../app/hooks";
 import { useRouter } from "../app/router";
@@ -12,6 +12,7 @@ export function MorePage() {
   return (
     <div className="page page-narrow">
       <SettingsGroup title="Your vault">
+        <SettingsRow icon={LogIn} title="Sign-ins" description="Which “Continue with” account you used on each site" onClick={() => void router.navigate({ page: "signins" })} />
         <SettingsRow icon={FileText} title="Notes" description={plural(snapshot.counts.notes, "private note")} onClick={() => void router.navigate({ page: "notes" })} />
         <SettingsRow icon={CircleHelp} title="Security questions" description={plural(snapshot.counts.questions, "saved question")} onClick={() => void router.navigate({ page: "list", category: "questions" })} />
         <SettingsRow icon={UserRound} title="Autofill details" description={plural(snapshot.counts.autofill, "saved profile")} onClick={() => void router.navigate({ page: "list", category: "autofill" })} />

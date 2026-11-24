@@ -119,6 +119,8 @@ h3 { font-size: 14px; font-weight: 600; }
 .title, .username { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title { font-size: 14px; font-weight: 600; }
 .username { color: var(--muted); font-size: 12px; }
+.signin-row .signin-mark { box-shadow: inset 0 0 0 1px rgb(127 127 127 / .25); }
+.signin-row .title { font-weight: 600; }
 .passkey-tag { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--pc); color: var(--opc); font-size: 11px; font-weight: 600; }
 .row-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .row-actions .icon-btn { width: 28px; height: 28px; border-color: transparent; }

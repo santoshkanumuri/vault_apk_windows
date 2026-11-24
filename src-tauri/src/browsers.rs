@@ -115,13 +115,24 @@ pub fn classify(exe: &str, display_name: &str) -> Option<Class> {
         "firefox.exe" | "zen.exe" | "librewolf.exe" | "waterfox.exe" | "floorp.exe" | "tor.exe" | "mullvadbrowser.exe" => {
             Some(Class { family: Family::Firefox, keys: vec![Key::Mozilla] })
         }
-        "chrome.exe" => chromium(&[Key::Chrome]),
+        // Forks that keep Chromium's "chrome.exe" (Helium, ungoogled-chromium, Supermium) read
+        // SOFTWARE\Chromium\NativeMessagingHosts as well, so only Google Chrome itself gets one key.
+        "chrome.exe" if is_google_chrome(display_name) => chromium(&[Key::Chrome]),
+        "chrome.exe" => chromium(&fork),
         "msedge.exe" => chromium(&[Key::Edge]),
         "brave.exe" => chromium(&[Key::Brave]),
-        "vivaldi.exe" | "opera.exe" | "launcher.exe" | "thorium.exe" | "arc.exe" | "browser.exe" | "chromium.exe" => chromium(&fork),
+        "vivaldi.exe" | "opera.exe" | "launcher.exe" | "thorium.exe" | "arc.exe" | "browser.exe" | "chromium.exe" | "comet.exe" => {
+            chromium(&fork)
+        }
         _ if display_name.to_ascii_lowercase().contains("tor browser") => Some(Class { family: Family::Firefox, keys: vec![Key::Mozilla] }),
         _ => Some(Class { family: Family::Unknown, keys: Vec::new() }),
     }
+}
+
+/// True for Google Chrome's own Start menu name ("Google Chrome", "Google Chrome Beta" ...), or no name.
+fn is_google_chrome(display_name: &str) -> bool {
+    let name = display_name.trim().to_ascii_lowercase();
+    name.is_empty() || name.starts_with("google chrome")
 }
 
 /// A name for a browser the registry gave none for.
@@ -141,6 +152,7 @@ fn known_name(id: &str) -> String {
         "mullvadbrowser" => "Mullvad Browser",
         "thorium" => "Thorium",
         "arc" => "Arc",
+        "comet" => "Comet",
         "browser" => "Yandex Browser",
         "chromium" => "Chromium",
         other => {
@@ -192,13 +204,27 @@ fn detected(exe: &str, name: &str) -> Option<Detected> {
 
 /// Browsers from the StartMenuInternet entries, plus the profile folders of Chrome, Brave, Edge
 /// and Firefox (a per-user install may not write StartMenuInternet). One entry per browser id.
+///
+/// Two browsers can share an id: Helium's program is also "chrome.exe". The native host tells them
+/// apart only by that id, so they stay one entry, with both names and the keys of both.
 pub fn detect(entries: &[StartMenuEntry], local: &Path, roaming: &Path) -> Vec<Detected> {
     let mut found: Vec<Detected> = Vec::new();
     let mut add = |browser: Option<Detected>| {
-        if let Some(browser) = browser
-            && !found.iter().any(|known| known.id == browser.id)
-        {
+        let Some(browser) = browser else { return };
+        let Some(known) = found.iter_mut().find(|known| known.id == browser.id) else {
             found.push(browser);
+            return;
+        };
+        if known.family != browser.family {
+            return;
+        }
+        for key in browser.keys {
+            if !known.keys.contains(&key) {
+                known.keys.push(key);
+            }
+        }
+        if !known.name.to_lowercase().contains(&browser.name.to_lowercase()) {
+            known.name = format!("{} and {}", known.name, browser.name).chars().take(120).collect();
         }
     };
     for entry in entries {
@@ -458,6 +484,11 @@ mod tests {
         assert_eq!(class("vivaldi.exe"), Class { family: Family::Chromium, keys: vec![Key::Chrome, Key::Chromium] });
         assert_eq!(class("msedge.exe").keys, [Key::Edge]);
         assert_eq!(class("chrome.exe").keys, [Key::Chrome]);
+        assert_eq!(classify("chrome.exe", "Google Chrome Beta").unwrap().keys, [Key::Chrome]);
+        // Helium keeps Chromium's program name and also reads the Chromium key.
+        assert_eq!(classify(r"C:\Users\a\AppData\Local\imput\Helium\Application\chrome.exe", "Helium").unwrap().keys,
+            [Key::Chrome, Key::Chromium]);
+        assert_eq!(class("comet.exe"), Class { family: Family::Chromium, keys: vec![Key::Chrome, Key::Chromium] });
         assert_eq!(class("brave.exe").keys, [Key::Brave]);
         assert_eq!(class("opera.exe").keys, [Key::Chrome, Key::Chromium]);
         assert_eq!(class("unknown.exe"), Class { family: Family::Unknown, keys: vec![] });
@@ -495,14 +526,17 @@ mod tests {
             entry("Google Chrome", r#""C:\Program Files\Google\Chrome\Application\chrome.exe""#),
             entry("Thorium Nightly", r#""C:\t\nightly.exe""#),
             entry("Internet Explorer", r#""C:\Program Files\Internet Explorer\iexplore.exe""#),
-            entry("Chrome again", r#""D:\other\chrome.exe""#),
+            entry("Helium", r#""C:\Users\a\AppData\Local\imput\Helium\Application\chrome.exe""#),
+            entry("Google Chrome", r#""D:\other\chrome.exe""#),
         ];
         let found = detect(&entries, &local, &roaming);
         let ids: Vec<&str> = found.iter().map(|browser| browser.id.as_str()).collect();
         assert_eq!(ids, ["zen", "vivaldi", "chrome", "nightly", "firefox"]);
         assert_eq!(found[0].family, Family::Firefox);
         assert_eq!(found[1].keys, [Key::Chrome, Key::Chromium]);
-        assert_eq!(found[2].name, "Google Chrome");
+        // Chrome and Helium share the id "chrome": one entry with both names and both keys.
+        assert_eq!(found[2].name, "Google Chrome and Helium");
+        assert_eq!(found[2].keys, [Key::Chrome, Key::Chromium]);
         assert_eq!(found[3].family, Family::Unknown);
         assert_eq!(found[4].name, "Firefox", "a profile folder alone counts");
         std::fs::remove_dir_all(&directory).unwrap();

@@ -1,0 +1,193 @@
+{
+  "format": "nuvori-sync-epoch-keys-vectors",
+  "version": 1,
+  "feature": "epoch-keys-v1",
+  "vaultId": "vault-epoch-test",
+  "managerSeed": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+  "managerPublic": "Zr5-Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo",
+  "devices": {
+    "dev-pc": {
+      "ed25519Seed": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+      "ed25519Public": "C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0",
+      "x25519Private": "67cb23b5dc73d5a37586c614f8d5506a504e3aa00e36d478bf682bc472043c55",
+      "x25519": "EkECrvuGr7T1mAGbOFc30PcFRaU6k8xFVYkIlBuAwgM",
+      "statementHex": "6e75766f72692d6465766963652d6b65792d76310a7661756c742d65706f63682d746573740a6465762d70630a456b454372767547723754316d4147624f46633330506346526155366b38784656596b496c42754177674d",
+      "signature": "CTnUpdN3fBptODe3a0xa1dST0BCBWI2v-FQ8fBAoXICmH7eQdBOooM6KVHxWdXIFN-uQ_35CZnwc6ycWmkewBQ"
+    },
+    "dev-removed": {
+      "ed25519Seed": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+      "ed25519Public": "C-71qeZ55qPhNP4ng3v_MsfLX11E6gm8sOVCutakwMw",
+      "x25519Private": "8aaee31aedd66fa1343effc1d90ec79aaf12eaed84ffe33b660d8fefd963b243",
+      "x25519": "ihHBC-6N7IMHuzSZ7O0L_WRo--Kn6Nk0iTIv3yPBIUc",
+      "statementHex": "6e75766f72692d6465766963652d6b65792d76310a7661756c742d65706f63682d746573740a6465762d72656d6f7665640a69684842432d364e37494d48757a535a374f304c5f57526f2d2d4b6e364e6b306954497633795042495563",
+      "signature": "qz81Uxtea9UW8XQ-ONwhJja6FEoSBpVLSUINHYT0he-DRDsN75N62ntaWJ0QElJ8Bvjxs2Z5CdU3E1cXsVm6AQ"
+    },
+    "dev-tablet": {
+      "ed25519Seed": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+      "ed25519Public": "kaKKC3Q4FZOk2UaVeSCJJq_IrYLIg5t2RDWbnrqaSzo",
+      "x25519Private": "574cb448f82270f75410b6cf27e8d32d20ca1fe74c303fba08ad201f1a4048b2",
+      "x25519": "yZRJ_r-TnkDdWOEbqoVXcjGmiJqgm9qxV0suw5wrWyA",
+      "statementHex": "6e75766f72692d6465766963652d6b65792d76310a7661756c742d65706f63682d746573740a6465762d7461626c65740a795a524a5f722d546e6b4464574f4562716f5658636a476d694a71676d3971785630737577357772577941",
+      "signature": "ViX33COaOG3dGbVVoAee0p-SqmAwJTp4Jw5wjG4ppChke-vMeGpCWLMxCoPoQ7PFmCCCtbcMSR8Kgot_ctinBw"
+    }
+  },
+  "epoch": 2,
+  "transportSecretHex": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+  "packageKeyHex": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+  "contentKeyHex": "e6716703e6981aab5781c1d31c2bcb542f5d15c5ef18f622851f1950c4016af4",
+  "epoch1ContentKeyHex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+  "rootTransportSecretHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "epoch2DerivedTransportHex": "9a201276615c42e85efc2b993ae33c6f68f7bf4cad47a19fd58dd03627517bcf",
+  "epoch3AfterRotationTransportHex": "3f6da7c9fe6c2cc579e83a8311c63c207e8dd96d7f6a68ca75f60fc7539d7694",
+  "removeEventHash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+  "packages": {
+    "dev-pc": "17XoHTNuV4sTuNcG6C0GHjA4yWvOZs3PUNVmuW3buhBQUFBQUFBQUFBQUFBcOBY56jcg8liktMGIG_e0yWrfKgwPxciS7-bxkj-Xeu7nupp9LSCulJRyfRGFUMI_D89yJNwDo2ft4KF208Nqca29iDCcCq-JLFkvSHciMg",
+    "dev-tablet": "ehpOcJvwhaxJSroEabmx7aCrH3ixaqu3n_7akGI-hSJRUVFRUVFRUVFRUVF8GfaBfPpG5q3WyyKH7KzqTqk2e9ERFSwdQjr6irPVm_j6ID6GAn2S0raq4fxDIh9ShMEIlrpuT6ovKJZH2cyIuhGxOfz7gNx1J_dYU56vpQ"
+  },
+  "tamperedPackage": {
+    "device": "dev-pc",
+    "package": "17XoHTNuV4sTuNcG6C0GHjA4yWvOZs3PUNVmuW3buhBQUFBQUFBQUFBQUFBcOBY56jcg8liktMGIG_e0yWrfKgwPxciS7-bxkj-Xeu7nupp9LSCulJRyfRGFUMI_D89yJNwDo2ft4KF208Nqca29iDCcCq-JLFkvSHciMw"
+  },
+  "setStatementHex": "6e75766f72692d65706f63682d6b6579732d76310a7661756c742d65706f63682d746573740a320a636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463640a6465762d70633a313536333061396163313736626637393230336638643862626239616636333964646463626434643735656138316235373537383038633933326162643932640a6465762d7461626c65743a643932363338333333613139313564666238343633663337343135663537663638643332363432383330363736636564663534376366323434646639343933630a",
+  "setSignature": "w4J3IpRVbXIAULJBlwkHQBOfSZxgdMZDUy-efu6QP2sN6PII-xnfp6JHT41bQQvc0W7uQTk6O16_S9D7PmJQCA",
+  "payloads": [
+    {
+      "epoch": 1,
+      "entityType": "entry",
+      "mutationId": "mutation-1",
+      "entityId": "e1",
+      "payloadNonce": "MzMzMzMzMzMzMzMz",
+      "payloadCiphertext": "aGrIaWCPdCaorx7MH7wOdf16yIoQxLj5ad2qgZhvPiUGiQNql7pYxkj5VDI_X7Hi9jCe4FrV2As0WkKQXWgnqg5V",
+      "aad": "nuvori-sync-entry-v1:vault-epoch-test:mutation-1:e1",
+      "plaintext": "{\"entry\":{\"id\":\"e1\",\"title\":\"Mail\"},\"groupIds\":[]}"
+    },
+    {
+      "epoch": 2,
+      "entityType": "entry",
+      "mutationId": "mutation-1",
+      "entityId": "e1",
+      "payloadNonce": "e2.MzMzMzMzMzMzMzMz",
+      "payloadCiphertext": "y-moCq2j3a1yGuPMy5lYOWZGP8JnoXj00wVQbbzg1To-T3LyxLWRSMAA2pVvoqBYhxOmju0oR5--2u2P1d9htBFY",
+      "aad": "nuvori-sync-entry-v2:vault-epoch-test:2:mutation-1:e1",
+      "plaintext": "{\"entry\":{\"id\":\"e1\",\"title\":\"Mail\"},\"groupIds\":[]}"
+    }
+  ],
+  "nonces": [
+    {
+      "field": "MzMzMzMzMzMzMzMz",
+      "epoch": 1,
+      "valid": true
+    },
+    {
+      "field": "ezMzMzMzMzMzMzMz",
+      "epoch": 1,
+      "valid": true
+    },
+    {
+      "field": "e2.MzMzMzMzMzMzMzMz",
+      "epoch": 2,
+      "valid": true
+    },
+    {
+      "field": "e17.MzMzMzMzMzMzMzMz",
+      "epoch": 17,
+      "valid": true
+    },
+    {
+      "field": "e1.MzMzMzMzMzMzMzMz",
+      "epoch": 0,
+      "valid": false
+    },
+    {
+      "field": "e0.MzMzMzMzMzMzMzMz",
+      "epoch": 0,
+      "valid": false
+    },
+    {
+      "field": "e02.MzMzMzMzMzMzMzMz",
+      "epoch": 0,
+      "valid": false
+    },
+    {
+      "field": "e.MzMzMzMzMzMzMzMz",
+      "epoch": 0,
+      "valid": false
+    },
+    {
+      "field": "e2MzMzMzMzMzMzMzMz",
+      "epoch": 0,
+      "valid": false
+    },
+    {
+      "field": "e2.MzMzMzMzMzMzMzM",
+      "epoch": 0,
+      "valid": false
+    },
+    {
+      "field": "e99999999999.MzMzMzMzMzMzMzMz",
+      "epoch": 0,
+      "valid": false
+    }
+  ],
+  "cloud": [
+    {
+      "epoch": 1,
+      "cloudKeyHex": "3a445c4a46c68f0cb18709d77a078fae4dd7d3842f1dd336855c30dc0a1284bb",
+      "groupTag": "a95bad45f90478e5",
+      "prefix": "nv1.a95bad45f90478e5."
+    },
+    {
+      "epoch": 2,
+      "cloudKeyHex": "98a11499dd75b81a639caacf136527d72f3621713fd26697ab4883d100b730be",
+      "groupTag": "9fc23f8dcd1f0975",
+      "prefix": "nv1.9fc23f8dcd1f0975."
+    },
+    {
+      "epoch": 3,
+      "cloudKeyHex": "98a11499dd75b81a639caacf136527d72f3621713fd26697ab4883d100b730be",
+      "groupTag": "9fc23f8dcd1f0975",
+      "prefix": "nv1.9fc23f8dcd1f0975."
+    }
+  ],
+  "packageFile": {
+    "name": "nv1.a95bad45f90478e5.e.2.e8c8241437df5c1d",
+    "bodyJson": "{\"vaultId\":\"vault-epoch-test\",\"epoch\":2,\"removeHash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"packages\":{\"dev-pc\":\"17XoHTNuV4sTuNcG6C0GHjA4yWvOZs3PUNVmuW3buhBQUFBQUFBQUFBQUFBcOBY56jcg8liktMGIG_e0yWrfKgwPxciS7-bxkj-Xeu7nupp9LSCulJRyfRGFUMI_D89yJNwDo2ft4KF208Nqca29iDCcCq-JLFkvSHciMg\",\"dev-tablet\":\"ehpOcJvwhaxJSroEabmx7aCrH3ixaqu3n_7akGI-hSJRUVFRUVFRUVFRUVF8GfaBfPpG5q3WyyKH7KzqTqk2e9ERFSwdQjr6irPVm_j6ID6GAn2S0raq4fxDIh9ShMEIlrpuT6ovKJZH2cyIuhGxOfz7gNx1J_dYU56vpQ\"},\"signature\":\"w4J3IpRVbXIAULJBlwkHQBOfSZxgdMZDUy-efu6QP2sN6PII-xnfp6JHT41bQQvc0W7uQTk6O16_S9D7PmJQCA\"}",
+    "envelopeNonceHex": "616161616161616161616161",
+    "sealedHex": "4e5643316161616161616161616161616580a20bafb33db1e51f2023ddeb2bc8d9d603b0424bd0bd82597b23c2072f8dcfaa75e3a802984614bb2f1d25aa0459ba06a49cfdfbd7e6f713cd028f8f8347b99fc296be3a17b1a5c3c7f8f3de7798f1d5bdfe1abe71edc77324f5352c48d4be84a1effab40b53b2db82a4118e82281564dce8319da25864ec01d28a2c5d5e2e626fb7c3d4764e1217352b714225b24ac4ed91e2c589349b0eed2b340f4d6d4c74d5e8489e5e0ca50fd926c4ad75fcac47bc1c73efd8cc74a637547d3d8e855e07707f268f9e803519bedde7b54e3f360aa325207cb6178bb0eb3d376ff83bcff8eb9b47811ce5f40288f433126c2f0f60a62e22cedc67f6fd3940a3c6d303b49b155fcd7e9bf8affeb4c06d3e521b1fed1851f8defebbab1f53400f5ff0572bf50474d64a6cff94d7f8a7842562e94db0632b312a3227b0181f946444a0ccc32418cb83142b24ff117b11cde87364911d084b1646bfb63e1f9016a90f78c0676b2a032435ed245d499a9a5411f19c032303d16bb96ee40b41c1808e6c9a2d53a94deb05b7d946d77294c9e7782d1b85a7143c33452e55681823a7cbc5dc59a7aac441642d95e878d06d43da4a8c7e56e072a07659b352f563e3091fafa545c5ae949881ed3b8919ad4b2ff6c7d9c46b5d97e3d6b0b49962dddd698cbac3177d2a13a9ad9a4f4c18ec93909f50694199e36e3e84e3dad4023c880ad5ff96a12ae3543aecb5ceb145a4c4e9e7281adf9edd4b7c336a4032c4401239c4d3d758cde49f3faeffac21fe78df65215374a7ab89a0c6d39dcfe84c9edcc9d168c48a93c6535a4060b2d41b71374ec4c642ae5add698e3be33a11ed14a770685589828bac"
+  },
+  "statementFileName": "nv1.9fc23f8dcd1f0975.k.b0093a4b46cf36c2",
+  "markerSet": {
+    "vaultId": "vault-epoch-test",
+    "epoch": 3,
+    "removeHash": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "packages": {},
+    "setStatementHex": "6e75766f72692d65706f63682d6b6579732d76310a7661756c742d65706f63682d746573740a330a656665666566656665666566656665666566656665666566656665666566656665666566656665666566656665666566656665666566656665666566656665660a",
+    "signature": "NIYZP_tdY_Tjp_I3pLU-6345FDaw8M_HMgrJStYN_LKHDZjqCgx3iJDVEPSmLXhU1w9GyxVMk4nyKXjP2ByeDg"
+  },
+  "nonCanonicalPackage": {
+    "device": "dev-pc",
+    "canonical": "17XoHTNuV4sTuNcG6C0GHjA4yWvOZs3PUNVmuW3buhBQUFBQUFBQUFBQUFBcOBY56jcg8liktMGIG_e0yWrfKgwPxciS7-bxkj-Xeu7nupp9LSCulJRyfRGFUMI_D89yJNwDo2ft4KF208Nqca29iDCcCq-JLFkvSHciMg",
+    "lenient": "17XoHTNuV4sTuNcG6C0GHjA4yWvOZs3PUNVmuW3buhBQUFBQUFBQUFBQUFBcOBY56jcg8liktMGIG_e0yWrfKgwPxciS7-bxkj-Xeu7nupp9LSCulJRyfRGFUMI_D89yJNwDo2ft4KF208Nqca29iDCcCq-JLFkvSHciMh"
+  },
+  "blobFile": {
+    "name": "nv1.9fc23f8dcd1f0975.b.5faa4eec3611556812c2d74b437c8c49add3f910f10063d801441f7d75cd5e3b",
+    "blobHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+    "envelopeNonceHex": "626262626262626262626262",
+    "sealedHex": "4e564331626262626262626262626262e7441fd2ab12c2ee69bed0293c34eec538cfb2a47e3e34f4955e701ac7a0b519eee7f07a2486071d22536643d16e62fbe18ff964d05cfdad"
+  },
+  "progressFile": {
+    "name": "nv1.9fc23f8dcd1f0975.p.b0093a4b46cf36c2",
+    "deviceId": "dev-pc",
+    "devicePublic": "C1E62bSSQBXKCQLtB5BE06xdvsIwbwaUjBDajrbjny0",
+    "prefixEpoch": 2,
+    "updatedAt": 1795000000000,
+    "keyEpoch": 2,
+    "progressText": "{\"received\":{\"dev-pc\":[3,\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"],\"dev-tablet\":[2,\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"]},\"applied\":{\"dev-pc\":[3,\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"],\"dev-tablet\":[1,\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"]}}",
+    "features": [
+      "epoch-keys-v1",
+      "removal-cutoff-v1"
+    ],
+    "signingHex": "6e75766f72692d64726976652d70726f67726573732d76310a7661756c742d65706f63682d746573740a6465762d70630a320a313739353030303030303030300a320a363234616436393434326361343536353565363538333533646161303063623434626230386436326138613131623166343830323534383130353463353664660a65706f63682d6b6579732d76312c72656d6f76616c2d6375746f66662d7631",
+    "signature": "qsJiwbzJ2intwwg1e230JeBBVZhcW2dUHuvlLAebNs-O3aygYP98Zdc4pDYYQxYSKwflmaOrobrPrYkAkNZKCw"
+  }
+}

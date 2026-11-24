@@ -3,8 +3,9 @@
 //! When the user visits a site that already has a login or passkey in the vault, the extension
 //! re-encodes the page's favicon to a small PNG and sends it here (`save_site_icon`). The icon
 //! goes into the encrypted vault database next to the items, keyed by registrable domain. It is
-//! never synced, never part of a backup's item list, and never fetched by the app: no network
-//! code lives here. The Android app does not capture icons; both apps ship a built-in icon set.
+//! never part of a backup's item list and never fetched by the app: no network code lives here.
+//! Sync shares it with the group (`site_icon_sync.rs`, protocol `site-icons-v1`). The Android app
+//! does not capture icons; it shows the synced ones. Both apps ship a built-in icon set.
 //!
 //! The extension is not trusted. The app checks the user's setting, the site, the size and the
 //! PNG itself before it stores anything. The app stores the original validated bytes.

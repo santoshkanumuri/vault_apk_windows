@@ -336,7 +336,7 @@ pub fn resolve<E>(
     let plaintext = Zeroizing::new(payload::decrypt(content_key, selected).map_err(|_| ConflictError::Data)?);
     let payload_json: Value = serde_json::from_slice(&plaintext).map_err(|_| ConflictError::Data)?;
     let mutation_id = uuid::Uuid::new_v4().to_string();
-    let encrypted = payload::encrypt(content_key, &selected.entity_type, &selected.vault_id, &mutation_id, &selected.entity_id, &plaintext)
+    let encrypted = payload::encrypt_in(db, content_key, &selected.entity_type, &selected.vault_id, &mutation_id, &selected.entity_id, &plaintext)
         .map_err(|_| ConflictError::Data)?;
     let head: Option<(i64, String)> = db
         .query_row(
