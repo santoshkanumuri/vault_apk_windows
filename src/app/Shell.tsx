@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { SearchContext } from "./search";
 import { Activity, ArchiveRestore, ArrowLeft, Clock3, CircleHelp, CreditCard, Ellipsis, FileText, House, KeyRound, LockKeyhole, LogIn, MonitorSmartphone, Moon, Search, Settings, Sun, UserRound, type LucideIcon } from "lucide-react";
 import { IconButton } from "../components/Button";
@@ -184,6 +184,18 @@ export function Shell() {
 
   const title = useRouteTitle(route);
 
+  // Icon-rail labels. The rail's nav scrolls on short windows, which would clip CSS ::after tooltips,
+  // so one fixed-position tooltip follows the hovered or keyboard-focused item instead.
+  const [railTip, setRailTip] = useState<{ text: string; top: number; left: number } | null>(null);
+  const showRailTip = (event: SyntheticEvent) => {
+    const item = (event.target as HTMLElement).closest<HTMLElement>(".nav-item[data-tooltip]");
+    if (!item || (event.type === "focus" && !item.matches(":focus-visible"))) { setRailTip(null); return; }
+    const rect = item.getBoundingClientRect();
+    const next = { text: item.dataset.tooltip ?? "", top: rect.top + rect.height / 2, left: rect.right + 10 };
+    setRailTip((current) => current && current.text === next.text && current.top === next.top && current.left === next.left ? current : next);
+  };
+  const hideRailTip = () => setRailTip(null);
+
   const navButton = (item: NavItem, current: string, variant: "side" | "bottom") => (
     <button key={item.id} type="button" className={cx(variant === "side" ? "nav-item" : "bottom-item", current === item.id && "is-active")} aria-current={current === item.id ? "page" : undefined}
       data-tooltip={variant === "side" ? item.label : undefined} onClick={() => void router.root(item.route)}>
@@ -196,12 +208,12 @@ export function Shell() {
     <SearchContext.Provider value={openSearch}>
       <div className="shell">
         <a className="skip-link" href="#main-content">Skip to content</a>
-        <aside className="sidebar" aria-label="Primary">
+        <aside className="sidebar" aria-label="Primary" onMouseOver={showRailTip} onMouseLeave={hideRailTip} onFocus={showRailTip} onBlur={hideRailTip}>
           <div className="sidebar-brand">
             <BrandMark />
             <span className="nav-label brand-text"><strong>Nuvori</strong><span>Yours, by design</span></span>
           </div>
-          <nav className="nav" aria-label="Vault">
+          <nav className="nav" aria-label="Vault" onScroll={hideRailTip}>
             {primaryNav.map((item) => navButton(item, section, "side"))}
             <div className="nav-divider" role="separator" />
             {secondaryNav.map((item) => navButton(item, section, "side"))}
@@ -217,6 +229,7 @@ export function Shell() {
             </button>
           </div>
         </aside>
+        {railTip && <div className="rail-tooltip" aria-hidden="true" style={{ top: railTip.top, left: railTip.left }}>{railTip.text}</div>}
 
         <div className="main-column">
           <header className={cx("topbar", route.page === "home" && "is-home")}>
