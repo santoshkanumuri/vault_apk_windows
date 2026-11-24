@@ -1040,3 +1040,18 @@ details[open]::details-content { block-size: auto; }
 .browser-ask { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 var(--s4) 10px 60px; font-size: 13px; color: var(--muted); }
 .browser-hint { margin: 0; padding: var(--s2) var(--s4) var(--s3); font-size: 12px; }
 @media (max-width: 720px) { .browser-ask { padding-left: var(--s4); } }
+
+/* ---------- UI review fixes (layout and components) ---------- */
+/* W-M3: menus and the search palette show the shared focus ring, not only a faint fill. */
+.menu-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.palette-item.is-active { box-shadow: inset 0 0 0 2px var(--focus); }
+/* W-M4: the selected segment gets a firmer fill and an outline, so it reads at a glance. */
+.segmented button.is-selected { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--outline), 0 1px 2px rgb(0 0 0 / .12); }
+/* W-L2: link buttons and the toast close button get at least a 32px hit area. */
+.link-button { min-height: 32px; padding: 4px 6px; }
+.toast-close { width: 32px; height: 32px; }
+/* W-L4: card labels never go below 11px. */
+.cf-kind { font-size: clamp(11px, 2.6cqw, 13px); }
+.cf-label { font-size: 11px; }
+/* W-L7: no backwards sweep when a code's period restarts. */
+.ring.is-reset .ring-value { transition: none; }
