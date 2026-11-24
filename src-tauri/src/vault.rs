@@ -90,7 +90,14 @@ pub struct LocalNote {
     pub created_at: i64,
     pub updated_at: i64,
     pub group_ids: Vec<String>,
+    /// Rich note formatting (docs/RICH-NOTES-PLAN.md), kept in the entry's `fourthValue`; empty for plain notes.
+    #[serde(default)]
+    pub rich: String,
 }
+
+/// Rich note JSON is at most 512 KiB, and with the text it must fit one sync payload.
+const MAX_RICH_NOTE_BYTES: usize = 512 * 1024;
+const MAX_NOTE_PAYLOAD_BYTES: usize = 1_000_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -505,7 +512,9 @@ impl UnlockedVault {
 
     pub fn list_notes(&self) -> Result<Vec<LocalNote>, VaultError> {
         let mut statement = self.connection.prepare(
-            "SELECT id, title, body, created_at, updated_at FROM local_notes ORDER BY updated_at DESC, id",
+            "SELECT n.id, n.title, n.body, n.created_at, n.updated_at, d.data_json
+             FROM local_notes n LEFT JOIN local_note_details d ON d.id = n.id
+             ORDER BY n.updated_at DESC, n.id",
         )?;
         let notes = statement.query_map([], |row| {
             Ok(LocalNote {
@@ -515,6 +524,7 @@ impl UnlockedVault {
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
                 group_ids: Vec::new(),
+                rich: rich_from_details(row.get::<_, Option<String>>(5)?.as_deref()),
             })
         })?;
         let mut notes = notes.collect::<Result<Vec<_>, _>>()?;
@@ -531,9 +541,39 @@ impl UnlockedVault {
         body: &str,
         group_ids: Option<Vec<String>>,
     ) -> Result<LocalNote, VaultError> {
+        self.save_rich_note(id, title, body, None, group_ids)
+    }
+
+    /// Saves a note. `rich` is its formatting JSON ("" for a plain note); `None` keeps what the note had,
+    /// and readers fall back to the text when it no longer matches.
+    pub fn save_rich_note(
+        &mut self,
+        id: Option<&str>,
+        title: &str,
+        body: &str,
+        rich: Option<&str>,
+        group_ids: Option<Vec<String>>,
+    ) -> Result<LocalNote, VaultError> {
         let title = title.trim();
         let body = body.trim();
         if title.is_empty() || body.is_empty() || title.len() > 500 || body.len() > 1_048_576 {
+            return Err(VaultError::InvalidNote);
+        }
+        let rich = match (rich, id) {
+            (Some(rich), _) => rich.to_owned(),
+            (None, Some(id)) => {
+                let details: Option<String> = self
+                    .connection
+                    .query_row("SELECT data_json FROM local_note_details WHERE id = ?1", [id], |row| row.get(0))
+                    .optional()?;
+                rich_from_details(details.as_deref())
+            }
+            (None, None) => String::new(),
+        };
+        if rich.len() > MAX_RICH_NOTE_BYTES
+            || body.len() + rich.len() > MAX_NOTE_PAYLOAD_BYTES
+            || !(rich.is_empty() || serde_json::from_str::<serde_json::Value>(&rich).is_ok_and(|value| value.is_object()))
+        {
             return Err(VaultError::InvalidNote);
         }
         let now = std::time::SystemTime::now()
@@ -582,6 +622,7 @@ impl UnlockedVault {
                 created_at,
                 updated_at: now,
                 group_ids: group_ids.clone(),
+                rich: rich.clone(),
             }
         } else {
             LocalNote {
@@ -591,6 +632,7 @@ impl UnlockedVault {
                 created_at: now,
                 updated_at: now,
                 group_ids: group_ids.clone(),
+                rich: rich.clone(),
             }
         };
         self.write_note_change(&note, ChangeKind::Upsert, |transaction| {
@@ -623,6 +665,7 @@ impl UnlockedVault {
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
                         group_ids: Vec::new(),
+                        rich: String::new(),
                     })
                 },
             )
@@ -2311,6 +2354,7 @@ impl UnlockedVault {
                 .unwrap_or_else(|| note_sync_json(note));
             entry["title"] = note.title.clone().into();
             entry["notes"] = note.body.clone().into();
+            entry["fourthValue"] = note.rich.clone().into();
             entry["createdAt"] = note.created_at.into();
             entry["updatedAt"] = note.updated_at.into();
             serde_json::json!({"entry": entry, "groupIds": note.group_ids})
@@ -2481,10 +2525,18 @@ fn insert_manifest(transaction: &Transaction<'_>, photo_id: &str, entry_id: &str
     Ok(())
 }
 
+/// A note's formatting from its stored entry JSON (`fourthValue`), or "" when it has none.
+fn rich_from_details(details: Option<&str>) -> String {
+    details
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .and_then(|entry| entry.get("fourthValue").and_then(|value| value.as_str()).map(str::to_owned))
+        .unwrap_or_default()
+}
+
 pub(crate) fn note_sync_json(note: &LocalNote) -> serde_json::Value {
     serde_json::json!({
         "id": note.id, "type": "NOTE", "title": note.title,
-        "primaryValue": "", "secondaryValue": "", "tertiaryValue": "", "fourthValue": "",
+        "primaryValue": "", "secondaryValue": "", "tertiaryValue": "", "fourthValue": note.rich,
         "cardKind": "CREDIT", "network": "", "totpAlgorithm": "SHA1", "totpDigits": 6,
         "totpPeriod": 30, "linkedApps": "", "autofillSignatures": "", "autofillOrigins": "",
         "linkedAuthenticatorId": "", "notes": note.body, "color": 0xFF08704A_u64,
@@ -3164,6 +3216,40 @@ mod tests {
         assert!(vault.trashed_items().unwrap().is_empty());
         // The restore is an ordinary signed change, so it syncs like a new item.
         assert!(ChangeStore::record(&vault.connection, "entry", new_id).unwrap().is_some());
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rich_note_formatting_is_saved_synced_and_kept_by_plain_edits() {
+        let directory = std::env::temp_dir().join(format!("nuvori-rich-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        // The "inline marks" fixture from docs/rich-notes/fixtures.json, as the Android app writes it.
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!("../../docs/rich-notes/fixtures.json")).unwrap();
+        let fixture = &fixtures["fixtures"][0];
+        let (plain, rich) = (fixture["plain"].as_str().unwrap(), fixture["encoded"].as_str().unwrap());
+        let note = vault.save_rich_note(None, "Formatted", plain, Some(rich), None).unwrap();
+        assert_eq!(note.rich, rich);
+        let stored = |vault: &mut UnlockedVault| -> serde_json::Value {
+            let json: String = vault.connection().query_row("SELECT data_json FROM local_note_details WHERE id = ?1", [&note.id], |row| row.get(0)).unwrap();
+            serde_json::from_str(&json).unwrap()
+        };
+        assert_eq!(stored(&mut vault)["fourthValue"], rich, "the sync entry carries the formatting byte for byte");
+        assert_eq!(stored(&mut vault)["notes"], plain);
+        assert_eq!(vault.list_notes().unwrap()[0].rich, rich);
+
+        // An edit that sends no formatting keeps it; readers see the text changed and show the text.
+        vault.save_note(Some(&note.id), "Formatted", "Edited as plain text", None).unwrap();
+        assert_eq!(vault.list_notes().unwrap()[0].rich, rich);
+        // Saving it as a plain note clears it.
+        vault.save_rich_note(Some(&note.id), "Formatted", "Plain now", Some(""), None).unwrap();
+        assert_eq!(vault.list_notes().unwrap()[0].rich, "");
+        assert_eq!(stored(&mut vault)["fourthValue"], "");
+
+        for bad in ["not json", "[1,2]", &"x".repeat(MAX_RICH_NOTE_BYTES + 1)] {
+            assert!(matches!(vault.save_rich_note(None, "Bad", "Body", Some(bad), None), Err(VaultError::InvalidNote)));
+        }
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }

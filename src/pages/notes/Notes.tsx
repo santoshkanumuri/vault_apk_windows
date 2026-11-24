@@ -3,7 +3,7 @@ import { FileText, Folder, Pencil, Plus, Save, SearchX, Trash2, X } from "lucide
 import { Button, IconButton } from "../../components/Button";
 import { Avatar, EmptyState } from "../../components/Display";
 import { CopyButton } from "../../components/DetailField";
-import { Checkbox, TextArea, TextField } from "../../components/Field";
+import { Checkbox, TextField } from "../../components/Field";
 import { ListRow, useNewIds } from "../../components/ListRow";
 import { Spinner } from "../../components/Spinner";
 import { StatusBanner } from "../../components/Status";
@@ -11,7 +11,7 @@ import { useConfirm } from "../../app/confirm";
 import { useRouteState, useRouter } from "../../app/router";
 import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
-import { api, type VaultGroup } from "../../lib/api";
+import { api, type LocalNote, type VaultGroup } from "../../lib/api";
 import { foldersFor, sortItems, type SortMode } from "../../lib/entries";
 import { formatDateTime, plural, relativeTime } from "../../lib/format";
 import { buildIndex, matchesFilter } from "../../lib/search";
@@ -19,6 +19,19 @@ import { deleteMessage, restoreDeleted } from "../../lib/trash";
 import { FolderDialog } from "../FolderDialog";
 import { useUnsavedGuard } from "../items/ItemEditor";
 import { FilterInput, FolderPicker, SortPicker } from "../items/Toolbar";
+import { load, NoteTooLargeError, plainText, sameDocument, storageFields, type Loaded, type RichDocument } from "../../lib/richNote";
+import { toggleChecked } from "../../lib/richNoteEdit";
+import { RichNoteEditor } from "./RichNoteEditor";
+import { RichNoteView } from "./RichNoteView";
+
+const loadNote = (note: LocalNote): Loaded => load(note.body, note.rich ?? "");
+
+/** Why a note shows as plain text, when it has formatting this app can't use. */
+function FormattingNotice({ source, editing }: { source: Loaded["source"]; editing?: boolean }) {
+  if (source === "diverged") return <StatusBanner kind="info">This note's text was changed in an app without formatting, so it shows as plain text.</StatusBanner>;
+  if (source === "newer") return <StatusBanner kind="warning">{editing ? "This note has formatting from a newer version of Nuvori. Saving it here keeps the text but removes that formatting." : "This note has formatting from a newer version of Nuvori, so it shows as plain text here."}</StatusBanner>;
+  return null;
+}
 
 export function NotesListPage() {
   const { notes, groups, loaded } = useVault();
@@ -76,8 +89,18 @@ export function NoteDetailPage({ id }: { id: string }) {
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const note = notes.find((item) => item.id === id);
-  if (!note) return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title="This note isn't here anymore" action={<Button onClick={() => void router.back()}>Go back</Button>} /></div> : <Spinner label="Loading" />}</div>;
+  const shown = useMemo(() => (note ? loadNote(note) : null), [note]);
+  if (!note || !shown) return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title="This note isn't here anymore" action={<Button onClick={() => void router.back()}>Go back</Button>} /></div> : <Spinner label="Loading" />}</div>;
   const folderNames = groups.filter((group) => note.groupIds?.includes(group.id)).map((group) => group.name);
+
+  const toggle = async (index: number) => {
+    try {
+      const [body, rich] = storageFields(toggleChecked(shown.document, index));
+      upsertNote(await api.saveNote({ id: note.id, title: note.title, body, groupIds: note.groupIds ?? [], rich }));
+    } catch (failure) {
+      toast.error(failure, "Couldn't update the checklist.");
+    }
+  };
 
   const remove = async () => {
     if (!(await confirm({ title: `Delete "${note.title}"?`, message: deleteMessage, confirmLabel: "Delete", danger: true }))) return;
@@ -122,7 +145,8 @@ export function NoteDetailPage({ id }: { id: string }) {
           <IconButton label="Delete" icon={Trash2} className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
         </div>
       </section>
-      <article className="card card-padded note-body">{note.body}</article>
+      <FormattingNotice source={shown.source} />
+      <article className="card card-padded note-body"><RichNoteView document={shown.document} onToggleCheck={shown.source === "rich" || shown.source === "plain" ? (index) => void toggle(index) : undefined} /></article>
       {folderNames.length > 0 && <div className="tag-list">{folderNames.map((name) => <span className="tag" key={name}><Folder aria-hidden="true" />{name}</span>)}</div>}
       <p className="detail-meta">Updated {formatDateTime(note.updatedAt)} · Created {formatDateTime(note.createdAt)}</p>
     </div>
@@ -134,12 +158,14 @@ export function NoteEditorPage({ id }: { id?: string }) {
   const router = useRouter();
   const toast = useToast();
   const existing = id ? notes.find((note) => note.id === id) : undefined;
-  const initial = useMemo(() => ({ title: existing?.title ?? "", body: existing?.body ?? "", groupIds: [...(existing?.groupIds ?? [])] }), [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const initial = useMemo(() => ({ title: existing?.title ?? "", groupIds: [...(existing?.groupIds ?? [])] }), [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const opened = useMemo(() => (existing ? loadNote(existing) : load("", "")), [existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState(initial);
+  const [noteDoc, setNoteDoc] = useState<RichDocument>(opened.document);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const form = useRef<HTMLFormElement>(null);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial) || !sameDocument(noteDoc, opened.document);
   useUnsavedGuard(dirty && !busy);
   const folders = foldersFor(groups, "NOTE");
 
@@ -153,10 +179,18 @@ export function NoteEditorPage({ id }: { id?: string }) {
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!draft.title.trim() || !draft.body.trim()) { setError("Add a title and some text."); return; }
+    let fields: [string, string];
+    try {
+      fields = storageFields(noteDoc);
+    } catch (failure) {
+      setError(failure instanceof NoteTooLargeError ? failure.message : "This note can't be saved.");
+      return;
+    }
+    const [body, rich] = fields;
+    if (!draft.title.trim() || !plainText(noteDoc).trim()) { setError("Add a title and some text."); return; }
     setBusy(true); setError("");
     try {
-      const saved = await api.saveNote({ id: existing?.id, title: draft.title.trim(), body: draft.body, groupIds: draft.groupIds });
+      const saved = await api.saveNote({ id: existing?.id, title: draft.title.trim(), body, groupIds: draft.groupIds, rich });
       upsertNote(saved);
       toast.success("Note saved");
       router.setGuard(null);
@@ -176,7 +210,8 @@ export function NoteEditorPage({ id }: { id?: string }) {
       <form ref={form} className="card card-padded form-stack" onSubmit={(event) => void save(event)} noValidate>
         {error && <StatusBanner kind="error">{error}</StatusBanner>}
         <TextField label="Title" value={draft.title} onValue={(title) => setDraft((current) => ({ ...current, title }))} maxLength={500} autoFocus={!existing} required />
-        <TextArea label="Note" value={draft.body} onValue={(body) => setDraft((current) => ({ ...current, body }))} rows={12} required />
+        <FormattingNotice source={opened.source} editing />
+        <RichNoteEditor label="Note" initial={opened.document} onChange={setNoteDoc} />
         {folders.length > 0 && (
           <fieldset className="fieldset">
             <legend>Folders</legend>

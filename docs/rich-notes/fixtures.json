@@ -1,0 +1,524 @@
+{
+  "fixtures": [
+    {
+      "name": "inline marks",
+      "plain": "Hello",
+      "hash": "185f8db32271fe25f561a6fc938b2e26",
+      "document": {
+        "format": "nuvori.richnote",
+        "version": 1,
+        "plainHash": "185f8db32271fe25f561a6fc938b2e26",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "H",
+                "bold": true,
+                "italic": true,
+                "underline": true,
+                "strike": true
+              },
+              {
+                "text": "e",
+                "code": true
+              },
+              {
+                "text": "l",
+                "color": "red",
+                "bg": "yellow"
+              },
+              {
+                "text": "l",
+                "link": "https://example.com/path?q=1"
+              },
+              {
+                "text": "o"
+              }
+            ]
+          }
+        ]
+      },
+      "encoded": "{\"format\":\"nuvori.richnote\",\"version\":1,\"plainHash\":\"185f8db32271fe25f561a6fc938b2e26\",\"blocks\":[{\"type\":\"paragraph\",\"spans\":[{\"text\":\"H\",\"bold\":true,\"italic\":true,\"underline\":true,\"strike\":true},{\"text\":\"e\",\"code\":true},{\"text\":\"l\",\"color\":\"red\",\"bg\":\"yellow\"},{\"text\":\"l\",\"link\":\"https://example.com/path?q=1\"},{\"text\":\"o\"}]}]}"
+    },
+    {
+      "name": "every block type",
+      "plain": "Trip\n☑ Charger\n☐ Adapter\n  • Nested\n1. First\n2. Second\n> Quoted\n———\nA | B\n1 | 2",
+      "hash": "824cbd2e97e7000f5722d43d24f334c4",
+      "document": {
+        "format": "nuvori.richnote",
+        "version": 1,
+        "plainHash": "824cbd2e97e7000f5722d43d24f334c4",
+        "blocks": [
+          {
+            "type": "heading",
+            "level": 2,
+            "spans": [
+              {
+                "text": "Trip"
+              }
+            ]
+          },
+          {
+            "type": "check",
+            "checked": true,
+            "spans": [
+              {
+                "text": "Charger"
+              }
+            ]
+          },
+          {
+            "type": "check",
+            "checked": false,
+            "spans": [
+              {
+                "text": "Adapter"
+              }
+            ]
+          },
+          {
+            "type": "bullet",
+            "indent": 1,
+            "spans": [
+              {
+                "text": "Nested",
+                "italic": true
+              }
+            ]
+          },
+          {
+            "type": "numbered",
+            "spans": [
+              {
+                "text": "First"
+              }
+            ]
+          },
+          {
+            "type": "numbered",
+            "spans": [
+              {
+                "text": "Second"
+              }
+            ]
+          },
+          {
+            "type": "quote",
+            "spans": [
+              {
+                "text": "Quoted"
+              }
+            ]
+          },
+          {
+            "type": "divider"
+          },
+          {
+            "type": "table",
+            "header": true,
+            "rows": [
+              [
+                {
+                  "spans": [
+                    {
+                      "text": "A"
+                    }
+                  ]
+                },
+                {
+                  "spans": [
+                    {
+                      "text": "B",
+                      "bold": true
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "spans": [
+                    {
+                      "text": "1"
+                    }
+                  ]
+                },
+                {
+                  "spans": [
+                    {
+                      "text": "2"
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        ]
+      },
+      "encoded": "{\"format\":\"nuvori.richnote\",\"version\":1,\"plainHash\":\"824cbd2e97e7000f5722d43d24f334c4\",\"blocks\":[{\"type\":\"heading\",\"level\":2,\"spans\":[{\"text\":\"Trip\"}]},{\"type\":\"check\",\"checked\":true,\"spans\":[{\"text\":\"Charger\"}]},{\"type\":\"check\",\"checked\":false,\"spans\":[{\"text\":\"Adapter\"}]},{\"type\":\"bullet\",\"indent\":1,\"spans\":[{\"text\":\"Nested\",\"italic\":true}]},{\"type\":\"numbered\",\"spans\":[{\"text\":\"First\"}]},{\"type\":\"numbered\",\"spans\":[{\"text\":\"Second\"}]},{\"type\":\"quote\",\"spans\":[{\"text\":\"Quoted\"}]},{\"type\":\"divider\"},{\"type\":\"table\",\"header\":true,\"rows\":[[{\"spans\":[{\"text\":\"A\"}]},{\"spans\":[{\"text\":\"B\",\"bold\":true}]}],[{\"spans\":[{\"text\":\"1\"}]},{\"spans\":[{\"text\":\"2\"}]}]]}]}"
+    },
+    {
+      "name": "normalizing: merged spans, unknown values dropped, unsafe link removed",
+      "plain": "Plain line\n\nSecond paragraph",
+      "hash": "0e6a658aeb546e1a21438e827c9931f3",
+      "document": {
+        "format": "nuvori.richnote",
+        "version": 1,
+        "plainHash": "0e6a658aeb546e1a21438e827c9931f3",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "Plain ",
+                "bold": true
+              },
+              {
+                "text": "line",
+                "bold": true,
+                "color": "chartreuse"
+              }
+            ]
+          },
+          {
+            "type": "unknown-block",
+            "spans": [
+              {
+                "text": "ignored"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "spans": []
+          },
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "Second ",
+                "link": "javascript:alert(1)"
+              },
+              {
+                "text": "paragraph",
+                "future": 1
+              }
+            ]
+          }
+        ]
+      },
+      "normalized": {
+        "format": "nuvori.richnote",
+        "version": 1,
+        "plainHash": "0e6a658aeb546e1a21438e827c9931f3",
+        "blocks": [
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "Plain line",
+                "bold": true
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "spans": []
+          },
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "Second paragraph"
+              }
+            ]
+          }
+        ]
+      },
+      "encoded": "{\"format\":\"nuvori.richnote\",\"version\":1,\"plainHash\":\"0e6a658aeb546e1a21438e827c9931f3\",\"blocks\":[{\"type\":\"paragraph\",\"spans\":[{\"text\":\"Plain line\",\"bold\":true}]},{\"type\":\"paragraph\",\"spans\":[]},{\"type\":\"paragraph\",\"spans\":[{\"text\":\"Second paragraph\"}]}]}"
+    },
+    {
+      "name": "unicode, colors, nesting and code",
+      "plain": "Héllo 👋 wörld\nSmall\ngray red orange yellow green teal blue purple pink \nMail me or x < y & \"z\"\n1. One\n  1. One A\n  2. One B\n2. Two\n        • Deep\n  indented code\twith tab\n | x\na | b | \nAfter",
+      "hash": "9bf897ccb60bbc6c2b7859a1c1529565",
+      "document": {
+        "format": "nuvori.richnote",
+        "version": 1,
+        "plainHash": "",
+        "blocks": [
+          {
+            "type": "heading",
+            "level": 1,
+            "spans": [
+              {
+                "text": "Héllo 👋 wörld"
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "level": 3,
+            "spans": [
+              {
+                "text": "Small"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "gray ",
+                "color": "gray",
+                "bg": "pink"
+              },
+              {
+                "text": "red ",
+                "color": "red",
+                "bg": "purple"
+              },
+              {
+                "text": "orange ",
+                "color": "orange",
+                "bg": "blue"
+              },
+              {
+                "text": "yellow ",
+                "color": "yellow",
+                "bg": "teal"
+              },
+              {
+                "text": "green ",
+                "color": "green",
+                "bg": "green"
+              },
+              {
+                "text": "teal ",
+                "color": "teal",
+                "bg": "yellow"
+              },
+              {
+                "text": "blue ",
+                "color": "blue",
+                "bg": "orange"
+              },
+              {
+                "text": "purple ",
+                "color": "purple",
+                "bg": "red"
+              },
+              {
+                "text": "pink ",
+                "color": "pink",
+                "bg": "gray"
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "Mail me",
+                "link": "mailto:me@example.com"
+              },
+              {
+                "text": " or "
+              },
+              {
+                "text": "x < y & \"z\"",
+                "code": true
+              }
+            ]
+          },
+          {
+            "type": "numbered",
+            "spans": [
+              {
+                "text": "One"
+              }
+            ]
+          },
+          {
+            "type": "numbered",
+            "indent": 1,
+            "spans": [
+              {
+                "text": "One A"
+              }
+            ]
+          },
+          {
+            "type": "numbered",
+            "indent": 1,
+            "spans": [
+              {
+                "text": "One B"
+              }
+            ]
+          },
+          {
+            "type": "numbered",
+            "spans": [
+              {
+                "text": "Two"
+              }
+            ]
+          },
+          {
+            "type": "bullet",
+            "indent": 4,
+            "spans": [
+              {
+                "text": "Deep"
+              }
+            ]
+          },
+          {
+            "type": "code",
+            "spans": [
+              {
+                "text": "  indented code\twith tab"
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "header": false,
+            "rows": [
+              [
+                {
+                  "spans": []
+                },
+                {
+                  "spans": [
+                    {
+                      "text": "x",
+                      "underline": true
+                    }
+                  ]
+                }
+              ],
+              [
+                {
+                  "spans": [
+                    {
+                      "text": "a | b"
+                    }
+                  ]
+                },
+                {
+                  "spans": []
+                }
+              ]
+            ]
+          },
+          {
+            "type": "paragraph",
+            "spans": [
+              {
+                "text": "After"
+              }
+            ]
+          }
+        ]
+      },
+      "encoded": "{\"format\":\"nuvori.richnote\",\"version\":1,\"plainHash\":\"9bf897ccb60bbc6c2b7859a1c1529565\",\"blocks\":[{\"type\":\"heading\",\"level\":1,\"spans\":[{\"text\":\"Héllo 👋 wörld\"}]},{\"type\":\"heading\",\"level\":3,\"spans\":[{\"text\":\"Small\"}]},{\"type\":\"paragraph\",\"spans\":[{\"text\":\"gray \",\"color\":\"gray\",\"bg\":\"pink\"},{\"text\":\"red \",\"color\":\"red\",\"bg\":\"purple\"},{\"text\":\"orange \",\"color\":\"orange\",\"bg\":\"blue\"},{\"text\":\"yellow \",\"color\":\"yellow\",\"bg\":\"teal\"},{\"text\":\"green \",\"color\":\"green\",\"bg\":\"green\"},{\"text\":\"teal \",\"color\":\"teal\",\"bg\":\"yellow\"},{\"text\":\"blue \",\"color\":\"blue\",\"bg\":\"orange\"},{\"text\":\"purple \",\"color\":\"purple\",\"bg\":\"red\"},{\"text\":\"pink \",\"color\":\"pink\",\"bg\":\"gray\"}]},{\"type\":\"paragraph\",\"spans\":[{\"text\":\"Mail me\",\"link\":\"mailto:me@example.com\"},{\"text\":\" or \"},{\"text\":\"x < y & \\\"z\\\"\",\"code\":true}]},{\"type\":\"numbered\",\"spans\":[{\"text\":\"One\"}]},{\"type\":\"numbered\",\"indent\":1,\"spans\":[{\"text\":\"One A\"}]},{\"type\":\"numbered\",\"indent\":1,\"spans\":[{\"text\":\"One B\"}]},{\"type\":\"numbered\",\"spans\":[{\"text\":\"Two\"}]},{\"type\":\"bullet\",\"indent\":4,\"spans\":[{\"text\":\"Deep\"}]},{\"type\":\"code\",\"spans\":[{\"text\":\"  indented code\\twith tab\"}]},{\"type\":\"table\",\"header\":false,\"rows\":[[{\"spans\":[]},{\"spans\":[{\"text\":\"x\",\"underline\":true}]}],[{\"spans\":[{\"text\":\"a | b\"}]},{\"spans\":[]}]]},{\"type\":\"paragraph\",\"spans\":[{\"text\":\"After\"}]}]}"
+    }
+  ],
+  "links": [
+    {
+      "input": "https://example.com/path?q=1#top",
+      "safe": "https://example.com/path?q=1#top"
+    },
+    {
+      "input": "http://user@example.com:8080/a",
+      "safe": "http://user@example.com:8080/a"
+    },
+    {
+      "input": "https://[::1]:443/x",
+      "safe": "https://[::1]:443/x"
+    },
+    {
+      "input": "mailto:me@example.com",
+      "safe": "mailto:me@example.com"
+    },
+    {
+      "input": "MAILTO:me@example.com",
+      "safe": "MAILTO:me@example.com"
+    },
+    {
+      "input": "javascript:alert(1)",
+      "safe": null
+    },
+    {
+      "input": "data:text/html,hi",
+      "safe": null
+    },
+    {
+      "input": "file:///C:/secret.txt",
+      "safe": null
+    },
+    {
+      "input": "https://exa mple.com",
+      "safe": null
+    },
+    {
+      "input": "https://example.com/a|b",
+      "safe": null
+    },
+    {
+      "input": "https://example.com/%zz",
+      "safe": null
+    },
+    {
+      "input": "https://ex_ample.com/",
+      "safe": null
+    },
+    {
+      "input": "https://exämple.com/",
+      "safe": null
+    },
+    {
+      "input": "https:example.com",
+      "safe": null
+    },
+    {
+      "input": "mailto:",
+      "safe": null
+    },
+    {
+      "input": "  https://example.com  ",
+      "safe": "https://example.com"
+    },
+    {
+      "input": "ftp://example.com",
+      "safe": null
+    }
+  ],
+  "typedLinks": [
+    {
+      "input": "example.com",
+      "link": "https://example.com"
+    },
+    {
+      "input": "me@example.com",
+      "link": "mailto:me@example.com"
+    },
+    {
+      "input": "javascript:alert(1)",
+      "link": null
+    },
+    {
+      "input": "localhost:8080/x",
+      "link": "https://localhost:8080/x"
+    },
+    {
+      "input": "https://example.com",
+      "link": "https://example.com"
+    },
+    {
+      "input": "mailto:a@b.co",
+      "link": "mailto:a@b.co"
+    }
+  ]
+}
