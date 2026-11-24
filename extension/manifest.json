@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nuvori Password Fill",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiKD5PzIhxbn6f44qevObO+T9t0LQNY4kShbHxAAeXELgqvA5jJyIDfCWe586sBNZcFsIdLdok8wwKaw2WINWETUzP5PhigJ8Ofg8/GrV06JVK7iLCTtjmzdA77GKpQu5baqz8ksxLQWsygP6X+R0UNnVPfVyyuKvk97y7bzQso0VTSuwt4TzoRCt+IIlXhN5+JJ+JQ6lI7oBewaZggw/xrtIS4d6vIzNajc012iZlfIxTDJKjnJK9iUVEuggLINMI7SXuAix/ZEPl2bz0PvZ9AX8j+IcQl1Ijt96z07TQWGu2HxiWmMOE59q6CoUjA2XeewUO84oGtVhwakZPN1NVwIDAQAB",
   "description": "Fill and save logins from Nuvori for Windows, right on the page.",
   "minimum_chrome_version": "127",

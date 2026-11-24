@@ -1,6 +1,6 @@
 [package]
 name = "nuvori"
-version = "2.3.0"
+version = "2.3.1"
 default-run = "nuvori"
 description = "Nuvori companion app for Windows"
 authors = ["Nuvori"]
