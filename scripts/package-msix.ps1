@@ -70,9 +70,13 @@ if (Test-Path -LiteralPath $layout) { Remove-Item -LiteralPath $layout -Recurse 
 New-Item -ItemType Directory -Path (Join-Path $layout 'Assets'), (Join-Path $layout 'pairing') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $release 'nuvori.exe'), (Join-Path $release 'nuvori-native-host.exe') -Destination $layout
 Copy-Item -LiteralPath $helper -Destination (Join-Path $layout 'pairing')
-foreach ($logo in 'StoreLogo.png', 'Square44x44Logo.png', 'Square150x150Logo.png') {
-    Copy-Item -LiteralPath (Join-Path $root "src-tauri\icons\$logo") -Destination (Join-Path $layout 'Assets')
+# Sized and unplated logos (scripts\build-msix-icons.py). The unplated taskbar sizes keep Windows
+# from drawing the icon on an accent-colored plate. makepri indexes them below.
+$icons = Join-Path $root 'src-tauri\icons\msix'
+if (-not (Get-ChildItem -LiteralPath $icons -Filter 'Square44x44Logo.targetsize-*_altform-unplated.png' -ErrorAction SilentlyContinue)) {
+    throw "Missing MSIX icons in $icons. Run: python scripts\build-msix-icons.py"
 }
+Copy-Item -Path (Join-Path $icons '*.png') -Destination (Join-Path $layout 'Assets')
 
 # The class ID must equal passkey_plugin::CLSID in src-tauri\src\passkey_plugin.rs.
 # The `unvirtualizedResources` capability keeps exactly these locations outside the package, so
@@ -160,6 +164,16 @@ $manifest = @"
 </Package>
 "@
 [System.IO.File]::WriteAllText((Join-Path $layout 'AppxManifest.xml'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
+
+# resources.pri maps the manifest's logo names to the sized files (scale-*, targetsize-*,
+# altform-unplated). Without it Windows finds only an unqualified file and plates the icon.
+$makepri = Join-Path $kit.FullName 'x64\makepri.exe'
+$priConfig = Join-Path $output 'priconfig.xml'
+& $makepri createconfig /cf $priConfig /dq en-US /pv 10.0.0 /o | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed with exit code $LASTEXITCODE" }
+& $makepri new /pr $layout /cf $priConfig /mn (Join-Path $layout 'AppxManifest.xml') /of (Join-Path $layout 'resources.pri') /o | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "makepri new failed with exit code $LASTEXITCODE" }
+Remove-Item -LiteralPath $priConfig -Force
 
 $package = Join-Path $output ("Nuvori_{0}.{1}_x64{2}.msix" -f $version, $Revision, $(if ($Store) { '_store' } else { '' }))
 & $makeappx pack /d $layout /p $package /o | Out-Null
