@@ -1595,7 +1595,8 @@ impl UnlockedVault {
             .collect())
     }
 
-    /// Logins saved for another page of the same site ("related_logins"), for listing and filling
+    /// Logins saved for the other of a bare site and its "www." name ("related_logins", see
+    /// `browser::login_url_same_site`), for listing and filling
     /// only. Saving and updating stay tied to the exact origin (`matching_logins`).
     pub fn related_logins(&self, origin: &str) -> Result<Vec<(String, String, String)>, VaultError> {
         if browser::canonical_https_origin(origin).is_none() {

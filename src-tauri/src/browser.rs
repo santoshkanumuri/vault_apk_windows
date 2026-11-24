@@ -194,7 +194,7 @@ pub struct CredentialChoice {
     pub title: String,
     pub username: String,
     pub selection_token: String,
-    /// "related_logins": saved for another page of the same site (same registrable domain).
+    /// "related_logins": saved for the other of a bare site and its "www." name (`login_url_same_site`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub related: bool,
     /// "passkey_mark": a passkey for the same account is saved too. Older extensions ignore it.
@@ -616,13 +616,38 @@ pub(crate) fn registrable_site(origin: &str) -> Option<String> {
     psl::domain_str(&host).map(str::to_owned)
 }
 
-/// A login saved for another page of the same site: both HTTPS, a different origin, and the same
-/// registrable domain. Sites under a public suffix (`a.github.io`, `b.github.io`) are different.
+/// A login saved for the other spelling of the same bare site ("related_logins"): both HTTPS, the
+/// same port, and the two hosts are exactly a registrable domain and its "www." name
+/// (`example.com` <-> `www.example.com`). Nothing else counts: a login saved for
+/// `accounts.example.com` is never offered on `www.example.com` or `mail.example.com`, and a login
+/// saved for `example.com` is never offered on `accounts.example.com`, since any subdomain of a site
+/// (user content, a third-party service, a takeover) may be run by someone else. The same origin is an
+/// exact match (`login_url_matches_origin`), not a related one. Public suffixes and IPs never match.
 pub fn login_url_same_site(login_url: &str, request_origin: &str) -> bool {
     let (Some(request), Some(stored)) = (canonical_https_origin(request_origin), stored_login_origin(login_url)) else {
         return false;
     };
-    request != stored && registrable_site(&request).is_some_and(|site| registrable_site(&stored).as_deref() == Some(site.as_str()))
+    if request == stored {
+        return false;
+    }
+    let (Ok(request), Ok(stored)) = (url::Url::parse(&request), url::Url::parse(&stored)) else {
+        return false;
+    };
+    let (Some(url::Host::Domain(request_host)), Some(url::Host::Domain(stored_host))) = (request.host(), stored.host()) else {
+        return false;
+    };
+    if request.port_or_known_default() != stored.port_or_known_default() {
+        return false;
+    }
+    let (request_host, stored_host) = (request_host.to_ascii_lowercase(), stored_host.to_ascii_lowercase());
+    let apex = if request_host.strip_prefix("www.") == Some(stored_host.as_str()) {
+        stored_host
+    } else if stored_host.strip_prefix("www.") == Some(request_host.as_str()) {
+        request_host
+    } else {
+        return false;
+    };
+    psl::domain_str(&apex) == Some(apex.as_str())
 }
 
 /// A short label for a login's saved website: its host without "www.", or the text itself
@@ -896,9 +921,28 @@ mod protocol_addition_tests {
     }
 
     #[test]
-    fn related_logins_share_the_registrable_domain_but_never_a_public_suffix() {
-        assert!(login_url_same_site("https://login.example.com", "https://www.example.com"));
-        assert!(login_url_same_site("https://example.co.uk/sign-in", "https://accounts.example.co.uk"));
+    fn related_logins_are_only_the_www_and_bare_names_of_a_registrable_domain() {
+        // A bare site and its "www." name, either way round, any path.
+        assert!(login_url_same_site("https://example.com/login", "https://www.example.com"));
+        assert!(login_url_same_site("https://www.example.com/sign-in", "https://example.com"));
+        assert!(login_url_same_site("https://example.co.uk/sign-in", "https://www.example.co.uk"));
+        assert!(login_url_same_site("https://WWW.Example.com", "https://example.com"));
+        // Any other subdomain is a different site, in both directions.
+        assert!(!login_url_same_site("https://accounts.example.com", "https://www.example.com"));
+        assert!(!login_url_same_site("https://accounts.example.com", "https://example.com"));
+        assert!(!login_url_same_site("https://accounts.example.com", "https://evil.example.com"));
+        assert!(!login_url_same_site("https://login.example.com", "https://www.example.com"));
+        assert!(!login_url_same_site("https://example.com", "https://accounts.example.com"));
+        assert!(!login_url_same_site("https://www.example.com", "https://accounts.example.com"));
+        assert!(!login_url_same_site("https://example.co.uk/sign-in", "https://accounts.example.co.uk"));
+        // "www." of a subdomain is not the bare registrable domain.
+        assert!(!login_url_same_site("https://accounts.example.com", "https://www.accounts.example.com"));
+        assert!(!login_url_same_site("https://www.accounts.example.com", "https://accounts.example.com"));
+        // The port must be the same.
+        assert!(!login_url_same_site("https://example.com:8443", "https://www.example.com"));
+        assert!(login_url_same_site("https://example.com:8443/x", "https://www.example.com:8443"));
+        // "www.github.io" is not github.io's site: github.io is a public suffix.
+        assert!(!login_url_same_site("https://www.github.io", "https://github.io"));
         assert!(!login_url_same_site("https://www.example.com", "https://www.example.com"), "the same origin is an exact match, not a related one");
         assert!(!login_url_same_site("https://a.github.io", "https://b.github.io"), "github.io is a public suffix");
         assert!(!login_url_same_site("https://example.com", "https://example.com.evil.test"));

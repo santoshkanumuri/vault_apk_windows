@@ -167,6 +167,7 @@ const mockBrowsers: MockBrowser[] = [
   { id: "thorium", name: "Thorium Nightly", family: "unknown", connected: false, askAtStart: true, lastSeen: null, registered: false },
 ];
 const mockAutoTypeState = { enabled: false, preset: "ctrl-alt-a", pressEnter: true };
+const mockAutoLock = { minutes: 15, saved: false };
 const autoTypePresets = [{ id: "ctrl-alt-a", label: "Ctrl+Alt+A" }, { id: "ctrl-alt-k", label: "Ctrl+Alt+K" }, { id: "ctrl-shift-u", label: "Ctrl+Shift+U" }];
 const mockAutoType = () => ({ ...mockAutoTypeState, shortcut: autoTypePresets.find((p) => p.id === mockAutoTypeState.preset)?.label ?? "", state: mockAutoTypeState.enabled ? "active" : "off", presets: autoTypePresets });
 let mockAutoTypeTarget: { title: string; app: string } | null = typeof location !== "undefined" && location.search.includes("autotype")
@@ -186,6 +187,9 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "lock_vault": state.vault = "locked"; log("info", "vault", "Vault locked"); return snapshot();
     case "stop_sharing": state.enrolled = false; log("info", "pairing", "Stopped sharing"); return snapshot();
     case "reset_vault": state.vault = "notConfigured"; state.enrolled = false; return snapshot();
+    case "auto_lock_status": return { minutes: mockAutoLock.minutes, saved: mockAutoLock.saved };
+    case "set_auto_lock": mockAutoLock.minutes = Number(args.minutes) || 0; mockAutoLock.saved = true; return { minutes: mockAutoLock.minutes, saved: true };
+    case "note_user_activity": return undefined;
     case "quick_search_status": return quickSearch();
     case "set_quick_search":
       state.quickSearch = { enabled: args.enabled === true, preset: typeof args.preset === "string" ? args.preset : state.quickSearch.preset };

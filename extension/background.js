@@ -38,6 +38,10 @@ const BADGE = { success: "#1E7A33", warning: "#8A5300", text: "#FFFFFF" };
 // visible before a click. There the list fills only what is tied to the page's own site (its
 // logins and its matching codes); cards, addresses, every code and every login fill from the popup.
 const LIMITED_PAGE_UI = String(chrome.runtime.getURL?.("") || "").startsWith("moz-extension:");
+// On every browser, a page (its content scripts) may list and fill only what is tied to that page's
+// own site. Cross-site lists (every login, every code) and filling a login saved for another site are
+// refused to pages, so a page that tricks the user into a click, or a compromised renderer, can't
+// enumerate the vault or pull another site's password. Older content scripts get "disabled".
 
 // ---------------------------------------------------------------------------
 // Diagnostics: action, status, site host and time only. Never usernames,
@@ -698,38 +702,7 @@ function queryOrigin(tabId, origin, { fresh = false } = {}) {
 }
 
 function forgetQueries(tabId) {
-  for (const cache of [queryCache, allCache]) for (const key of [...cache.keys()]) if (key.startsWith(`${tabId}|`)) cache.delete(key);
-}
-
-// "Search all logins" ("all_logins" hosts): every saved login, listed for this page, so the user can fill
-// any of them here. Tokens from this listing release a login only on the page it was listed for.
-const allCache = new Map();
-
-function queryAll(tabId, origin, { fresh = false } = {}) {
-  const key = `${tabId}|${origin}`;
-  const hit = allCache.get(key);
-  if (!fresh && hit && Date.now() - hit.at < (hit.status === "ok" ? QUERY_TTL_OK_MS : QUERY_TTL_OTHER_MS)) return hit.promise;
-  const entry = { at: Date.now(), status: undefined, promise: undefined };
-  entry.promise = (async () => {
-    let result;
-    try {
-      const response = await native("query_credentials", origin, { all: true });
-      if (response?.status === "ok" && Array.isArray(response.credentials)) {
-        result = { status: "ok", credentials: response.credentials.filter((choice) =>
-          typeof choice?.id === "string" && choice.id && typeof choice.selectionToken === "string") };
-      } else if (response?.status === "locked") result = { status: "locked", credentials: [] };
-      else if (response?.status === "desktop_unavailable") result = { status: "offline", credentials: [] };
-      else result = { status: "error", credentials: [] };
-    } catch (error) {
-      result = { status: hostErrorStatus(error), credentials: [] };
-    }
-    entry.status = result.status;
-    entry.at = Date.now();
-    return result;
-  })();
-  allCache.set(key, entry);
-  while (allCache.size > 16) allCache.delete(allCache.keys().next().value);
-  return entry.promise;
+  for (const key of [...queryCache.keys()]) if (key.startsWith(`${tabId}|`)) queryCache.delete(key);
 }
 
 // ---------------------------------------------------------------------------
@@ -805,7 +778,7 @@ async function handleItems(page, message) {
   if (!settings.inlineSuggestions || settings.noSuggest.includes(page.origin) || !settings.fill[kind]) return { status: "disabled", theme: settings.theme };
   const unavailable = await itemsUnavailable(kind);
   if (unavailable) return { status: unavailable, theme: settings.theme, items: [] };
-  const result = await queryItems(page.tabId, page.origin, kind, kind === "code" && message.all === true);
+  const result = await queryItems(page.tabId, page.origin, kind, false);
   // The code for the account used on the previous page comes first.
   const name = kind === "code" ? (await stepName(page)).toLowerCase() : "";
   const items = name
@@ -839,13 +812,10 @@ async function stillThere(target) {
 async function handleFillItem(page, message) {
   const { kind, id } = message;
   if (!ITEM_FEATURES[kind] || typeof id !== "string" || !id || id.length > 256) return { status: "error", message: "Choose it again." };
+  // Only an item listed for this page's own site (never one from the every-code list) fills here.
   const find = async (fresh) => {
-    for (const all of kind === "code" ? [false, true] : [false]) {
-      const listing = await queryItems(page.tabId, page.origin, kind, all, { fresh });
-      const choice = listing.items.find((entry) => entry.id === id);
-      if (choice || fresh) return { listing, choice };
-    }
-    return { listing: { status: "error", items: [] }, choice: undefined };
+    const listing = await queryItems(page.tabId, page.origin, kind, false, { fresh });
+    return { listing, choice: listing.items.find((entry) => entry.id === id) };
   };
   let { listing, choice } = await find(false);
   if (!choice) ({ listing, choice } = await find(true));
@@ -1399,7 +1369,9 @@ async function handleFillFrame(page, message) {
   const target = scopeOf(page, message, kind);
   if (!target) return { status: "missing", message: "Click the field again." };
   if (kind === "login") {
-    const result = await handleFill(target, { credentialId: message.id, want: target.field.want }, { all: message.all === true });
+    // Only a login listed for the frame's own site fills here (no cross-site "all" fill).
+    if (message.all === true) return { status: "disabled" };
+    const result = await handleFill(target, { credentialId: message.id, want: target.field.want });
     if (result.status !== "ok") return result;
     const payload = { target: "nuvori-frame", action: "fill_login", username: result.username, password: result.password };
     result.password = undefined;
@@ -1645,12 +1617,12 @@ async function handleApprove(page, message) {
  * Release one login for `page` (a page or a frame field). `all`: the user picked it from every
  * saved login ("Search all logins"), so it may be saved for another site.
  */
-async function handleFill(page, message, { all = false } = {}) {
+async function handleFill(page, message) {
   const { credentialId } = message;
   if (typeof credentialId !== "string" || !credentialId || credentialId.length > 256) return { status: "error", message: "Choose an account again." };
   const key = `${page.tabId}|${page.origin}`;
-  const list = (fresh) => all ? queryAll(page.tabId, page.origin, { fresh }) : queryOrigin(page.tabId, page.origin, { fresh });
-  const cache = all ? allCache : queryCache;
+  const list = (fresh) => queryOrigin(page.tabId, page.origin, { fresh });
+  const cache = queryCache;
   let listing = await list(false);
   let choice = listing.credentials.find((entry) => entry.id === credentialId);
   if (!choice) {
@@ -1739,33 +1711,17 @@ async function handlePageMessage(page, message) {
       return result;
     }
     case "inline_items": {
-      if (LIMITED_PAGE_UI && (message.kind !== "code" || message.all === true)) return { status: "disabled" };
+      // Every code (not only this site's) is a cross-site list: refused to pages on every browser.
+      if (message.all === true || (LIMITED_PAGE_UI && message.kind !== "code")) return { status: "disabled" };
       const scope = scopeOf(page, message, message.kind);
       return scope ? handleItems(scope, message) : { status: "missing", message: "Click the field again." };
     }
-    case "inline_all_logins": {
-      if (LIMITED_PAGE_UI) return { status: "disabled" };
-      const settings = await readSettings();
-      const scope = scopeOf(page, message, "login");
-      if (!scope) return { status: "missing", message: "Click the field again.", theme: settings.theme };
-      if (!(await getFeatures()).includes("all_logins") && !(await getFeatures({ refresh: true })).includes("all_logins")) {
-        return { status: featureCache ? "unsupported" : "offline", theme: settings.theme };
-      }
-      const result = await queryAll(page.tabId, scope.origin, { fresh: message.fresh === true });
-      const text = (value, max = 256) => typeof value === "string" ? value.slice(0, max) : "";
-      return {
-        status: result.status, theme: settings.theme, host: hostOf(scope.origin),
-        accounts: result.credentials.slice(0, 1000).map((choice) => ({ id: choice.id, title: text(choice.title), username: text(choice.username), site: text(choice.site, 80),
-          ...(choice.passkey === true ? { passkey: true } : {}) })),
-      };
-    }
-    case "inline_fill_any": {
-      if (LIMITED_PAGE_UI) return { status: "disabled" };
-      // A login the user chose from every saved login, for this page.
-      const result = await handleFill(page, { credentialId: message.id, want: message.want }, { all: true });
-      void logEvent("inline_fill_any", result.status, page.origin);
-      return result;
-    }
+    // Every saved login, and filling one saved for another site: cross-site, refused to pages on
+    // every browser (older content scripts still send these).
+    case "inline_all_logins":
+    case "inline_fill_any":
+      void logEvent(message.action, "disabled", page.origin);
+      return { status: "disabled", theme: (await readSettings()).theme };
     case "inline_fill_item": {
       const result = await handleFillItem(page, message);
       void logEvent(`fill_${ITEM_FEATURES[message.kind] ? message.kind : "item"}`, result.status, page.origin);
@@ -1798,7 +1754,7 @@ async function handlePageMessage(page, message) {
     case "inline_approve":
       return runInOrder(() => handleApprove(page, message));
     case "inline_fill_frame": {
-      if (LIMITED_PAGE_UI && (!["login", "code"].includes(message.kind) || message.all === true)) return { status: "disabled" };
+      if (message.all === true || (LIMITED_PAGE_UI && !["login", "code"].includes(message.kind))) return { status: "disabled" };
       const result = await handleFillFrame(page, message);
       void logEvent(`fill_frame_${ITEM_FEATURES[message.kind] ? message.kind : "item"}`, result.status, page.origin);
       return result;

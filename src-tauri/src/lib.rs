@@ -1,10 +1,12 @@
 pub mod activity;
+mod auto_lock;
 mod auto_type;
 pub mod appearance;
 pub mod browser;
 pub mod browser_ipc;
 mod browser_setup;
 mod browsers;
+mod clipboard;
 pub mod change_store;
 pub mod checkpoint;
 pub mod compaction;
@@ -1958,10 +1960,65 @@ fn lock(state: &ManagedState, browser: &BrowserIpcServer, pairing: &PairingContr
     let snapshot = app.snapshot();
     drop(app);
     browser.set_provider(None);
+    // A password copied from Nuvori goes when the vault locks, if nothing was copied since.
+    clipboard::clear_secret_now();
     if was_unlocked {
         activity::log(Level::Info, Category::Vault, "Vault locked");
     }
     snapshot
+}
+
+/// H-03: the backend's auto-lock (idle, Windows session lock, sleep). Runs on the auto-lock
+/// threads, never the UI thread; a vault that is already locked is left alone.
+fn auto_lock_vault(app: &AppHandle, reason: auto_lock::Reason) {
+    let state = app.state::<ManagedState>();
+    let unlocked = state.lock().is_ok_and(|state| state.unlocked.is_some());
+    if !unlocked {
+        return;
+    }
+    let locked = lock(
+        state.inner(),
+        app.state::<Arc<BrowserIpcServer>>().inner(),
+        app.state::<Arc<PairingController>>().inner(),
+    );
+    if locked.is_ok() {
+        activity::log(Level::Info, Category::Security, reason.message());
+        vault_changed(app, false);
+    }
+}
+
+// Secret copies (L-17). The clipboard formats and the clearing live in `clipboard.rs`.
+
+/// Copies a password or code without clipboard history or cloud clipboard, and clears it after
+/// `clear_after_seconds` (0: never) if nothing was copied since.
+#[tauri::command]
+async fn copy_secret(text: String, clear_after_seconds: u32) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || clipboard::copy_secret(text, clear_after_seconds))
+        .await
+        .map_err(|_| "The clipboard could not be set".to_owned())?
+}
+
+#[tauri::command]
+async fn clear_secret_clipboard() {
+    let _ = tauri::async_runtime::spawn_blocking(clipboard::clear_secret_now).await;
+}
+
+// Auto-lock commands. The timer and the Windows session watcher live in `auto_lock.rs`.
+
+#[tauri::command]
+fn auto_lock_status(auto_lock: State<'_, Arc<auto_lock::AutoLock>>) -> auto_lock::Status {
+    auto_lock.status()
+}
+
+#[tauri::command]
+fn set_auto_lock(minutes: u32, auto_lock: State<'_, Arc<auto_lock::AutoLock>>) -> Result<auto_lock::Status, String> {
+    auto_lock.set_minutes(minutes)
+}
+
+/// The app's windows report user input here (throttled by the page): it restarts the idle time.
+#[tauri::command]
+fn note_user_activity(auto_lock: State<'_, Arc<auto_lock::AutoLock>>) {
+    auto_lock.touch();
 }
 
 /// Tray "Lock vault". Runs off the UI thread because a sync may hold the vault for a moment.
@@ -2766,22 +2823,39 @@ pub fn run() {
                 .path()
                 .resource_dir()?
                 .join("pairing/Nuvori.PairingHelper.exe");
-            let development_helper = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../pairing-helper/publish/Nuvori.PairingHelper.exe");
+            // Only a development build may fall back to the helper in the source tree. A release
+            // build never runs a program from a path baked in on the build machine (a folder that
+            // could exist, and be writable, on the user's PC); without the packaged helper,
+            // pairing reports that the helper is missing.
+            #[cfg(debug_assertions)]
+            let helper_path = if packaged_helper.is_file() {
+                packaged_helper
+            } else {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../pairing-helper/publish/Nuvori.PairingHelper.exe")
+            };
+            #[cfg(not(debug_assertions))]
+            let helper_path = packaged_helper;
             app.manage(Arc::new(PairingController {
                 progress: Mutex::new(PairingProgress::default()),
                 approval: Condvar::new(),
-                helper_path: if packaged_helper.is_file() {
-                    packaged_helper
-                } else {
-                    development_helper
-                },
+                helper_path,
             }));
             app.manage(Arc::new(Mutex::new(AppState {
                 store: VaultStore::new(directory.clone()),
                 unlocked: None,
             })));
             app.manage(Arc::new(BrowserIpcServer::start()?));
+            let auto_lock = auto_lock::AutoLock::new(directory.clone());
+            app.manage(auto_lock.clone());
+            let activity_source = auto_lock.clone();
+            browser_ipc::set_user_activity_hook(move || activity_source.touch());
+            let watched = app.state::<ManagedState>().inner().clone();
+            let lock_handle = app.handle().clone();
+            auto_lock.start(
+                // A vault busy with a sync is checked again on the next tick.
+                move || watched.try_lock().ok().map(|state| state.unlocked.is_some()),
+                move |reason| auto_lock_vault(&lock_handle, reason),
+            );
             app.manage(Arc::new(SyncController::default()));
             app.manage(quick_search::QuickSearch::new(directory.clone()));
             app.state::<quick_search::QuickSearch>().apply(app.handle());
@@ -2916,6 +2990,11 @@ pub fn run() {
             show_main_window,
             quick_search_status,
             set_quick_search,
+            auto_lock_status,
+            set_auto_lock,
+            note_user_activity,
+            copy_secret,
+            clear_secret_clipboard,
             take_quick_search_request,
             get_appearance,
             set_appearance,

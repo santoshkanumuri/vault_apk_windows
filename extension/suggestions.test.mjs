@@ -893,23 +893,17 @@ test("address form: each row shows the value the focused field receives, like th
   assert.deepEqual(row(), ["Home", "Alice Smith · alice@example.com"]);
 });
 
-test("authenticator code: Show all codes on demand, and the picked code fills the field", async () => {
+test("authenticator code: with no code for this site the page offers no list of every code", async () => {
   let totp;
   const state = await detailPage((Input) => [totp = new Input("text", { name: "totp" })], {
     reply: (message) => message.action === "inline_items" ? (message.all ? { status: "ok", items: [{ id: "k2", title: "Bank", subtitle: "me" }] } : { status: "ok", items: [] })
-      : message.action === "inline_fill_item" ? { status: "ok", code: { value: "287082", secondsLeft: 12 } } : { status: "none" } });
+      : { status: "none" } });
   await state.focus(totp);
-  const [dropdown] = state.hosts();
-  assert.match(textOf(dropdown.closedRoot), /No code matches this site/);
-  const showAll = state.find(dropdown, (node) => node.tagName === "BUTTON" && /Show all codes/.test(textOf(node)));
-  state.clock.now += 450;
-  await state.click(showAll);
-  assert.ok(state.requests.some((request) => request.action === "inline_items" && request.all === true));
-  const option = state.find(state.hosts()[0], (node) => node.attrs.role === "option");
-  assert.match(textOf(option), /Bank/);
-  state.clock.now += 450;
-  await state.click(option);
-  assert.equal(totp.value, "287082");
+  assert.ok(state.requests.some((request) => request.action === "inline_items" && request.kind === "code"));
+  assert.equal(state.requests.some((request) => request.all === true), false, "every code is never asked for from the page");
+  for (const host of state.hosts()) {
+    assert.equal(state.find(host, (node) => node.tagName === "BUTTON" && /Show all codes/.test(textOf(node)) && !("hidden" in node.attrs)), undefined);
+  }
 });
 
 test("a code box without authenticator wording stays quiet when nothing matches", async () => {
@@ -1010,45 +1004,21 @@ test("frames: a frame passes a child frame's code up to its parent with the chil
   assert.equal(posted.length, 1, "only codes from this page's own frames are passed on");
 });
 
-test("search all logins: any saved login fills here, and one saved for another site asks first", async () => {
+test("search all logins is not offered in the page: no saved login for this site shows only the empty state", async () => {
   const state = await page({ reply: (message) => {
     if (message.action === "inline_query") return { status: "ok", accounts: [] };
-    if (message.action === "inline_all_logins") return { status: "ok", host: "example.com", accounts: [
-      { id: "s", title: "Seedr", username: "me@example.com", site: "seedr.cc" },
-      { id: "e", title: "Example", username: "alice", site: "example.com" }] };
-    if (message.action === "inline_fill_any") return { status: "ok", username: message.id === "s" ? "me@example.com" : "alice", password: "synthetic-secret" };
+    if (message.action === "inline_all_logins") return { status: "ok", host: "example.com", accounts: [{ id: "s", title: "Seedr", username: "me@example.com", site: "seedr.cc" }] };
     return { status: "none" };
   } });
   await state.focus(state.password);
-  assert.ok(state.hosts().every((host) => !host.popoverOpen), "no saved login for this site: no popup on focus");
   state.doc.fire("keydown", { key: "ArrowDown", target: state.password });
   await settle();
   const [dropdown] = state.hosts();
   assert.equal(dropdown.popoverOpen, true);
   assert.match(textOf(dropdown.closedRoot), /No login saved for this site yet/);
-  const search = state.find(dropdown, (node) => node._tag === "BUTTON" && node.textContent === "Search all logins" && !node.attrs.hidden && node.className === "btn");
-  state.clock.now += 450;
-  await state.click(search);
-  await settle();
-  assert.ok(state.requests.some((message) => message.action === "inline_all_logins"));
-  const box = state.find(dropdown, (node) => node.attrs["aria-label"] === "Search all logins");
-  box.value = "seed";
-  box.dispatchEvent({ type: "input" });
-  const rows = state.inside(dropdown).filter((node) => node.attrs.role === "option");
-  assert.equal(rows.length, 1, "the search narrows the list");
-  assert.match(textOf(rows[0]), /me@example\.com · seedr\.cc/);
-  state.clock.now += 450;
-  await state.click(rows[0]);
-  assert.match(textOf(dropdown.closedRoot), /Nuvori saved this login for seedr\.cc\. Fill it on example\.com\?/);
-  assert.equal(state.requests.some((message) => message.action === "inline_fill_any"), false, "nothing fills before the user confirms");
-  const fill = state.find(dropdown, (node) => node._tag === "BUTTON" && node.textContent === "Fill here");
-  state.clock.now += 450;
-  await state.click(fill);
-  await settle();
-  const sent = state.requests.find((message) => message.action === "inline_fill_any");
-  assert.deepEqual([sent.id, sent.want], ["s", "both"]);
-  assert.equal(state.username.value, "me@example.com");
-  assert.equal(state.password.value, "synthetic-secret");
+  assert.doesNotMatch(textOf(dropdown.closedRoot), /search all your logins/);
+  assert.equal(state.find(dropdown, (node) => node._tag === "BUTTON" && node.textContent === "Search all logins" && !("hidden" in node.attrs)), undefined);
+  assert.equal(state.requests.some((message) => ["inline_all_logins", "inline_fill_any"].includes(message.action)), false);
 });
 
 // ---------------------------------------------------------------------------

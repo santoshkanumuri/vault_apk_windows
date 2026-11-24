@@ -75,6 +75,9 @@
   // codes); cards, addresses, every code and every login fill from the toolbar popup instead.
   // (An engine with no IntersectionObserver at all stays fail-closed: nothing activates.)
   const LIMITED_PAGE_UI = typeof IntersectionObserverEntry === "function" && !("isVisible" in IntersectionObserverEntry.prototype);
+  // On every browser the background refuses cross-site lists to pages (every login, every code), so
+  // the in-page list never offers them.
+  const CROSS_SITE_LISTS = false;
   const ACTIVATION_DELAY_MS = 400;
   const BLUR_CLOSE_MS = 150;
   const LOADING_DELAY_MS = 250;
@@ -786,7 +789,7 @@
     if (kind !== "login" && status === "ok") return renderState("info", KINDS[kind].empty);
     if (status === "ok" && response.accounts?.length) return renderAccounts(response.accounts);
     if (status === "ok") {
-      if (LIMITED_PAGE_UI) return renderState("info", "No login saved for this site yet. Sign in and Nuvori will offer to save it.");
+      if (!CROSS_SITE_LISTS) return renderState("info", "No login saved for this site yet. Sign in and Nuvori will offer to save it.");
       return renderState("info", "No login saved for this site yet. Sign in and Nuvori will offer to save it, or search all your logins.", searchButton());
     }
     if (status === "locked") return renderState("warning", "Nuvori is locked. Unlock it to fill this site.", unlockButton("Unlock Nuvori"));
@@ -821,7 +824,7 @@
 
   /** Every saved login, with a search box: the user may fill any of them on this page. */
   async function openSearch() {
-    if (LIMITED_PAGE_UI) return;
+    if (!CROSS_SITE_LISTS) return;
     const field = dropdown.field;
     if (!field?.isConnected) return;
     const frame = dropdown.frameTarget;
@@ -954,9 +957,9 @@
     dropdown.surface.setTheme(theme);
     dropdown.hostLabel.textContent = dropdown.frameTarget?.host || location.host;
     dropdown.kindLabel.textContent = dropdown.kind === "login" ? "" : KINDS[dropdown.kind].label;
-    if (dropdown.kind === "code" && !dropdown.allCodes && !LIMITED_PAGE_UI) dropdown.showAll.removeAttribute("hidden");
+    if (dropdown.kind === "code" && !dropdown.allCodes && CROSS_SITE_LISTS) dropdown.showAll.removeAttribute("hidden");
     else dropdown.showAll.setAttribute("hidden", "");
-    if (dropdown.kind === "login" && !LIMITED_PAGE_UI) dropdown.searchAll.removeAttribute("hidden");
+    if (dropdown.kind === "login" && CROSS_SITE_LISTS) dropdown.searchAll.removeAttribute("hidden");
     else dropdown.searchAll.setAttribute("hidden", "");
     render();
     dropdown.surface.show();
@@ -1068,7 +1071,7 @@
     dropdown.kind = kind;
     dropdown.allCodes = all;
     if (kind === "code" && response?.status === "ok" && !hasItems && !all) {
-      if (LIMITED_PAGE_UI) { closeDropdown(); return; }
+      if (!CROSS_SITE_LISTS) { closeDropdown(); return; }
       showDropdown(field, () => renderState("info", "No code matches this site. Choose Show all codes to pick one."));
       return;
     }
