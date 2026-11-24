@@ -27,6 +27,7 @@ pub mod merge_join;
 mod discovery;
 mod google_drive;
 mod lan_sync;
+mod preauth;
 pub mod membership;
 pub mod membership_exit;
 pub mod migration_inventory;
@@ -1125,6 +1126,8 @@ fn each_way_keeps_its_own_interval_and_retry_delay() {
 
 /// Advertise and accept only while this vault is unlocked and automatic sync is enabled.
 fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync: Arc<SyncController>) {
+    // Security review L-20: an address whose connections keep failing the proof is turned away.
+    let limiter = Arc::new(std::sync::Mutex::new(preauth::PreAuthLimiter::default()));
     thread::spawn(move || loop {
         thread::sleep(Duration::from_millis(500));
         let vault_id = (|| {
@@ -1142,13 +1145,17 @@ fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync
             network.accept()
         };
         let Some(stream) = stream else { continue; };
+        let Ok(source) = stream.peer_addr().map(|address| address.ip()) else { continue; };
+        if !limiter.lock().is_ok_and(|mut limiter| limiter.allow(source, Instant::now())) { drop(stream); continue; }
         if pairing.is_active().unwrap_or(true) || sync.gate.try_lock().is_err() { lan_sync::reply_busy(stream); continue; }
         // The session runs on its own thread so this loop keeps accepting: a second device that
         // connects meanwhile gets a busy reply at once instead of waiting for its timeout.
-        let (state, pairing, sync) = (state.clone(), pairing.clone(), sync.clone());
+        let (state, pairing, sync, limiter) = (state.clone(), pairing.clone(), sync.clone(), limiter.clone());
         thread::spawn(move || {
             let Ok(_guard) = sync.gate.try_lock() else { lan_sync::reply_busy(stream); return; };
-            if let Ok(report) = lan_sync::serve(&state, &pairing.helper_path, stream, &sync.tracker) {
+            let (result, proved) = lan_sync::serve_proved(&state, &pairing.helper_path, stream, &sync.tracker);
+            if let Ok(mut limiter) = limiter.lock() { limiter.finish(source, proved, Instant::now()); }
+            if let Ok(report) = result {
                 if let Ok(mut message) = sync.message.lock() {
                     *message = format!("Sent {} changes and received {} from a paired device.", report.sent, report.received);
                 }
@@ -1537,25 +1544,35 @@ fn join_reverse(
     offer: ReverseOffer,
     password: &str,
 ) -> Result<bool, String> {
-    let stream = offer
-        .accept(|| controller.is_canceled())
-        .map_err(|error| error.to_string())?;
-    controller
-        .attach_socket(&stream)
-        .map_err(|error| error.to_string())?;
-    controller.set_stage("connecting", "Checking the Android pairing request", "")?;
     let identity_store = {
         let app = state.lock().map_err(|_| "Vault state is unavailable")?;
         app.store.identity_store()
     };
-    let mut session = JoinSession::accept(
-        stream,
-        &offer,
-        password,
-        &controller.helper_path,
-        &identity_store,
-    )
-    .map_err(|error| error.to_string())?;
+    // Security review L-20: the first device to dial the QR's port may not be the phone. A
+    // connection that never proves the QR's code is dropped, and the offer waits for the next one
+    // until it expires. Once the code is proved, any failure is final.
+    let mut attempts = 0;
+    let mut session = loop {
+        attempts += 1;
+        let stream = offer
+            .accept(|| controller.is_canceled())
+            .map_err(|error| error.to_string())?;
+        controller
+            .attach_socket(&stream)
+            .map_err(|error| error.to_string())?;
+        controller.set_stage("connecting", "Checking the Android pairing request", "")?;
+        let mut code_proved = false;
+        match JoinSession::accept_proving(stream, &offer, password, &controller.helper_path,
+            &identity_store, &mut code_proved) {
+            Ok(session) => break session,
+            Err(_) if !code_proved && !controller.is_canceled() && attempts < enrollment::REVERSE_ATTEMPTS => {
+                activity::log(Level::Warning, Category::Pairing,
+                    "A device connected to the pairing QR without its code. Still waiting for the phone");
+                controller.set_stage("connecting", "Waiting for the phone to scan the QR", "")?;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    };
     finish_join(state, controller, &identity_store, &mut session)
 }
 

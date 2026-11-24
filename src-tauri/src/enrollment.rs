@@ -33,7 +33,13 @@ pub struct ReverseOffer {
     session: String,
     code: Zeroizing<String>,
     link: Zeroizing<String>,
+    /// The QR stays valid for two minutes from when it was made, however many devices dial in.
+    expires: Instant,
 }
+
+/// Connections a reverse offer takes before it gives up. A nearby device that dials the port first
+/// does not know the code, so its attempt fails and the offer waits for the phone (review L-20).
+pub const REVERSE_ATTEMPTS: usize = 8;
 
 impl ReverseOffer {
     pub fn bind() -> Result<Self, EnrollmentError> {
@@ -68,6 +74,7 @@ impl ReverseOffer {
             session,
             code,
             link,
+            expires: Instant::now() + Duration::from_secs(120),
         })
     }
 
@@ -76,7 +83,7 @@ impl ReverseOffer {
     }
 
     pub fn accept(&self, canceled: impl Fn() -> bool) -> Result<TcpStream, EnrollmentError> {
-        let deadline = Instant::now() + Duration::from_secs(120);
+        let deadline = self.expires;
         loop {
             if canceled() {
                 return Err(EnrollmentError::Canceled);
@@ -196,6 +203,8 @@ impl JoinSession {
             master_password,
             helper_path,
             identity_store,
+            &mut false,
+            None,
         )
     }
 
@@ -206,6 +215,22 @@ impl JoinSession {
         helper_path: &Path,
         identity_store: &DeviceIdentityStore,
     ) -> Result<Self, EnrollmentError> {
+        Self::accept_proving(stream, offer, master_password, helper_path, identity_store, &mut false)
+    }
+
+    /// [Self::accept]. `code_proved` turns true once the device on `stream` has shown it holds the
+    /// QR's code. Until then a failure says nothing about the phone, and the offer can wait for
+    /// another connection.
+    pub fn accept_proving(
+        stream: TcpStream,
+        offer: &ReverseOffer,
+        master_password: &str,
+        helper_path: &Path,
+        identity_store: &DeviceIdentityStore,
+        code_proved: &mut bool,
+    ) -> Result<Self, EnrollmentError> {
+        // Security review L-20: a device that never proves the code cannot hold the offer for long.
+        let deadline = crate::preauth::close_after(stream.try_clone()?, crate::preauth::PRE_AUTH_DEADLINE);
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         stream.set_write_timeout(Some(Duration::from_secs(30)))?;
         let mut frames = SyncFrames::new(stream.try_clone()?, stream.try_clone()?);
@@ -222,6 +247,8 @@ impl JoinSession {
             master_password,
             helper_path,
             identity_store,
+            code_proved,
+            Some(deadline),
         )
     }
 
@@ -231,6 +258,8 @@ impl JoinSession {
         master_password: &str,
         helper_path: &Path,
         identity_store: &DeviceIdentityStore,
+        code_proved: &mut bool,
+        deadline: Option<crate::preauth::DeadlineGuard>,
     ) -> Result<Self, EnrollmentError> {
         if master_password.chars().count() < 12 {
             return Err(EnrollmentError::InvalidPassword);
@@ -249,6 +278,8 @@ impl JoinSession {
             false,
             None,
         )?;
+        *code_proved = true;
+        drop(deadline);
         let password_check = pairing::handshake(
             &mut frames,
             helper_path,

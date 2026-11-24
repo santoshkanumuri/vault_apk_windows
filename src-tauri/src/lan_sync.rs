@@ -575,18 +575,27 @@ pub(crate) fn remember_peer_endpoint(vault: &mut UnlockedVault, vault_id: &str, 
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn serve(state: &ManagedState, helper: &Path, stream: TcpStream,
     tracker: &SyncTracker) -> Result<SyncReport> {
+    serve_proved(state, helper, stream, tracker).0
+}
+
+/// [serve], and whether the connecting device proved membership (or only asked to leave), for
+/// [crate::preauth::PreAuthLimiter].
+pub(crate) fn serve_proved(state: &ManagedState, helper: &Path, stream: TcpStream,
+    tracker: &SyncTracker) -> (Result<SyncReport>, bool) {
     let before = tracker.state.lock().map_or(0, |state| state.generation);
     let result = exchange_role(state, helper, tracker, true, |_| Ok(stream));
     match result {
-        Ok((report, true)) => { tracker.succeed(); Ok(report) }
-        Ok((_, false)) => { tracker.fail(MORE_REMAIN); Err(MORE_REMAIN.into()) }
+        Ok((report, true)) => { tracker.succeed(); (Ok(report), true) }
+        Ok((_, false)) => { tracker.fail(MORE_REMAIN); (Err(MORE_REMAIN.into()), true) }
         Err(error) => {
             // A nearby device outside this group must not replace the paired-device status.
             let authenticated = tracker.state.lock().is_ok_and(|state| state.generation != before);
             if authenticated { tracker.fail(&error); }
-            Err(error)
+            let proved = authenticated || error == LEAVE_ANSWERED;
+            (Err(error), proved)
         }
     }
 }
@@ -731,6 +740,11 @@ fn exchange_role(
     stream.set_read_timeout(Some(if server { Duration::from_secs(5) } else { READ_IDLE })).map_err(network_error)?;
     let _ = stream.set_nodelay(true);
     let timeout_handle = stream.try_clone().map_err(network_error)?;
+    // Security review L-20: a device that has not proved membership gets 20 s in total, however
+    // slowly it sends. Dropped once the proof is accepted, or on any early return.
+    let deadline = if server {
+        Some(crate::preauth::close_after(stream.try_clone().map_err(network_error)?, crate::preauth::PRE_AUTH_DEADLINE))
+    } else { None };
     let reader = stream.try_clone().map_err(network_error)?;
     let mut frames = SyncFrames::new(reader, PacedWriter { stream });
     let mut epoch_secret = crate::membership_exit::transport_epoch_secret(&secret, &vault_id, membership.key_epoch, &random)
@@ -806,8 +820,12 @@ fn exchange_role(
         frames.send(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()).as_bytes(), 4096).map_err(network_error)?;
         let reply = frames.receive(4096).map_err(|error| closed_as(error, REJECTED))?;
         if reply == b"removed1" { return Err(accept_removal(state, &mut frames, &events, &local.device_id, freeze.as_ref())); }
+        // A phone from 2.3.5 checks the proof before it waits for its sync lock, and answers busy
+        // when the lock stays taken. That is a busy peer, not a rejection.
+        if is_busy_reply(&reply) { return Err(BUSY.into()); }
         if reply != b"ok" { return Err(REJECTED.into()); }
     }
+    drop(deadline);
 
     timeout_handle.set_read_timeout(Some(READ_IDLE)).map_err(network_error)?;
     let encoded_secret = Zeroizing::new(URL_SAFE_NO_PAD.encode(&epoch_secret));
@@ -3658,6 +3676,20 @@ mod tests {
         assert_eq!(run(&a.state, &helper, "", &busy, &[busy_address, offline_address], false).unwrap_err(), BUSY);
         busy_server.join().unwrap();
         assert_eq!(busy.consecutive_failures(), 0, "busy peers are reachable and do not extend failure backoff");
+        // A phone from 2.3.5 checks the proof first and may then answer busy (review L-20).
+        let late_listener = std::net::TcpListener::bind((ip, 0)).unwrap();
+        let late_address = late_listener.local_addr().unwrap();
+        let late_server = std::thread::spawn(move || {
+            let stream = late_listener.accept().unwrap().0;
+            let mut frames = SyncFrames::new(stream.try_clone().unwrap(), stream);
+            frames.send(&[7; 32], 4096).unwrap();
+            frames.receive(4096).unwrap();
+            frames.send(BUSY_REPLY, 4096).unwrap();
+        });
+        let late = SyncTracker::default();
+        assert_eq!(run(&a.state, &helper, "", &late, &[late_address, offline_address], false).unwrap_err(), BUSY);
+        late_server.join().unwrap();
+        assert_eq!(late.consecutive_failures(), 0, "busy after the proof is busy, not a rejection");
         let listener = std::net::TcpListener::bind((ip, 0)).unwrap();
         let address = listener.local_addr().unwrap();
         let server_state = b.state.clone();
