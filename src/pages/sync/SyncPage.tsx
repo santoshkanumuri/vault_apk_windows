@@ -7,18 +7,19 @@ import { Segmented, TextField, Toggle } from "../../components/Field";
 import { ProgressBar } from "../../components/Spinner";
 import { StatusBanner, StatusChip } from "../../components/Status";
 import { useConflicts, useMembership, usePhotoSyncStatus, usePolling, useSyncStatus } from "../../app/hooks";
+import { useSyncOverview, type SyncOverviewState } from "../../app/useSyncOverview";
 import { DevicesGroup, PendingLeaveChip, RemovedNoticeBanner } from "./Membership";
 import { useRouter } from "../../app/router";
 import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
 import { api, type ActivityEvent, type SyncStatus } from "../../lib/api";
 import { formatDateTime, plural, relativeTime } from "../../lib/format";
-import { isSyncing, phaseLabel, syncIndicator } from "../../lib/syncState";
+import { isSyncing, phaseLabel } from "../../lib/syncState";
 import { ActivityList } from "../ActivityPage";
 import { useSyncNow } from "../Home";
 import { PairedNotice, PairingCard } from "./Pairing";
 import { CloudCard } from "./Cloud";
-import { strings } from "../../strings";
+import { strings, syncStatusText } from "../../strings";
 
 export function SyncPage() {
   const { snapshot } = useVault();
@@ -30,6 +31,8 @@ export function SyncPage() {
   const membershipShown = Boolean(membership.data && !membership.error && membership.data.devices.length > 0);
   const conflictCount = conflicts.data ? conflicts.data.length : sync.data?.conflicts ?? 0;
   const recent = (activity.data ?? []).filter((event) => event.category === "sync" || event.category === "pairing").slice(0, 6);
+  // One status over Wi-Fi and Google Drive: a success on either counts.
+  const overview = useSyncOverview(sync.data, membershipShown ? membership.data : null, conflictCount);
 
   return (
     <div className="page page-narrow">
@@ -47,7 +50,7 @@ export function SyncPage() {
           </ol>
         </Card>
       )}
-      {snapshot.enrolled ? <ConnectionCard status={sync.data} error={sync.error} reload={sync.reload} /> : <PairingCard />}
+      {snapshot.enrolled ? <ConnectionCard status={sync.data} error={sync.error} reload={sync.reload} overview={overview} /> : <PairingCard />}
       {snapshot.enrolled && <CloudCard />}
 
       {snapshot.enrolled && conflictCount > 0 && (
@@ -69,7 +72,7 @@ export function SyncPage() {
       )}
       {snapshot.enrolled && <PhotoTransfer />}
 
-      {snapshot.enrolled && membershipShown && <DevicesGroup membership={membership.data!} reload={membership.reload} />}
+      {snapshot.enrolled && membershipShown && <DevicesGroup membership={membership.data!} reload={membership.reload} overview={overview} />}
       {snapshot.enrolled && membership.data?.managerLost && <PairingCard />}
       {snapshot.enrolled && !membershipShown && (
         <SettingsGroup title={strings.devices}>
@@ -122,15 +125,22 @@ function PhotoTransfer() {
   );
 }
 
-function ConnectionCard({ status, error, reload }: { status: SyncStatus | null; error: unknown; reload: () => Promise<void> }) {
-  const { snapshot } = useVault();
+function ConnectionCard({ status, error, reload, overview }: { status: SyncStatus | null; error: unknown; reload: () => Promise<void>; overview: SyncOverviewState | null }) {
   const syncNow = useSyncNow(status?.phoneAddress ?? "", reload);
-  const indicator = syncIndicator(snapshot, status, Boolean(error));
   const running = isSyncing(status) || syncNow.busy;
   const total = status?.progressTotal ?? 0;
   const done = status?.progressDone ?? 0;
   const retry = status?.nextRetrySeconds ?? 0;
   const failures = status?.consecutiveFailures ?? 0;
+  const text = overview?.text;
+  const facts = overview?.facts;
+  // Conflicts, set-aside changes, changes waiting here and missing keys have their own banners on this page.
+  const shownBelow = overview?.overview.state === "conflicts" || overview?.overview.state === "waitingHere"
+    || overview?.overview.cause === "rejected";
+  const problem = text && (text.kind === "error" || text.kind === "warning") && !shownBelow;
+  const wifiFact = facts?.wifi === "failed" ? syncStatusText.factCouldntReach : status?.lastSync ? relativeTime(status.lastSync) : syncStatusText.factNotYet;
+  const driveFact = !facts || facts.drive === "off" ? syncStatusText.factOff : facts.drive === "failed" ? syncStatusText.factDidntFinish
+    : facts.lastDriveSync ? relativeTime(facts.lastDriveSync) : syncStatusText.factNotYet;
 
   return (
     <section className="card card-padded connection" aria-labelledby="connection-title">
@@ -138,9 +148,9 @@ function ConnectionCard({ status, error, reload }: { status: SyncStatus | null; 
         <span className="connection-icon" aria-hidden="true"><Smartphone /></span>
         <div className="connection-text">
           <h2 id="connection-title">{strings.yourDevices}</h2>
-          <p className="muted small">{status?.phoneAddress ? status.phoneAddress : "Find paired devices automatically on this network"}</p>
+          <p className="muted small">{text?.lastSynced ?? (status?.phoneAddress ? status.phoneAddress : "Find paired devices automatically on this network")}</p>
         </div>
-        <StatusChip kind={indicator.kind} label={indicator.label} />
+        {text ? <StatusChip kind={text.kind} label={text.title} /> : <StatusChip kind="neutral" label={strings.syncStatusIsUnavailableRightNow} />}
       </div>
 
       {running && status && (
@@ -150,21 +160,24 @@ function ConnectionCard({ status, error, reload }: { status: SyncStatus | null; 
         </div>
       )}
 
-      {!running && indicator.detail && (indicator.kind === "error" || indicator.kind === "warning") && indicator.label !== "Needs review" && (
-        <StatusBanner kind={indicator.kind} title={indicator.label}>
-          {indicator.detail}
-          {failures > 1 && ` Failed ${failures} times in a row.`}
-          {retry > 0 && status?.automatic && ` Retrying in ${retry < 60 ? `${retry}s` : `${Math.round(retry / 60)} min`}.`}
+      {!running && text && problem && (
+        <StatusBanner kind={text.kind} title={text.title}>
+          {text.detail}
+          {overview?.overview.cause === "localProblem" && failures > 1 && ` Failed ${failures} times in a row.`}
+          {overview?.overview.cause === "localProblem" && retry > 0 && status?.automatic && ` Retrying in ${retry < 60 ? `${retry}s` : `${Math.round(retry / 60)} min`}.`}
         </StatusBanner>
       )}
+      {!running && text && !problem && text.detail && <p className="small" aria-live="polite">{text.detail}</p>}
+      {/* A transport that failed while the other one carried the changes: a quiet line, not the headline. */}
+      {text?.note && <p className="muted small">{text.note}</p>}
       {error ? <StatusBanner kind="warning">{strings.syncStatusIsUnavailableRightNow}</StatusBanner> : null}
 
       <dl className="connection-facts">
-        <div><dt>{strings.lastChecked}</dt><dd title={status?.lastAttempt || status?.lastSync ? formatDateTime(status?.lastAttempt || status?.lastSync || "") : undefined}>{relativeTime(status?.lastAttempt || status?.lastSync)}</dd></div>
-        <div><dt>{strings.lastSuccessfulSync}</dt><dd title={status?.lastSync ? formatDateTime(status.lastSync) : undefined}>{relativeTime(status?.lastSync)}</dd></div>
+        <div><dt>{syncStatusText.factLastSynced}</dt><dd title={overview?.overview.lastSynced ? formatDateTime(overview.overview.lastSynced) : undefined}>{relativeTime(overview?.overview.lastSynced || status?.lastSync)}</dd></div>
+        <div><dt>{syncStatusText.factWifi}</dt><dd title={status?.lastSync ? formatDateTime(status.lastSync) : undefined}>{wifiFact}</dd></div>
+        <div><dt>{syncStatusText.factDrive}</dt><dd title={facts?.lastDriveSync ? formatDateTime(facts.lastDriveSync) : undefined}>{driveFact}</dd></div>
         <div><dt>{strings.autoSync}</dt><dd>{status?.automatic ? "On" : "Off"}</dd></div>
       </dl>
-      {!running && status?.message && indicator.kind !== "error" && indicator.kind !== "warning" && <p className="muted small">{status.message}</p>}
 
       <div className="button-row">
         <Button variant="primary" icon={RefreshCw} busy={running} disabled={!status} onClick={() => void syncNow.run()}>{running ? "Syncing changes" : "Sync now"}</Button>

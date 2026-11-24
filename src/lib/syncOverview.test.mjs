@@ -1,0 +1,115 @@
+// Run with `npm test`. The same cases as Android `SyncOverviewTest` and `SyncOverviewTextTest`.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { overviewText, peerAck, peerAckText, syncFacts, syncOverview } from "./syncOverview.ts";
+
+const now = 1_790_000_000_000;
+const minute = 60_000;
+const day = 24 * 60 * minute;
+const peer = (name, { unconfirmed = 0, seenAgo = 5 * minute, reported = true, wifiFailed = false } = {}) =>
+  ({ deviceId: `id-${name}`, name, unconfirmed, reported, lastSeen: seenAgo === null ? 0 : now - seenAgo, wifiFailed });
+const facts = (peers, extra = {}) => ({ now, peers, wifi: "ok", drive: "off", ...extra });
+const both = (f) => { const overview = syncOverview(f); return { overview, text: overviewText(f, overview) }; };
+
+test("the owner's case: Wi-Fi failed and Google Drive delivered everything reads as up to date", () => {
+  const { overview, text } = both(facts([peer("Pixel 8", { wifiFailed: true })], { wifi: "failed", drive: "ok", lastDriveSync: now - minute }));
+  assert.equal(overview.state, "upToDate");
+  assert.equal(text.kind, "success");
+  assert.equal(text.title, "Up to date");
+  assert.equal(text.detail, "Every device has your latest changes.");
+  assert.equal(text.note, "Wi-Fi couldn't reach Pixel 8. Google Drive kept it in sync.");
+  assert.equal(text.lastSynced, "Last synced 1 min ago");
+  const two = both(facts([peer("Pixel 8"), peer("Tablet")], { wifi: "failed", drive: "ok" }));
+  assert.equal(two.text.note, "Wi-Fi couldn't reach your devices. Google Drive kept them in sync.");
+  // Changes still on the way: Drive carries them, so it is waiting, not an error.
+  const waiting = both(facts([peer("Pixel 8", { unconfirmed: 2 })], { wifi: "failed", drive: "ok" }));
+  assert.equal(waiting.overview.state, "waiting");
+  assert.equal(waiting.text.note, "Wi-Fi couldn't reach Pixel 8. Changes go through Google Drive.");
+});
+
+test("a Drive failure is a quiet note while Wi-Fi keeps devices in step", () => {
+  const { overview, text } = both(facts([peer("Pixel 8")], { drive: "failed" }));
+  assert.equal(overview.state, "upToDate");
+  assert.equal(text.note, "Google Drive didn't finish. Wi-Fi kept your devices in sync.");
+});
+
+test("both transports failing, or the only one while changes wait, is an error", () => {
+  const bothFailed = both(facts([peer("Pixel 8")], { wifi: "failed", drive: "failed" }));
+  assert.equal(bothFailed.overview.cause, "bothFailed");
+  assert.equal(bothFailed.text.title, "Sync needs attention");
+  assert.equal(bothFailed.text.detail, "Couldn't reach your devices over Wi-Fi or Google Drive.");
+  assert.equal(bothFailed.text.note, undefined);
+  // Wi-Fi only, every device confirmed: synced, with a quiet note.
+  assert.equal(both(facts([peer("Pixel 8")], { wifi: "failed" })).text.note, "Wi-Fi couldn't reach Pixel 8 on the last check.");
+  const stuck = both(facts([peer("Pixel 8", { unconfirmed: 1 })], { wifi: "failed" }));
+  assert.equal(stuck.overview.cause, "wifiOnlyFailed");
+  assert.equal(stuck.text.detail, "Wi-Fi couldn't reach Pixel 8. Your changes wait until it connects.");
+  assert.equal(stuck.text.note, undefined, "the failure is the headline, not a second line");
+  assert.equal(syncOverview(facts([peer("Pixel 8", { unconfirmed: 1 })], { wifi: "off", drive: "failed" })).cause, "driveOnlyFailed");
+});
+
+test("waiting counts changes not every active device applied, over both transports", () => {
+  const { overview, text } = both(facts([peer("Pixel 8", { unconfirmed: 2 }), peer("Tablet", { unconfirmed: 5 }), peer("PC")]));
+  assert.equal(overview.state, "waiting");
+  assert.equal(overview.waitingChanges, 5);
+  assert.equal(overview.peers["id-PC"], "upToDate");
+  assert.equal(text.title, "Waiting for 2 devices");
+  assert.equal(text.detail, "5 changes aren't on every device yet.");
+  const one = both(facts([peer("Pixel 8", { unconfirmed: 3 }), peer("Tablet")]));
+  assert.equal(one.text.title, "Waiting for Pixel 8");
+  assert.equal(one.text.detail, "Pixel 8 hasn't confirmed 3 changes yet.");
+});
+
+test("a device silent for long with waiting changes is an error; no device heard for days is stale", () => {
+  const silent = both(facts([peer("Tablet", { unconfirmed: 2, seenAgo: 4 * day }), peer("Pixel 8")], { drive: "ok" }));
+  assert.equal(silent.overview.cause, "deviceSilent");
+  assert.equal(silent.text.detail, "Tablet hasn't synced in 4 days and doesn't have your latest changes.");
+  assert.equal(syncOverview(facts([peer("Tablet", { seenAgo: 4 * day }), peer("Pixel 8")])).state, "upToDate");
+  const stale = both(facts([peer("Pixel 8", { seenAgo: 5 * day })], { drive: "ok", lastDriveSync: now - minute }));
+  assert.equal(stale.overview.state, "stale");
+  assert.equal(stale.text.title, "Devices haven't synced in 5 days");
+  assert.equal(stale.text.detail, "Open Nuvori on your other device so it syncs with Google Drive.");
+});
+
+test("real problems stay visible", () => {
+  assert.equal(syncOverview(facts([peer("Pixel 8")], { localProblem: "Photo sync needs more free space." })).cause, "localProblem");
+  assert.equal(syncOverview(facts([peer("Pixel 8")], { rejected: 2 })).cause, "rejected");
+  assert.equal(syncOverview(facts([peer("Pixel 8")], { waitingForKeys: true })).state, "keys");
+  assert.equal(syncOverview(facts([peer("Pixel 8")], { conflicts: 1 })).state, "conflicts");
+  assert.equal(syncOverview(facts([peer("Pixel 8")], { waitingHere: true })).state, "waitingHere");
+  assert.equal(syncOverview(facts([peer("Pixel 8", { seenAgo: null, reported: false })])).state, "notYet");
+  assert.equal(peerAck(peer("Pixel 8", { unconfirmed: 1, seenAgo: null, reported: false }), now), "waiting");
+});
+
+test("device rows", () => {
+  assert.equal(peerAckText(peer("Pixel 8"), "upToDate", now).label, "Up to date");
+  assert.equal(peerAckText(peer("Pixel 8", { unconfirmed: 1 }), "waiting", now).detail, "Waiting for Pixel 8 to confirm 1 change.");
+  const silent = peerAckText(peer("Tablet", { unconfirmed: 2, seenAgo: 6 * day }), "silent", now);
+  assert.equal(silent.kind, "error");
+  assert.equal(silent.detail, "Hasn't synced in 6 days. Open Nuvori on it to catch up.");
+});
+
+test("facts read the backend: unreachable Wi-Fi is a transport failure, other errors stay errors", () => {
+  const sync = { lastSync: new Date(now - day).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "", automatic: true, running: false,
+    message: "", phase: "error", lastError: "No paired device answered", consecutiveFailures: 2 };
+  const cloud = { available: true, connected: true, account: "a", lastSync: new Date(now - minute).toISOString(), lastError: "", connecting: false, needsSignIn: false };
+  const membership = { devices: [
+    { deviceId: "pc", name: "This PC", platform: "windows", status: "active", isManager: false, isThisDevice: true },
+    { deviceId: "phone", name: "Pixel 8", platform: "android", status: "active", isManager: true, isThisDevice: false, lastSeen: now - 2 * minute,
+      counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } },
+    { deviceId: "old", name: "Old", platform: "android", status: "removed", isManager: false, isThisDevice: false },
+  ] };
+  const f = syncFacts(sync, cloud, membership, 0, now);
+  assert.equal(f.wifi, "failed");
+  assert.equal(f.drive, "ok");
+  assert.equal(f.localProblem, undefined);
+  assert.deepEqual(f.peers.map((p) => p.deviceId), ["phone"], "this PC and removed devices never count");
+  assert.equal(syncOverview(f).state, "upToDate");
+  const full = syncFacts({ ...sync, lastError: "Photo sync needs more free space." }, cloud, membership, 0, now);
+  assert.equal(full.wifi, "ok");
+  assert.equal(full.localProblem, "Photo sync needs more free space.");
+  assert.equal(syncFacts(sync, { ...cloud, needsSignIn: true }, membership, 0, now).drive, "failed");
+  // An older backend without `unconfirmed`: not received plus not applied there.
+  const older = { devices: [{ ...membership.devices[1], counts: { checked: true, toSend: 1, toApplyHere: 0, receivedThere: 2, toReceiveHere: 0 } }] };
+  assert.equal(syncFacts(sync, cloud, older, 0, now).peers[0].unconfirmed, 3);
+});

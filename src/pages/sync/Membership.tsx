@@ -13,6 +13,8 @@ import { isUnavailable } from "../../lib/errors";
 import { cx, formatDateTime, plural, relativeTime } from "../../lib/format";
 import { isStale, removeHelp, splitDevices, staleHint } from "../../lib/deviceList";
 import { strings } from "../../strings";
+import { peerAckText } from "../../lib/syncOverview";
+import type { SyncOverviewState } from "../../app/useSyncOverview";
 
 const platformIcon: Record<MemberDevice["platform"], LucideIcon> = { android: Smartphone, windows: Monitor, unknown: CircleHelp };
 
@@ -138,8 +140,16 @@ export function PendingLeaveChip({ membership }: { membership: MembershipStatus 
 
 const changes = (count: number) => plural(count, "change");
 
+/** This device's state by its verified progress over Wi-Fi and Google Drive; null without one. */
+function deviceAck(device: MemberDevice, overview: SyncOverviewState | null | undefined) {
+  if (!overview || device.isThisDevice || device.status === "removed") return null;
+  const peer = overview.facts.peers.find((item) => item.deviceId === device.deviceId);
+  const ack = overview.overview.peers[device.deviceId];
+  return peer && ack ? peerAckText(peer, ack, overview.facts.now) : null;
+}
+
 /** The same states and words as the phone's device card. */
-function deviceChip(device: MemberDevice, membership: MembershipStatus) {
+function deviceChip(device: MemberDevice, membership: MembershipStatus, overview?: SyncOverviewState | null) {
   if (device.status === "removed") return <StatusChip kind="neutral" label={strings.removed} />;
   if (membership.pendingTransferTo === device.deviceId) {
     return membership.transferAccepted ? <StatusChip kind="progress" label={strings.acceptedManagingRole} title={strings.acceptedManagingRole} /> : <StatusChip kind="info" label={strings.waitingToAcceptManagingRole} title={strings.waitingToAcceptManagingRole} />;
@@ -147,23 +157,29 @@ function deviceChip(device: MemberDevice, membership: MembershipStatus) {
   if (device.isThisDevice) return <StatusChip kind="success" label={strings.active} />;
   const counts = device.counts;
   if (counts?.toApplyHere) return <StatusChip kind="warning" label={strings.waitingToApply} />;
-  if (counts && (counts.toSend || counts.toReceiveHere || counts.receivedThere)) return <StatusChip kind="warning" label={strings.changesWaiting} />;
+  // Up to date when its applied progress covers this PC's changes, whichever transport carried them.
+  const ack = deviceAck(device, overview);
+  if (ack && ack.kind !== "success") return <StatusChip kind={ack.kind} label={ack.label} />;
   if (isStale(device)) return <StatusChip kind="warning" label={strings.notSeenRecently} />;
+  if (ack) return <StatusChip kind={ack.kind} label={ack.label} />;
+  if (counts && (counts.toSend || counts.toReceiveHere || counts.receivedThere)) return <StatusChip kind="warning" label={strings.changesWaiting} />;
   if (device.lastSeen) return <StatusChip kind="success" label={strings.active} />;
   return <StatusChip kind="neutral" label={strings.notCheckedYet} />;
 }
 
 /** One line about what still has to move, as on the phone. */
-function deviceDetail(device: MemberDevice, managerName?: string): string {
+function deviceDetail(device: MemberDevice, managerName?: string, overview?: SyncOverviewState | null): string {
   const platform = device.platform === "android" ? "Android" : device.platform === "windows" ? "Windows" : "Unknown device";
   if (device.status === "removed") return `${platform} · Can't sync with your devices. It keeps its own copy, and can pair again as a new device.`;
   if (device.isThisDevice) return platform;
-  if (isStale(device)) return `${platform} · ${staleHint(device, managerName)}`;
+  const ack = deviceAck(device, overview);
+  if (isStale(device) && (!ack || ack.kind === "success")) return `${platform} · ${staleHint(device, managerName)}`;
   const counts = device.counts;
   const seen = device.lastSeen ? `Last seen ${relativeTime(device.lastSeen)}` : "Not seen yet";
-  const detail = !counts?.checked ? "Waiting for the first check."
+  const detail = counts?.toApplyHere ? `${changes(counts.toApplyHere)} received from it still need to apply here.`
+    : ack ? ack.detail
+    : !counts?.checked ? "Waiting for the first check."
     : counts.toSend ? `${changes(counts.toSend)} from this PC still need to reach it.`
-    : counts.toApplyHere ? `${changes(counts.toApplyHere)} received from it still need to apply here.`
     : counts.toReceiveHere ? "Changes from this device are waiting to arrive here."
     : counts.receivedThere ? "It received changes and still needs to apply them."
     : "The last check finished with no known changes waiting.";
@@ -202,7 +218,7 @@ export function useMarkLost(membership: MembershipStatus, reload?: () => Promise
 }
 
 /** Devices in the group as reported by the signed membership chain. Read-only: Windows can't manage devices. */
-export function DevicesGroup({ membership, reload }: { membership: MembershipStatus; reload?: () => Promise<void> }) {
+export function DevicesGroup({ membership, reload, overview }: { membership: MembershipStatus; reload?: () => Promise<void>; overview?: SyncOverviewState | null }) {
   const leave = useLeaveGroup(membership.managerName);
   const lost = useMarkLost(membership, reload);
   const phone = membership.managerName || "the managing phone";
@@ -214,8 +230,8 @@ export function DevicesGroup({ membership, reload }: { membership: MembershipSta
     return (
       <SettingsRow key={device.deviceId} icon={Icon}
         title={<span className="device-name">{device.isThisDevice ? (!device.name || /^this pc$/i.test(device.name) ? "This PC" : `${device.name} (this PC)`) : device.name || "Unnamed device"}{device.isManager && <span className="badge"><Crown aria-hidden="true" />Managing device</span>}</span>}
-        description={deviceDetail(device, membership.managerName)}
-        control={deviceChip(device, membership)} />
+        description={deviceDetail(device, membership.managerName, overview)}
+        control={deviceChip(device, membership, overview)} />
     );
   };
 

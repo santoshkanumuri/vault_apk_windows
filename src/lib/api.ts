@@ -172,12 +172,14 @@ export type MemberDevice = {
   status: "active" | "removed";
   isManager: boolean;
   isThisDevice: boolean;
-  /** Unix ms of the last completed exchange; 0 = not yet. */
+  /** Unix ms of the last completed Wi-Fi exchange or signed Google Drive progress report; 0 = not yet. */
   lastSeen?: number;
   counts?: PeerCounts;
 };
 /** Changes still moving between this PC and one device (same counts as the phone). */
-export type PeerCounts = { checked: boolean; toSend: number; toApplyHere: number; receivedThere: number; toReceiveHere: number };
+export type PeerCounts = { checked: boolean; toSend: number; toApplyHere: number; receivedThere: number; toReceiveHere: number;
+  /** This PC's changes the device has not applied, by its verified progress over Wi-Fi or Google Drive. Absent on older builds. */
+  unconfirmed?: number };
 export type MembershipStatus = {
   managerDeviceId: string;
   managerName: string;
