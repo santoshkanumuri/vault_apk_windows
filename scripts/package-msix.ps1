@@ -44,6 +44,10 @@ $helper = Join-Path $root 'pairing-helper\publish\Nuvori.PairingHelper.exe'
 
 if (-not $SkipBuild) {
     . (Join-Path $PSScriptRoot 'ensure-perl.ps1')
+    # The Store signs the package, not each program in it, so an MSIX build must not pin the
+    # installer build's Authenticode signers (security review M-07, src-tauri/src/signer.rs). The
+    # Store build trusts its own package identity instead.
+    Remove-Item Env:NUVORI_SIGNER_SHA256, Env:NUVORI_SIGNER_NAME -ErrorAction SilentlyContinue
     dotnet publish (Join-Path $root 'pairing-helper\Nuvori.PairingHelper.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o (Split-Path $helper)
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cargo build --manifest-path (Join-Path $root 'src-tauri\Cargo.toml') --release --bin nuvori-native-host

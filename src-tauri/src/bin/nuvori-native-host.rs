@@ -12,6 +12,9 @@ mod browser;
 mod browser_ipc;
 #[path = "../dpapi.rs"]
 mod dpapi;
+#[path = "../signer.rs"]
+#[allow(dead_code)]
+mod signer;
 #[path = "../store_launch.rs"]
 #[allow(dead_code)]
 mod store_launch;
