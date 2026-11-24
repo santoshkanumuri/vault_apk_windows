@@ -68,7 +68,7 @@ export function SyncPage() {
         </StatusBanner>
       )}
       {snapshot.enrolled && sync.data && (sync.data.setAside ?? 0) > 0 && (
-        <StatusBanner kind="warning" title={`${plural(sync.data.setAside ?? 0, "change")} could not be read`}>
+        <StatusBanner kind="warning" title={`${plural(sync.data.setAside ?? 0, "change")} couldn't be read`}>
           Nuvori set {sync.data.setAside === 1 ? "it" : "them"} aside and tries again on each sync. Other changes still sync. Update Nuvori on this PC and on your phone.
         </StatusBanner>
       )}

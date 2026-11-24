@@ -60,7 +60,7 @@ export function PasswordGeneratorDialog({ open, onClose, onUse }: { open: boolea
 
   useEffect(() => {
     if (!open || settings.mode !== "passphrase" || words) return;
-    loadWordList().then(setWords, () => setError("The word list could not be loaded. Use a password instead."));
+    loadWordList().then(setWords, () => setError("The word list couldn't be loaded. Use a password instead."));
   }, [open, settings.mode, words]);
 
   const regenerate = useCallback(() => {
