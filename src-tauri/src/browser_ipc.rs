@@ -78,6 +78,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_ACTIVE_CONNECTIONS: usize = 8;
 /// Login checks (review or save) per site per minute, so a page cannot use their outcomes as an oracle.
 const LOGIN_CHECKS_PER_MINUTE: usize = 10;
+/// "Every login" / "every code" listings (`all`), across all sites, per minute. The extension
+/// asks for one only when the user opens such a list.
+const BULK_LISTINGS_PER_MINUTE: usize = 6;
+/// The browser host's file name, next to `nuvori.exe` (and copied for Firefox, `browser_setup.rs`).
+const HOST_EXE: &str = "nuvori-native-host.exe";
+const APP_EXE: &str = "nuvori.exe";
 
 /// "sign_in_methods": listed on `status` responses only while the app's setting is on, so the
 /// extension does not even watch sign-ins when the user turned the feature off. The native host
@@ -304,6 +310,8 @@ pub enum BrowserIpcError {
     SaveFailed,
     #[error("the browser pipe is not served by the Nuvori app")]
     UntrustedServer,
+    #[error("the browser pipe client is not a Nuvori program")]
+    UntrustedClient,
 }
 
 /// What a selection token may release. A card token never releases a login, and so on.
@@ -348,6 +356,7 @@ struct SelectionGrant {
 struct SelectionGrants {
     grants: HashMap<String, SelectionGrant>,
     login_checks: HashMap<String, VecDeque<Instant>>,
+    bulk_listings: VecDeque<Instant>,
 }
 
 impl SelectionGrants {
@@ -448,6 +457,19 @@ impl SelectionGrants {
             return false;
         }
         hits.push_back(now);
+        true
+    }
+
+    /// Counts one listing of every login or every code; false once the per-minute budget is spent.
+    fn allow_bulk_listing(&mut self) -> bool {
+        let now = Instant::now();
+        while self.bulk_listings.front().is_some_and(|hit| now.duration_since(*hit) >= Duration::from_secs(60)) {
+            self.bulk_listings.pop_front();
+        }
+        if self.bulk_listings.len() >= BULK_LISTINGS_PER_MINUTE {
+            return false;
+        }
+        self.bulk_listings.push_back(now);
         true
     }
 
@@ -936,6 +958,17 @@ fn serve_connection(
 ) -> Result<(), BrowserIpcError> {
     // The watchdog owns the handle; never close it here.
     let mut stream = ManuallyDrop::new(unsafe { File::from_raw_handle(pipe.0 as RawHandle) });
+    // Only Nuvori's own programs may use the pipe (its ACL already limits it to this user).
+    // Anything else gets a refusal without its request being read.
+    if !pipe_client_allowed(pipe) {
+        activity::log(Level::Warning, Category::Security, "Refused a browser connection from a program that is not Nuvori's browser host".to_owned());
+        let response = serde_json::to_vec(&BrowserResponse::invalid(String::new(), "This program may not use Nuvori's browser connection."))?;
+        let length = u32::try_from(response.len()).map_err(|_| BrowserIpcError::InvalidRequest)?;
+        stream.write_all(&length.to_le_bytes())?;
+        stream.write_all(&response)?;
+        stream.flush()?;
+        return Err(BrowserIpcError::UntrustedClient);
+    }
     let mut seen = None;
     let mut handed_over = false;
     // A read that failed or was cancelled by the watchdog gets no answer.
@@ -999,6 +1032,68 @@ fn pipe_client_process(pipe: HANDLE) -> Option<u32> {
     let mut pid = 0u32;
     unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) }.ok()?;
     (pid != 0).then_some(pid)
+}
+
+/// Folders a pipe client may run from, as (folder, host only). The app's own folder (installer
+/// builds, development builds and the Store package all keep the host next to `nuvori.exe`),
+/// the standard installer folders (the same ones `trusted_server_images` trusts, so an installer
+/// build and a Store build can talk to each other), and `%LOCALAPPDATA%\Nuvori\BrowserHost`,
+/// where the Store build (and the development registration script) puts the host copy that
+/// Firefox starts; only the host may run from there.
+fn trusted_client_folders() -> Vec<(std::path::PathBuf, bool)> {
+    let mut folders = Vec::new();
+    if let Some(directory) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
+        folders.push((directory, false));
+    }
+    for (variable, suffix) in [("LOCALAPPDATA", "Nuvori"), ("LOCALAPPDATA", "Programs\\Nuvori"),
+        ("ProgramFiles", "Nuvori"), ("ProgramW6432", "Nuvori")] {
+        if let Some(base) = std::env::var_os(variable) {
+            folders.push((std::path::PathBuf::from(base).join(suffix), false));
+        }
+    }
+    if let Some(base) = std::env::var_os("LOCALAPPDATA") {
+        folders.push((std::path::PathBuf::from(base).join("Nuvori").join("BrowserHost"), true));
+    }
+    folders
+}
+
+/// True when `image` (a client's full executable path) is this app itself, or Nuvori's browser host
+/// or app in one of `folders` (see `trusted_client_folders`). Names and folders compare without
+/// case, after resolving links.
+fn client_image_allowed(image: &Path, own_exe: Option<&Path>, folders: &[(std::path::PathBuf, bool)]) -> bool {
+    if own_exe.is_some_and(|own| same_path(own, image)) {
+        return true;
+    }
+    let (Some(name), Some(parent)) = (image.file_name().and_then(|name| name.to_str()), image.parent()) else {
+        return false;
+    };
+    let host = name.eq_ignore_ascii_case(HOST_EXE);
+    let app = name.eq_ignore_ascii_case(APP_EXE);
+    (host || app) && folders.iter().any(|(folder, host_only)| (host || !host_only) && same_path(folder, parent))
+}
+
+/// M-05: the pipe answers only Nuvori's own programs: this app (a second launch handing over), the
+/// browser host next to it or in a trusted folder, or a program of the installed Store package.
+/// Full signer (Authenticode) checks need signed builds and are not done here.
+fn pipe_client_allowed(pipe: HANDLE) -> bool {
+    let Some(pid) = pipe_client_process(pipe) else {
+        return false;
+    };
+    if pid == std::process::id() {
+        return true;
+    }
+    let own_exe = std::env::current_exe().ok();
+    if process_image(pid).is_some_and(|image| client_image_allowed(&image, own_exe.as_deref(), &trusted_client_folders())) {
+        return true;
+    }
+    // The Store build: its host (started through the app execution alias) and the app itself run
+    // with the package's identity.
+    let Some(family) = crate::store_launch::process_family(pid) else {
+        return false;
+    };
+    let own = crate::store_launch::process_family(std::process::id());
+    let store = crate::store_launch::installed_store_build().map(|store| store.family_name);
+    [own, store].into_iter().flatten().any(|trusted| trusted.eq_ignore_ascii_case(&family))
 }
 
 fn handle_request(
@@ -1116,6 +1211,9 @@ fn handle_request_with(
                 ));
             }
             let every = request.all == Some(true);
+            if every && !grants.lock().expect("browser grant lock poisoned").allow_bulk_listing() {
+                return Ok(BrowserResponse::invalid(request.request_id, "Too many requests. Try again in a minute."));
+            }
             let listed = if every { provider.query_all_credentials() } else { provider.query_credentials(&origin) };
             let candidates = match listed {
                 Ok(candidates) => candidates,
@@ -1274,6 +1372,9 @@ fn handle_request_with(
             if request.credential_id.is_some() || request.selection_token.is_some() || request.username.is_some()
                 || request.password.is_some() || request.sealed_login.is_some() {
                 return Ok(BrowserResponse::invalid(request.request_id, "Item lookup cannot include other fields."));
+            }
+            if request.all == Some(true) && !grants.lock().expect("browser grant lock poisoned").allow_bulk_listing() {
+                return Ok(BrowserResponse::invalid(request.request_id, "Too many requests. Try again in a minute."));
             }
             let candidates = match provider.query_items(kind, &origin, request.all == Some(true)) {
                 Ok(candidates) => candidates,
@@ -1627,7 +1728,11 @@ fn pipe_server_pid(pipe: &File) -> Option<u32> {
 
 /// Image path of the process serving the connected pipe.
 fn pipe_server_image(pipe: &File) -> Option<std::path::PathBuf> {
-    let pid = pipe_server_pid(pipe)?;
+    process_image(pipe_server_pid(pipe)?)
+}
+
+/// Full Win32 path of a running process's executable.
+fn process_image(pid: u32) -> Option<std::path::PathBuf> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut buffer = vec![0u16; 32_768];
     let mut size = buffer.len() as u32;
@@ -1816,6 +1921,52 @@ mod tests {
         assert_eq!(describe(RequestKind::Review, Some("a.example"), "needs_save").1, "Reviewed a new login from a.example");
         assert_eq!(describe(RequestKind::Update, Some("a.example"), "saved").1, "Updated a login for a.example");
         assert_eq!(describe(RequestKind::Query, None, "ok").1, "Looked up logins for a site");
+    }
+
+    #[test]
+    fn pipe_clients_must_be_nuvori_programs_from_trusted_folders() {
+        let root = std::env::temp_dir().join(format!("nuvori-client-{}", uuid::Uuid::new_v4()));
+        let app_dir = root.join("Nuvori");
+        let host_copy_dir = root.join("Local").join("Nuvori").join("BrowserHost");
+        let other = root.join("Downloads");
+        for directory in [&app_dir, &host_copy_dir, &other] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        for file in [app_dir.join("nuvori.exe"), app_dir.join(HOST_EXE), host_copy_dir.join(HOST_EXE),
+            host_copy_dir.join(APP_EXE), other.join(HOST_EXE), other.join("evil.exe"), app_dir.join("evil.exe")] {
+            std::fs::write(file, b"x").unwrap();
+        }
+        let own = app_dir.join("nuvori.exe");
+        let folders = vec![(app_dir.clone(), false), (host_copy_dir.clone(), true)];
+        // The app itself, and the host next to it (any case).
+        assert!(client_image_allowed(&own, Some(&own), &folders));
+        assert!(client_image_allowed(&app_dir.join(HOST_EXE), Some(&own), &folders));
+        assert!(client_image_allowed(&app_dir.join("NUVORI-Native-Host.EXE"), Some(&own), &[(app_dir.join("."), false)]));
+        // The Firefox copy of the host, but not an app in that folder.
+        assert!(client_image_allowed(&host_copy_dir.join(HOST_EXE), Some(&own), &folders));
+        assert!(!client_image_allowed(&host_copy_dir.join(APP_EXE), Some(&own), &folders));
+        // A host with the right name elsewhere, or another program next to the app, is refused.
+        assert!(!client_image_allowed(&other.join(HOST_EXE), Some(&own), &folders));
+        assert!(!client_image_allowed(&app_dir.join("evil.exe"), Some(&own), &folders));
+        assert!(!client_image_allowed(&other.join("evil.exe"), Some(&own), &folders));
+        // A folder whose name only starts like a trusted one is another folder.
+        assert!(!client_image_allowed(&root.join("Nuvori2").join(HOST_EXE), Some(&own), &folders));
+        assert!(!client_image_allowed(Path::new(HOST_EXE), None, &folders), "a bare name has no trusted folder");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn listing_every_login_or_code_is_rate_limited() {
+        let mut grants = SelectionGrants::default();
+        for _ in 0..BULK_LISTINGS_PER_MINUTE {
+            assert!(grants.allow_bulk_listing());
+        }
+        assert!(!grants.allow_bulk_listing());
+        let past = Instant::now().checked_sub(Duration::from_secs(61));
+        if let Some(past) = past {
+            grants.bulk_listings.iter_mut().for_each(|hit| *hit = past);
+            assert!(grants.allow_bulk_listing(), "the budget comes back after a minute");
+        }
     }
 
     #[test]
