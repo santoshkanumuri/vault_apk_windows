@@ -644,14 +644,15 @@ test("cards: the page gets titles, then one card without its code; the code wait
   assert.equal((await state.send({ action: "inline_card_code", id: "c1" }, page("https://example.com/login", 2))).status, "expired");
 });
 
-test("codes: matches by default, all on request; off switches stay quiet", async () => {
+test("codes: the page gets this site's codes only; every code is refused to pages; off switches stay quiet", async () => {
   const state = await worker((request) => request.action === "status" ? { status: "ok", features: ALL_FEATURES }
     : request.action === "query_items" ? { status: "ok", credentials: request.all ? [{ id: "k1", title: "Bank", username: "", selectionToken: "x" }] : [] }
     : request.action === "fill_item" ? { status: "ok", item: { id: "k1", kind: "code", code: { value: "287082", secondsLeft: 9 } } } : { status: "error" });
   assert.equal((await state.send({ action: "inline_items", kind: "code" }, page())).items.length, 0);
-  assert.equal((await state.send({ action: "inline_items", kind: "code", all: true }, page())).items.length, 1);
-  const filled = await state.send({ action: "inline_fill_item", kind: "code", id: "k1" }, page());
-  assert.equal(filled.code.value, "287082");
+  assert.equal((await state.send({ action: "inline_items", kind: "code", all: true }, page())).status, "disabled");
+  // A code listed only under "every code" can't be filled from a page either.
+  assert.equal((await state.send({ action: "inline_fill_item", kind: "code", id: "k1" }, page())).status, "missing");
+  assert.equal(state.requests.some((request) => request.all === true), false, "the vault was never asked for every code");
   state.data.fillCodes = false;
   assert.equal((await state.send({ action: "inline_items", kind: "code" }, page())).status, "disabled");
   assert.equal((await state.send({ action: "inline_items", kind: "nope" }, page())).status, "error");
@@ -860,15 +861,13 @@ test("frames: a sign-in frame lists logins for its own site, and the login goes 
   assert.equal(state.requests.find((request) => request.action === "fill_credential").origin, "https://login.bank.example");
   assert.equal((await state.send({ action: "inline_fill_frame", kind: "login", id: "b1", frameId: 4 }, top)).status, "missing", "one report, one fill");
 
-  // Search all logins, for this frame: any login, filled only into this frame.
+  // Every login, or a login saved for another site, is never listed or filled for a page or frame.
   await state.send({ action: "frame_field", detail: "login", rect, nonce: "c".repeat(32) }, frame);
-  const every = await state.send({ action: "inline_all_logins", frameId: 4 }, top);
-  assert.equal(JSON.stringify(every.accounts), JSON.stringify([{ id: "x", title: "Other", username: "o", site: "other.example" }]));
-  const listing = state.requests.filter((request) => request.action === "query_credentials").at(-1);
-  assert.deepEqual([listing.all, listing.origin], [true, "https://login.bank.example"]);
+  assert.equal((await state.send({ action: "inline_all_logins", frameId: 4 }, top)).status, "disabled");
   state.sent.length = 0;
-  assert.equal((await state.send({ action: "inline_fill_frame", kind: "login", id: "x", frameId: 4, all: true }, top)).status, "ok");
-  assert.deepEqual(state.sent.map((entry) => entry.options.frameId), [4]);
+  assert.equal((await state.send({ action: "inline_fill_frame", kind: "login", id: "x", frameId: 4, all: true }, top)).status, "disabled");
+  assert.equal(state.sent.length, 0);
+  assert.equal(state.requests.some((request) => request.all === true), false, "the vault was never asked for every login");
 });
 
 test("frames: the login still fills only while the frame shows the same site", async () => {
@@ -932,27 +931,28 @@ test("frames: a login submitted in a frame is saved for the frame's site, and it
   assert.equal(pending.status, "ok");
 });
 
-test("search all logins: needs a desktop app that lists every login, and fills the chosen one on this page", async () => {
-  const older = await worker((request) => request.action === "status"
-    ? { status: "ok", features: ALL_FEATURES.filter((name) => name !== "all_logins") } : { status: "ok", credentials: [] });
-  const page = { tab: { id: 1 }, frameId: 0, url: "https://example.com/login" };
-  assert.equal((await older.send({ action: "inline_all_logins" }, page)).status, "unsupported");
-
-  const state = await worker((request) => {
+test("search all logins: refused to pages on every browser; nothing reaches the vault", async () => {
+  const host = (request) => {
     if (request.action === "status") return { status: "ok", features: ALL_FEATURES };
     if (request.action === "query_credentials") return request.all
-      ? { status: "ok", credentials: [{ id: "s", title: "Seedr", username: "me@example.com", selectionToken: "s".repeat(64), site: "seedr.cc", passkey: true }] }
+      ? { status: "ok", credentials: [{ id: "s", title: "Seedr", username: "me@example.com", selectionToken: "s".repeat(64), site: "seedr.cc" }] }
       : { status: "ok", credentials: [] };
     if (request.action === "fill_credential") return { status: "ok", credential: { id: "s", username: "me@example.com", password: "seedr-secret" } };
     return { status: "error" };
-  }, { tabUrl: "https://example.com/login" });
-  const every = await state.send({ action: "inline_all_logins" }, page);
-  assert.equal(JSON.stringify(every.accounts), JSON.stringify([{ id: "s", title: "Seedr", username: "me@example.com", site: "seedr.cc", passkey: true }]));
-  const filled = await state.send({ action: "inline_fill_any", id: "s", want: "both" }, page);
-  assert.deepEqual([filled.status, filled.username, filled.password], ["ok", "me@example.com", "seedr-secret"]);
-  const fill = state.requests.find((request) => request.action === "fill_credential");
-  assert.deepEqual([fill.origin, fill.selectionToken], ["https://example.com", "s".repeat(64)]);
-  assert.equal((await state.send({ action: "inline_fill_any", id: "unknown", want: "both" }, page)).status, "missing");
+  };
+  for (const extensionUrl of ["chrome-extension://kapellkbongejlglcengbmjnpblemmjm/", FIREFOX_URL, undefined]) {
+    const state = await worker(host, { tabUrl: "https://example.com/login", extensionUrl });
+    const top = page("https://example.com/login");
+    const every = await state.send({ action: "inline_all_logins" }, top);
+    assert.equal(every.status, "disabled", extensionUrl);
+    assert.equal(every.accounts, undefined);
+    const filled = await state.send({ action: "inline_fill_any", id: "s", want: "both" }, top);
+    assert.equal(filled.status, "disabled");
+    assert.equal(JSON.stringify(filled).includes("seedr-secret"), false);
+    // The site's own fill can't be used to pull a login saved for another site either.
+    assert.equal((await state.send({ action: "inline_fill", credentialId: "s", want: "both" }, top)).status, "missing");
+    assert.equal(state.requests.some((request) => request.all === true || request.action === "fill_credential"), false);
+  }
 });
 
 // ---------------------------------------------------------------------------
