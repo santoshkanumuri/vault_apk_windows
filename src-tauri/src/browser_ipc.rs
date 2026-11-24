@@ -1098,7 +1098,8 @@ fn client_image_allowed(image: &Path, own_exe: Option<&Path>, folders: &[(std::p
 
 /// M-05: the pipe answers only Nuvori's own programs: this app (a second launch handing over), the
 /// browser host next to it or in a trusted folder, or a program of the installed Store package.
-/// Full signer (Authenticode) checks need signed builds and are not done here.
+/// M-07: a signed build also requires the program's Authenticode signer to be one of its own
+/// certificates (`signer.rs`), so a copy dropped into a user-writable trusted folder is refused.
 fn pipe_client_allowed(pipe: HANDLE) -> bool {
     let Some(pid) = pipe_client_process(pipe) else {
         return false;
@@ -1107,7 +1108,9 @@ fn pipe_client_allowed(pipe: HANDLE) -> bool {
         return true;
     }
     let own_exe = std::env::current_exe().ok();
-    if process_image(pid).is_some_and(|image| client_image_allowed(&image, own_exe.as_deref(), &trusted_client_folders())) {
+    if process_image(pid).is_some_and(|image| {
+        client_image_allowed(&image, own_exe.as_deref(), &trusted_client_folders()) && crate::signer::check(&image).allows()
+    }) {
         return true;
     }
     // The Store build: its host (started through the app execution alias) and the app itself run
@@ -1772,7 +1775,8 @@ fn process_image(pid: u32) -> Option<std::path::PathBuf> {
 
 fn verify_pipe_server(pipe: &File) -> Result<(), BrowserIpcError> {
     let image = pipe_server_image(pipe).ok_or(BrowserIpcError::UntrustedServer)?;
-    if trusted_server_images().iter().any(|trusted| same_path(trusted, &image)) {
+    // M-07: in a signed build the server must also carry one of this build's signatures.
+    if trusted_server_images().iter().any(|trusted| same_path(trusted, &image)) && crate::signer::check(&image).allows() {
         return Ok(());
     }
     // A host copied out of the Store package (for Firefox) runs outside it, so the Store app's

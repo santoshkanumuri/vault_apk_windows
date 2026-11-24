@@ -30,7 +30,7 @@ Keep the version consistent in `package.json`, `package-lock.json`, `src-tauri/C
 
 For local sync, keep both devices on a network that allows them to reach each other. Allow the installed Nuvori app through Windows Firewall on your trusted local network. A firewall rule for the development executable does not cover a separately installed executable.
 
-These Windows packages are unsigned. Public distribution should use Windows code signing to identify the publisher. SmartScreen warnings can still depend on reputation even after signing. See [Tauri's Windows signing guide](https://v2.tauri.app/distribute/sign/windows/).
+Publish only signed packages. Without signing, `npm run package:windows` warns that the installers are for testing only. See [Sign a release](#sign-a-release).
 
 To compare a download with the supplied checksum:
 
@@ -39,6 +39,68 @@ Get-FileHash .\Nuvori_2.3.0_x64-setup.exe -Algorithm SHA256
 ```
 
 The checksum detects a changed file. It does not replace a trusted publisher signature.
+
+## Sign a release
+
+From the security review (M-07), a release build signs every program it ships and checks the signatures before anything is copied to `artifacts`. A signed build also refuses to talk to a pairing helper, browser host or second app copy that was not signed by one of its own certificates, so a program dropped into a folder Nuvori trusts cannot pose as part of Nuvori. An unsigned development build keeps working as before.
+
+The certificate and its private key stay on your PC, in the Windows certificate store, on a hardware token, or in Azure. Nothing secret goes into the repository: the build reads its settings from environment variables, listed at the top of `scripts/signing.ps1`.
+
+### What you need to supply
+
+Pick one:
+
+1. **A code signing certificate from a certificate authority** (an OV or EV certificate, usually on a USB token or in a cloud HSM). Install it so it shows in `certmgr.msc` under Personal > Certificates with a private key. Note its SHA-1 thumbprint and the CA's RFC 3161 timestamp address.
+2. **Azure Trusted Signing.** Create an account and a public trust certificate profile, install the `Microsoft.Trusted.Signing.Client` package for `Azure.CodeSigning.Dlib.dll`, write the `metadata.json` it describes (endpoint, account name, profile name), and sign in with `az login`. Note the publisher name the profile issues (its common name).
+
+You also need `signtool.exe` from the Windows SDK.
+
+### Build signed installers
+
+For a certificate:
+
+```powershell
+$env:NUVORI_SIGN_MODE = 'certificate'
+$env:NUVORI_SIGN_CERT_THUMBPRINT = '<40-digit SHA-1 thumbprint>'
+$env:NUVORI_SIGN_TIMESTAMP_URL = '<your CA''s timestamp address>'
+$env:NUVORI_REQUIRE_SIGNING = '1'
+npm run package:windows
+```
+
+For Azure Trusted Signing:
+
+```powershell
+$env:NUVORI_SIGN_MODE = 'trusted-signing'
+$env:NUVORI_TRUSTED_SIGNING_DLIB = '<path>\Azure.CodeSigning.Dlib.dll'
+$env:NUVORI_TRUSTED_SIGNING_METADATA = '<path>\metadata.json'
+$env:NUVORI_SIGNER_NAME = '<publisher name in the certificate>'
+$env:NUVORI_SIGN_TIMESTAMP_URL = 'http://timestamp.acs.microsoft.com'
+$env:NUVORI_REQUIRE_SIGNING = '1'
+npm run package:windows
+```
+
+The build signs the pairing helper, then Tauri signs `nuvori.exe`, `nuvori-native-host.exe`, the uninstaller and both installers through `scripts/sign-file.ps1`. Every file is signed with SHA-256 and timestamped, so it keeps verifying after the certificate expires. `NUVORI_REQUIRE_SIGNING=1` stops the build if signing is not set up or any signature fails.
+
+### Which signers the app trusts
+
+The build bakes its signers into the app (`src-tauri/src/signer.rs`):
+
+- In `certificate` mode it adds the SHA-256 of your certificate. That pins one certificate, so **before you renew**, add the new certificate's SHA-256 to `NUVORI_SIGNER_SHA256` (comma separated) for one release, so the release before the switch already trusts the next certificate. Get it with `(Get-FileHash -InputStream ([IO.MemoryStream]::new($cert.RawData)) -Algorithm SHA256).Hash`.
+- In `trusted-signing` mode it trusts the publisher name, because Azure issues a new short-lived certificate every few days. Windows still checks that the chain ends at a trusted root and that the signature is intact.
+
+The MSIX for the Microsoft Store is built without pinning, because the Store signs the package and trusts it by package identity.
+
+### Signed update channel
+
+Nuvori does not check for updates by itself, so the release page is the update channel. To let people check a download against a key you control, as well as against the Authenticode signature:
+
+1. Once, make a key pair: `npm run tauri -- signer generate -w "$env:USERPROFILE\.tauri\nuvori.key"`. Keep the private key and its password offline, and publish the public key in this file and on the release page.
+2. Before each release build, set `TAURI_SIGNING_PRIVATE_KEY` (the key or its path) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+3. `npm run package:windows` then writes `SHA256SUMS-<version>.txt.sig` next to the checksum list. Upload both.
+
+If Nuvori later gets the Tauri updater, the same key pair signs its update files, and its public key goes into `tauri.conf.json` under `plugins.updater.pubkey`. That adds a network check, so the privacy policy needs updating first.
+
+SmartScreen warnings can still depend on reputation after signing. See [Tauri's Windows signing guide](https://v2.tauri.app/distribute/sign/windows/).
 
 ## Test the Store build (MSIX)
 

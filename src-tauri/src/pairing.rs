@@ -202,6 +202,11 @@ struct JpakeHelper {
 
 impl JpakeHelper {
     fn start(path: &Path, id: &str, secret: &str) -> Result<Self, PairingError> {
+        // L-19 / M-07: the helper receives pairing secrets, so a signed build runs it only when it
+        // carries one of this build's signatures.
+        if !crate::signer::check(path).allows() {
+            return Err(PairingError::HelperUnavailable);
+        }
         let mut command = if path.extension().is_some_and(|extension| extension == "dll") {
             let mut command = Command::new("dotnet");
             command.arg(path);

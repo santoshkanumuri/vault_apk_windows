@@ -43,6 +43,7 @@ pub mod site_icon_sync;
 pub mod sign_in_sync;
 pub mod sign_ins;
 pub mod site_icons;
+pub mod signer;
 pub mod snapshot;
 pub mod snapshot_import;
 mod store_build;
