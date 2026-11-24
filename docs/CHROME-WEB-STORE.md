@@ -49,7 +49,7 @@ What it does
 - Fills logins on HTTPS websites. Choose an account from the list under the sign-in field.
 - Saves new logins and updates changed passwords after you sign in.
 - Fills logins, cards, addresses and authenticator codes, also inside sign-in and payment frames.
-- Search all logins: fill any saved login on any page, after confirming when it was saved for another site.
+- Search all logins from the toolbar popup: find any saved login by site, name or username, and fill it after a warning when it was saved for another site.
 - Can turn off the browser's own password manager, so only one tool offers to save.
 
 Private by design

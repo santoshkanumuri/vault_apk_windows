@@ -75,6 +75,22 @@
           <p>Sign in on the page and Nuvori will offer to save it.</p>
         </div>
 
+        <div id="search-section" hidden>
+          <div class="section-head">
+            <h2><label for="login-search">Search all logins</label></h2>
+          </div>
+          <input id="login-search" class="text-input" type="search" maxlength="100" autocomplete="off" spellcheck="false" placeholder="Site, name or username" aria-describedby="search-status" />
+          <p id="search-status" class="search-status" role="status"></p>
+          <div id="search-confirm" class="notice" data-tone="warning" role="alertdialog" aria-labelledby="search-confirm-text" hidden>
+            <p id="search-confirm-text"></p>
+            <div class="actions">
+              <button id="search-confirm-fill" class="btn primary small" type="button">Fill anyway</button>
+              <button id="search-confirm-cancel" class="btn small" type="button">Cancel</button>
+            </div>
+          </div>
+          <ul id="search-results" class="card list" aria-label="Logins that match your search" hidden></ul>
+        </div>
+
         <div id="signins-section" hidden>
           <div class="section-head">
             <h2>Sign-in methods</h2>
@@ -258,6 +274,7 @@
     <script src="appearance-palette.js"></script>
     <script src="appearance.js"></script>
     <script src="signins.js"></script>
+    <script src="loginsearch.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
