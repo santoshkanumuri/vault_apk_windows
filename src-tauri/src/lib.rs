@@ -6,6 +6,7 @@ pub mod browser;
 pub mod browser_ipc;
 mod browser_setup;
 mod browsers;
+mod clipboard;
 pub mod change_store;
 pub mod checkpoint;
 pub mod compaction;
@@ -1959,6 +1960,8 @@ fn lock(state: &ManagedState, browser: &BrowserIpcServer, pairing: &PairingContr
     let snapshot = app.snapshot();
     drop(app);
     browser.set_provider(None);
+    // A password copied from Nuvori goes when the vault locks, if nothing was copied since.
+    clipboard::clear_secret_now();
     if was_unlocked {
         activity::log(Level::Info, Category::Vault, "Vault locked");
     }
@@ -1982,6 +1985,22 @@ fn auto_lock_vault(app: &AppHandle, reason: auto_lock::Reason) {
         activity::log(Level::Info, Category::Security, reason.message());
         vault_changed(app, false);
     }
+}
+
+// Secret copies (L-17). The clipboard formats and the clearing live in `clipboard.rs`.
+
+/// Copies a password or code without clipboard history or cloud clipboard, and clears it after
+/// `clear_after_seconds` (0: never) if nothing was copied since.
+#[tauri::command]
+async fn copy_secret(text: String, clear_after_seconds: u32) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || clipboard::copy_secret(text, clear_after_seconds))
+        .await
+        .map_err(|_| "The clipboard could not be set".to_owned())?
+}
+
+#[tauri::command]
+async fn clear_secret_clipboard() {
+    let _ = tauri::async_runtime::spawn_blocking(clipboard::clear_secret_now).await;
 }
 
 // Auto-lock commands. The timer and the Windows session watcher live in `auto_lock.rs`.
@@ -2974,6 +2993,8 @@ pub fn run() {
             auto_lock_status,
             set_auto_lock,
             note_user_activity,
+            copy_secret,
+            clear_secret_clipboard,
             take_quick_search_request,
             get_appearance,
             set_appearance,

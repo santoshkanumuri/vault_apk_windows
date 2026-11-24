@@ -324,6 +324,9 @@ export const api = {
   autoLockStatus: () => call<AutoLockStatus>("auto_lock_status"),
   setAutoLock: (minutes: number) => call<AutoLockStatus>("set_auto_lock", { minutes }),
   noteUserActivity: () => call<void>("note_user_activity"),
+  /** A secret on the clipboard without history or cloud sync; the backend clears it (clipboard.rs). */
+  copySecret: (text: string, clearAfterSeconds: number) => call<void>("copy_secret", { text, clearAfterSeconds }),
+  clearSecretClipboard: () => call<void>("clear_secret_clipboard"),
   quickSearchStatus: () => call<QuickSearchStatus>("quick_search_status"),
   setQuickSearch: (enabled: boolean, preset?: string) => call<QuickSearchStatus>("set_quick_search", { enabled, preset: preset ?? null }),
   takeQuickSearchRequest: () => call<boolean>("take_quick_search_request"),

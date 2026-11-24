@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { api } from "../lib/api";
 import { usePreferences } from "./settings";
 import { useToast } from "./toast";
 
@@ -27,6 +28,8 @@ async function writeClipboard(text: string): Promise<void> {
 
 /** Clears any pending secret on lock or exit. */
 export function clearClipboardNow() {
+  // A secret the backend copied: it clears it if nothing was copied since.
+  void api.clearSecretClipboard().catch(() => undefined);
   if (clearTimer === undefined) return;
   window.clearTimeout(clearTimer);
   clearTimer = undefined;
@@ -47,10 +50,14 @@ export function useCopy() {
     try {
       const text = typeof value === "function" ? await value() : value;
       if (!text) { toast.warning(`Nothing to copy for ${options.label.toLowerCase()}.`); return false; }
-      await writeClipboard(text);
+      // Secrets go through the backend: kept out of clipboard history (Win+V) and cloud clipboard,
+      // and cleared by the backend even with no window open. An older backend, or the browser
+      // preview, falls back to the page's clipboard and timer below.
+      const viaBackend = options.secret === true && await api.copySecret(text, clipboardSeconds).then(() => true, () => false);
+      if (!viaBackend) await writeClipboard(text);
       const mine = ++generation;
       if (clearTimer !== undefined) { window.clearTimeout(clearTimer); clearTimer = undefined; }
-      if (options.secret && clipboardSeconds > 0) {
+      if (options.secret && !viaBackend && clipboardSeconds > 0) {
         clearTimer = window.setTimeout(() => {
           clearTimer = undefined;
           // Only clear if nothing newer was copied from Nuvori since.
