@@ -1,6 +1,7 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Check } from "lucide-react";
 import { accentChoices, surfaceChoices, type ResolvedTheme } from "../app/theme";
+import { strings } from "../strings";
 
 type Choice = { id: string; name: string };
 
@@ -43,7 +44,7 @@ function RadioGrid<T extends Choice>({ label, items, value, onSelect, render, cl
 
 export function AccentPicker({ value, onSelect }: { value: string; onSelect: (id: string) => void }) {
   return (
-    <RadioGrid label="Accent color" className="swatch-grid" items={accentChoices} value={value} onSelect={onSelect}
+    <RadioGrid label={strings.accentColor} className="swatch-grid" items={accentChoices} value={value} onSelect={onSelect}
       render={(item, selected) => (
         <span className="swatch-dot" style={{ background: item.swatch }}>{selected && <Check aria-hidden="true" />}</span>
       )} />
@@ -53,7 +54,7 @@ export function AccentPicker({ value, onSelect }: { value: string; onSelect: (id
 export function SurfacePicker({ value, accent, mode, onSelect }: { value: string; accent: string; mode: ResolvedTheme; onSelect: (id: string) => void }) {
   const colors = accentChoices.find((item) => item.id === accent)?.[mode];
   return (
-    <RadioGrid label="Background" className="swatch-grid swatch-grid-tiles" items={surfaceChoices} value={value} onSelect={onSelect}
+    <RadioGrid label={strings.background} className="swatch-grid swatch-grid-tiles" items={surfaceChoices} value={value} onSelect={onSelect}
       render={(item, selected) => (
         <span className="swatch-tile" style={{ background: item[mode].background, borderColor: item[mode].hairline }}>
           <span className="swatch-tile-card" style={{ background: item[mode].container }} />
@@ -69,9 +70,9 @@ export function SurfacePicker({ value, accent, mode, onSelect }: { value: string
 export function AppearancePreview() {
   return (
     <div className="appearance-preview" aria-hidden="true">
-      <span className="appearance-preview-button">Unlock</span>
-      <span className="appearance-preview-text">Sample text on this background</span>
-      <span className="appearance-preview-chip">Chip</span>
+      <span className="appearance-preview-button">{strings.unlock}</span>
+      <span className="appearance-preview-text">{strings.sampleTextOnThisBackground}</span>
+      <span className="appearance-preview-chip">{strings.chip}</span>
     </div>
   );
 }

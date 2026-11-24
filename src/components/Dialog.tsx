@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cx } from "../lib/format";
 import { IconButton } from "./Button";
+import { strings } from "../strings";
 
 type DialogProps = {
   open: boolean;
@@ -50,7 +51,7 @@ export function Dialog({ open, title, description, onClose, children, footer, si
       {open && <div className="dialog-surface">
         <header className="dialog-header">
           <h2 id={titleId}>{title}</h2>
-          <IconButton label="Close" icon={X} size="sm" onClick={() => onCloseRef.current()} disabled={locked} />
+          <IconButton label={strings.close} icon={X} size="sm" onClick={() => onCloseRef.current()} disabled={locked} />
         </header>
         {description && <div id={descriptionId} className="dialog-description">{description}</div>}
         {children && <div className="dialog-body">{children}</div>}

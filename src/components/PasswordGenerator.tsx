@@ -9,6 +9,7 @@ import { Button, IconButton } from "./Button";
 import { Dialog } from "./Dialog";
 import { Segmented, Toggle } from "./Field";
 import { StatusBanner } from "./Status";
+import { strings } from "../strings";
 
 /** One click: a new password or passphrase with the settings last used on this PC. */
 export async function generateWithSavedSettings(): Promise<string> {
@@ -77,13 +78,13 @@ export function PasswordGeneratorDialog({ open, onClose, onUse }: { open: boolea
   const noun = settings.mode === "passphrase" ? "passphrase" : "password";
 
   return (
-    <Dialog open={open} onClose={onClose} title="Generate a password" size="md"
+    <Dialog open={open} onClose={onClose} title={strings.generateAPassword} size="md"
       footer={<>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="ghost" onClick={onClose}>{strings.cancel}</Button>
         <Button variant="primary" disabled={!value} onClick={() => { saveGeneratorSettings(settings); onUse(value); }}>Use {noun}</Button>
       </>}>
       <div className="form-stack">
-        <Segmented label="Type" value={settings.mode} onChange={(mode) => change({ mode })}
+        <Segmented label={strings.type} value={settings.mode} onChange={(mode) => change({ mode })}
           options={[{ value: "password", label: "Password" }, { value: "passphrase", label: "Passphrase" }]} />
         <div className="generator-preview">
           <output className="mono" aria-live="polite" aria-label={`Generated ${noun}`}>{value ? <Breakable value={value} settings={settings} /> : "…"}</output>
@@ -92,23 +93,23 @@ export function PasswordGeneratorDialog({ open, onClose, onUse }: { open: boolea
         <p className="field-hint">{strengthLabel(bits)} · about {bits} bits of randomness</p>
         {error && <StatusBanner kind="error">{error}</StatusBanner>}
         {settings.mode === "password" ? <>
-          <Range label="Length" value={settings.length} min={LENGTH_RANGE.min} max={LENGTH_RANGE.max} onChange={(length) => change({ length })} />
+          <Range label={strings.length} value={settings.length} min={LENGTH_RANGE.min} max={LENGTH_RANGE.max} onChange={(length) => change({ length })} />
           <div className="generator-options">
-            <Option label="Uppercase" detail="A–Z" checked={settings.uppercase} disabled={onlySet(settings.uppercase)} onChange={(uppercase) => change({ uppercase })} />
-            <Option label="Lowercase" detail="a–z" checked={settings.lowercase} disabled={onlySet(settings.lowercase)} onChange={(lowercase) => change({ lowercase })} />
-            <Option label="Numbers" detail="0–9" checked={settings.digits} disabled={onlySet(settings.digits)} onChange={(digits) => change({ digits })} />
-            <Option label="Symbols" detail="! @ # $ % ^ & * - _ = + ?" checked={settings.symbols} disabled={onlySet(settings.symbols)} onChange={(symbols) => change({ symbols })} />
-            <Option label="Avoid similar characters" detail="Leaves out l, I, O, 0 and 1" checked={settings.avoidSimilar} onChange={(avoidSimilar) => change({ avoidSimilar })} />
+            <Option label={strings.uppercase} detail="A–Z" checked={settings.uppercase} disabled={onlySet(settings.uppercase)} onChange={(uppercase) => change({ uppercase })} />
+            <Option label={strings.lowercase} detail="a–z" checked={settings.lowercase} disabled={onlySet(settings.lowercase)} onChange={(lowercase) => change({ lowercase })} />
+            <Option label={strings.numbers} detail="0–9" checked={settings.digits} disabled={onlySet(settings.digits)} onChange={(digits) => change({ digits })} />
+            <Option label={strings.symbols} detail="! @ # $ % ^ & * - _ = + ?" checked={settings.symbols} disabled={onlySet(settings.symbols)} onChange={(symbols) => change({ symbols })} />
+            <Option label={strings.avoidSimilarCharacters} detail="Leaves out l, I, O, 0 and 1" checked={settings.avoidSimilar} onChange={(avoidSimilar) => change({ avoidSimilar })} />
           </div>
         </> : <>
-          <Range label="Words" value={settings.words} min={WORDS_RANGE.min} max={WORDS_RANGE.max} onChange={(count) => change({ words: count })} />
+          <Range label={strings.words} value={settings.words} min={WORDS_RANGE.min} max={WORDS_RANGE.max} onChange={(count) => change({ words: count })} />
           <div className="field">
-            <span className="generator-label">Separator</span>
-            <Segmented label="Separator" size="sm" value={settings.separator} onChange={(separator) => change({ separator })} options={separatorOptions} />
+            <span className="generator-label">{strings.separator}</span>
+            <Segmented label={strings.separator} size="sm" value={settings.separator} onChange={(separator) => change({ separator })} options={separatorOptions} />
           </div>
           <div className="generator-options">
-            <Option label="Capitalize words" checked={settings.capitalize} onChange={(capitalize) => change({ capitalize })} />
-            <Option label="Include a number" detail="Many websites ask for one" checked={settings.includeNumber} onChange={(includeNumber) => change({ includeNumber })} />
+            <Option label={strings.capitalizeWords} checked={settings.capitalize} onChange={(capitalize) => change({ capitalize })} />
+            <Option label={strings.includeANumber} detail="Many websites ask for one" checked={settings.includeNumber} onChange={(includeNumber) => change({ includeNumber })} />
           </div>
         </>}
       </div>

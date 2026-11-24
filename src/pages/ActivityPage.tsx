@@ -10,6 +10,7 @@ import { useRouteState } from "../app/router";
 import { useToast } from "../app/toast";
 import { api, type ActivityCategory, type ActivityEvent } from "../lib/api";
 import { cx, formatDateTime, relativeTime, toMillis } from "../lib/format";
+import { strings } from "../strings";
 
 const categoryLabels: Record<ActivityCategory, string> = { vault: "Vault", items: "Items", sync: "Sync", pairing: "Pairing", browser: "Browser", security: "Security" };
 
@@ -61,7 +62,7 @@ export function ActivityPage() {
   return (
     <div className="page page-narrow">
       <div className="toolbar">
-        <div className="chip-filter" role="radiogroup" aria-label="Filter by category">
+        <div className="chip-filter" role="radiogroup" aria-label={strings.filterByCategory}>
           {(["all", ...Object.keys(categoryLabels)] as Array<ActivityCategory | "all">).map((key) => (
             <button key={key} type="button" role="radio" aria-checked={filter === key} className={cx("filter-chip", filter === key && "is-selected")} onClick={() => setFilter(key)}>
               {key === "all" ? "All" : categoryLabels[key]}
@@ -70,14 +71,14 @@ export function ActivityPage() {
           ))}
         </div>
         <div className="toolbar-group">
-          <Button variant="ghost" icon={Trash2} onClick={() => void clear()} disabled={!log.data?.length}>Clear</Button>
+          <Button variant="ghost" icon={Trash2} onClick={() => void clear()} disabled={!log.data?.length}>{strings.clear}</Button>
         </div>
       </div>
-      {log.loading && !log.data ? <div className="card card-padded center"><Spinner label="Loading activity" /></div>
-        : log.error && !log.data ? <div className="card"><EmptyState icon={ScrollText} title="Activity log unavailable" body="This version of Nuvori doesn't record activity yet, or the log couldn't be read." action={<Button onClick={() => void log.reload()}>Try again</Button>} /></div>
+      {log.loading && !log.data ? <div className="card card-padded center"><Spinner label={strings.loadingActivity} /></div>
+        : log.error && !log.data ? <div className="card"><EmptyState icon={ScrollText} title={strings.activityLogUnavailable} body="This version of Nuvori doesn't record activity yet, or the log couldn't be read." action={<Button onClick={() => void log.reload()}>{strings.tryAgain}</Button>} /></div>
         : events.length === 0 ? <div className="card"><EmptyState icon={ScrollText} title={filter === "all" ? "No activity yet" : `No ${categoryLabels[filter as ActivityCategory].toLowerCase()} activity`} body="Unlocks, saves, syncs, and browser fills show up here. Events are kept until you close Nuvori." /></div>
         : <ActivityList events={events} />}
-      <p className="detail-meta">Activity never includes passwords, usernames, or item names.</p>
+      <p className="detail-meta">{strings.activityNeverIncludesPasswordsUsernamesOr}</p>
     </div>
   );
 }

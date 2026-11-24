@@ -11,6 +11,7 @@ import { iconHints } from "../lib/siteIcons";
 import { cx } from "../lib/format";
 import { buildIndex, fold, highlight, searchDocs, tokenize, type SearchDoc } from "../lib/search";
 import { useEntryActions, type QuickAction } from "./items/actions";
+import { strings } from "../strings";
 
 type Command = { id: string; title: string; hint: string; icon: LucideIcon; keywords: string; run: () => void };
 type Result =
@@ -123,15 +124,15 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
 
   let index = -1;
   return (
-    <dialog ref={ref} className="palette" aria-label="Search" onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => { if (event.target === ref.current) onClose(); }}>
+    <dialog ref={ref} className="palette" aria-label={strings.search} onCancel={(event) => { event.preventDefault(); onClose(); }} onMouseDown={(event) => { if (event.target === ref.current) onClose(); }}>
       {open && <div className="palette-surface">
         <div className="palette-input">
           <Search aria-hidden="true" />
           <input ref={input} type="text" role="combobox" aria-expanded="true" aria-controls="palette-results" aria-activedescendant={flat[active] ? `palette-${active}` : undefined}
-            aria-label="Search your vault" placeholder="Search passwords, cards, codes, notes…" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} spellCheck={false} autoComplete="off" />
-          <Kbd>Esc</Kbd>
+            aria-label={strings.searchYourVault} placeholder={strings.searchPasswordsCardsCodesNotes2} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} spellCheck={false} autoComplete="off" />
+          <Kbd>{strings.esc}</Kbd>
         </div>
-        <div className="palette-results" id="palette-results" role="listbox" ref={list} aria-label="Results">
+        <div className="palette-results" id="palette-results" role="listbox" ref={list} aria-label={strings.results}>
           {tokens.length > 0 && flat.length === 0 && <p className="palette-empty">No results for "{query}". Search matches titles, usernames, websites, tags, notes, and card last 4.</p>}
           {groups.map(({ group, items }) => {
             const GroupIcon = groupIcon(group);
@@ -175,8 +176,8 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
         </div>
         <div className="palette-footer">
           <span><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
-          <span><Kbd>Enter</Kbd> open</span>
-          <span><Kbd>Ctrl</Kbd><Kbd>Enter</Kbd> copy secret</span>
+          <span><Kbd>{strings.enter}</Kbd> open</span>
+          <span><Kbd>{strings.ctrl}</Kbd><Kbd>{strings.enter}</Kbd> copy secret</span>
         </div>
       </div>}
     </dialog>

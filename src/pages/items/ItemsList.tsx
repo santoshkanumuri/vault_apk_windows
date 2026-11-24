@@ -16,6 +16,7 @@ import { buildIndex, matchesFilter } from "../../lib/search";
 import { FolderDialog } from "../FolderDialog";
 import { EntryQuickActions } from "./actions";
 import { FilterInput, FolderPicker, SortPicker } from "./Toolbar";
+import { strings } from "../../strings";
 
 export function ItemsListPage({ category }: { category: Exclude<Category, "codes"> }) {
   const info = categories[category];
@@ -54,16 +55,16 @@ export function ItemsListPage({ category }: { category: Exclude<Category, "codes
         </div>
       </div>
 
-      {!loaded ? <div className="card card-padded center"><Spinner label="Loading" /></div>
+      {!loaded ? <div className="card card-padded center"><Spinner label={strings.loading} /></div>
         : ofType.length === 0 ? (
           <div className="card"><EmptyState icon={info.icon} title={`No ${info.label.toLowerCase()} yet`} body={`Add your first ${info.singular} to keep it in your encrypted vault.`} action={<Button variant="primary" icon={Plus} onClick={add}>Add {info.singular}</Button>} /></div>
         ) : visible.length === 0 ? (
-          <div className="card"><EmptyState icon={SearchX} title="No matches" body="Try another word, or clear the folder filter." action={<Button onClick={() => { setFilter(""); setFolderId(""); }}>Clear filters</Button>} /></div>
+          <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} body="Try another word, or clear the folder filter." action={<Button onClick={() => { setFilter(""); setFolderId(""); }}>{strings.clearFilters}</Button>} /></div>
         ) : (
           <>
             <div className="list-head">
               <p className="list-count">{plural(visible.length, info.singular)}{visible.length !== ofType.length ? ` of ${ofType.length}` : ""}</p>
-              {info.type === "CARD" && <Segmented label="View" size="sm" value={view} onChange={setView}
+              {info.type === "CARD" && <Segmented label={strings.view} size="sm" value={view} onChange={setView}
                 options={[{ value: "cards", label: "Cards", icon: CreditCard }, { value: "list", label: "List", icon: List }]} />}
             </div>
             {wallet ? (

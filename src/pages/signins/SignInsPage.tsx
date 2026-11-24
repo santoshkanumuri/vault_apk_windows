@@ -17,6 +17,7 @@ import { accountProblem, accountsOf, forLogin, groupBySite, providerName, provid
 import { FilterInput } from "../items/Toolbar";
 import marks from "../../lib/sign-in-marks.json";
 import "./signins.css";
+import { strings } from "../../strings";
 
 type Mark = { title: string; hex: string; path?: string; letter?: string };
 const MARKS = marks.marks as Record<string, Mark>;
@@ -113,26 +114,24 @@ export function SignInsPage() {
 
   return (
     <div className="page page-narrow signins-page">
-      <p className="toolbar-text">When you sign in to a site with Google, Apple, GitHub or another account in your browser, the Nuvori extension asks to remember which one you used. It reminds you on that site's sign-in page.</p>
+      <p className="toolbar-text">{strings.whenYouSignInToA}</p>
       {state && !state.enabled && (
-        <StatusBanner kind="info" title="Remembering sign-in methods is off"
-          action={<Button size="sm" busy={busy} onClick={() => void apply(() => api.setSignIns(true), "Sign-in methods on")}>Turn on</Button>}>
-          The extension doesn't watch sign-ins or show reminders. The methods below stay until you forget them.
-        </StatusBanner>
+        <StatusBanner kind="info" title={strings.rememberingSignInMethodsIsOff}
+          action={<Button size="sm" busy={busy} onClick={() => void apply(() => api.setSignIns(true), "Sign-in methods on")}>{strings.turnOn}</Button>}>{strings.theExtensionDoesnTWatchSign}</StatusBanner>
       )}
       {items.length > 0 && (
         <div className="toolbar signins-toolbar">
-          <FilterInput value={query} onChange={setQuery} placeholder="Search by site" />
+          <FilterInput value={query} onChange={setQuery} placeholder={strings.searchBySite} />
           <div className="toolbar-group">
-            <label className="sr-only" htmlFor="signin-account">Account</label>
+            <label className="sr-only" htmlFor="signin-account">{strings.account}</label>
             <select id="signin-account" className="input select select-compact" value={account} onChange={(event) => setAccount(event.target.value)}>
-              <option value="">All accounts</option>
+              <option value="">{strings.allAccounts}</option>
               {accounts.map((value) => <option key={value} value={value}>{value}</option>)}
-              {unknownAccounts && <option value={NO_ACCOUNT}>Account not known</option>}
+              {unknownAccounts && <option value={NO_ACCOUNT}>{strings.accountNotKnown}</option>}
             </select>
           </div>
           {providers.length > 1 && (
-            <div className="chip-filter" role="radiogroup" aria-label="Filter by sign-in provider" onKeyDown={onChipKey}>
+            <div className="chip-filter" role="radiogroup" aria-label={strings.filterBySignInProvider} onKeyDown={onChipKey}>
               {["", ...providers].map((id) => (
                 <button key={id || "all"} type="button" role="radio" data-provider={id || "all"} aria-checked={provider === id} tabIndex={provider === id ? 0 : -1}
                   className={cx("filter-chip", provider === id && "is-selected")} onClick={() => setProvider(id)}>
@@ -146,20 +145,20 @@ export function SignInsPage() {
         </div>
       )}
 
-      {loading && !state ? <div className="card card-padded center"><Spinner label="Loading sign-in methods" /></div>
+      {loading && !state ? <div className="card card-padded center"><Spinner label={strings.loadingSignInMethods} /></div>
         : error && !state ? (
-          <div className="card"><EmptyState icon={LogIn} title="Sign-in methods unavailable" body="Nuvori couldn't read them from your vault. Try again; if it keeps failing, restart Nuvori."
-            action={<Button onClick={() => void reload()}>Try again</Button>} /></div>
+          <div className="card"><EmptyState icon={LogIn} title={strings.signInMethodsUnavailable} body="Nuvori couldn't read them from your vault. Try again; if it keeps failing, restart Nuvori."
+            action={<Button onClick={() => void reload()}>{strings.tryAgain}</Button>} /></div>
         ) : items.length === 0 ? (
-          <div className="card"><EmptyState icon={LogIn} title="No sign-in methods yet"
+          <div className="card"><EmptyState icon={LogIn} title={strings.noSignInMethodsYet}
             body="Sign in to a site with “Continue with Google”, GitHub, Microsoft, Apple or another provider, and choose Save when the extension asks. Nuvori then shows which one, and which account, you used." /></div>
         ) : groups.length === 0 ? (
-          <div className="card"><EmptyState icon={SearchX} title="No matches" body="Try another site, or clear the filters."
-            action={filtered ? <Button onClick={() => { setQuery(""); setProvider(""); setAccount(""); }}>Clear filters</Button> : undefined} /></div>
+          <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} body="Try another site, or clear the filters."
+            action={filtered ? <Button onClick={() => { setQuery(""); setProvider(""); setAccount(""); }}>{strings.clearFilters}</Button> : undefined} /></div>
         ) : (
           <>
             <p className="list-count">{plural(groups.length, "site")} · {plural(groups.reduce((sum, group) => sum + group.methods.length, 0), "sign-in method")}</p>
-            <ul className="signin-groups" aria-label="Sign-in methods by site">
+            <ul className="signin-groups" aria-label={strings.signInMethodsBySite}>
               {groups.map((group) => {
                 const logins = state?.logins[group.site] ?? [];
                 return (
@@ -181,7 +180,7 @@ export function SignInsPage() {
                         <li key={item.id} className="signin-method">
                           <ProviderMark provider={item.provider} size={30} />
                           <span className="signin-text">
-                            <span className="signin-title">{providerName(item.provider)}{item.account ? <span className="signin-account"> · {item.account}</span> : <span className="signin-unknown"> · account not known</span>}</span>
+                            <span className="signin-title">{providerName(item.provider)}{item.account ? <span className="signin-account"> · {item.account}</span> : <span className="signin-unknown">{strings.accountNotKnown2}</span>}</span>
                             <span className="signin-meta">
                               Last used <time dateTime={new Date(item.lastUsedAt).toISOString()} title={formatDateTime(item.lastUsedAt)}>{relativeTime(item.lastUsedAt, now).replace(/^Just/, "just").replace(/^Yesterday/, "yesterday")}</time>
                               {" · "}{plural(item.useCount, "time")}
@@ -200,7 +199,7 @@ export function SignInsPage() {
             </ul>
           </>
         )}
-      <p className="detail-meta">Kept in your encrypted vault on this PC. Nuvori never stores a password, token or code from these sign-ins. Provider logos only show which sign-in you used.</p>
+      <p className="detail-meta">{strings.keptInYourEncryptedVaultOn}</p>
       <AccountDialog item={editing} busy={busy} onClose={() => setEditing(null)}
         onSave={async (value) => { if (editing && (await apply(() => api.editSignIn(editing.id, value), "Account saved", "Couldn't save the account."))) setEditing(null); }} />
     </div>
@@ -214,12 +213,12 @@ function AccountDialog({ item, busy, onClose, onSave }: { item: SignIn | null; b
   return (
     <Dialog open={item !== null} title={item?.account ? "Edit account" : "Add account"} description={item ? `${providerName(item.provider)} on ${item.site}` : undefined} onClose={onClose}
       footer={<>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" busy={busy} disabled={problem !== null} onClick={() => void onSave(value)}>Save</Button>
+        <Button variant="ghost" onClick={onClose}>{strings.cancel}</Button>
+        <Button variant="primary" busy={busy} disabled={problem !== null} onClick={() => void onSave(value)}>{strings.save}</Button>
       </>}>
       <form onSubmit={(event) => { event.preventDefault(); if (!problem) void onSave(value); }}>
-        <TextField label="Account" value={value} onValue={setValue} maxLength={256} autoComplete="off" spellCheck={false} error={problem ?? undefined}
-          hint="The email address or user name you use with this provider. Leave it empty if you don't know." autoFocus />
+        <TextField label={strings.account} value={value} onValue={setValue} maxLength={256} autoComplete="off" spellCheck={false} error={problem ?? undefined}
+          hint={strings.theEmailAddressOrUserName} autoFocus />
       </form>
     </Dialog>
   );
@@ -233,7 +232,7 @@ export function LoginSignIns({ loginId }: { loginId: string }) {
   if (!methods.length) return null;
   return (
     <section className="card card-padded login-signins" aria-labelledby={`signins-${loginId}`}>
-      <h2 id={`signins-${loginId}`} className="login-signins-title">Also signs in with</h2>
+      <h2 id={`signins-${loginId}`} className="login-signins-title">{strings.alsoSignsInWith}</h2>
       <ul className="signin-methods">
         {methods.slice(0, 4).map((item) => (
           <li key={item.id} className="signin-method is-compact">
@@ -245,7 +244,7 @@ export function LoginSignIns({ loginId }: { loginId: string }) {
           </li>
         ))}
       </ul>
-      <Button size="sm" variant="ghost" icon={LogIn} onClick={() => void router.navigate({ page: "signins" })}>All sign-in methods</Button>
+      <Button size="sm" variant="ghost" icon={LogIn} onClick={() => void router.navigate({ page: "signins" })}>{strings.allSignInMethods}</Button>
     </section>
   );
 }
@@ -263,10 +262,10 @@ export function SignInsSettingRow() {
     finally { setBusy(false); }
   };
   return (
-    <SettingsRow icon={LogIn} title="Remember sign-in methods"
+    <SettingsRow icon={LogIn} title={strings.rememberSignInMethods}
       description={state.enabled
         ? "The extension asks to remember when you use “Continue with Google”, GitHub or another provider, and reminds you on that site next time. Never in private windows."
         : "Off. The extension doesn't watch sign-ins or show reminders. Remembered methods stay until you forget them."}
-      control={<Toggle label="Remember sign-in methods" checked={state.enabled} disabled={busy} onChange={(value) => void change(value)} />} />
+      control={<Toggle label={strings.rememberSignInMethods} checked={state.enabled} disabled={busy} onChange={(value) => void change(value)} />} />
   );
 }

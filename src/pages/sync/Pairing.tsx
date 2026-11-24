@@ -12,6 +12,7 @@ import { useVault } from "../../app/vault";
 import { api, type PairingStatus } from "../../lib/api";
 import { humanError } from "../../lib/errors";
 import { cx } from "../../lib/format";
+import { strings } from "../../strings";
 
 const idle: PairingStatus = { stage: "", confirmation: "", message: "", invitation: "" };
 
@@ -85,10 +86,10 @@ export function PairedNotice() {
   };
   const review = status.needsReview ?? 0;
   return (
-    <StatusBanner kind={review ? "info" : "success"} title="Paired with your phone"
+    <StatusBanner kind={review ? "info" : "success"} title={strings.pairedWithYourPhone}
       action={<div className="button-row">
         {review > 0 && <Button size="sm" variant="primary" onClick={() => void router.navigate({ page: "trash" })}>Review {review === 1 ? "1 item" : `${review} items`}</Button>}
-        <Button size="sm" variant="ghost" onClick={dismiss}>Dismiss</Button>
+        <Button size="sm" variant="ghost" onClick={dismiss}>{strings.dismiss}</Button>
       </div>}>
       {status.message}
     </StatusBanner>
@@ -105,7 +106,7 @@ function stepFor(stage: string): number {
 function Stepper({ step }: { step: number }) {
   const steps = ["Connect", "Confirm code", "Import vault"];
   return (
-    <ol className="stepper" aria-label="Pairing steps">
+    <ol className="stepper" aria-label={strings.pairingSteps}>
       {steps.map((label, index) => {
         const number = index + 1;
         const state = number < step ? "done" : number === step ? "active" : "todo";
@@ -272,14 +273,14 @@ export function PairingCard() {
     <section className="card card-padded pairing" aria-labelledby="pairing-title">
       <header className="card-header compact">
         <div className="card-heading">
-          <h2 id="pairing-title">Pair with your phone</h2>
-          <p>Both devices confirm the same code before this PC receives a copy of your vault.</p>
+          <h2 id="pairing-title">{strings.pairWithYourPhone}</h2>
+          <p>{strings.bothDevicesConfirmTheSameCode}</p>
         </div>
       </header>
       <Stepper step={step} />
 
       {statusError && <StatusBanner kind="warning">{statusError}</StatusBanner>}
-      {stage === "failed" && <StatusBanner kind="error" title="Pairing didn't finish">{pairing.message || "Start again from your phone."}</StatusBanner>}
+      {stage === "failed" && <StatusBanner kind="error" title={strings.pairingDidnTFinish}>{pairing.message || "Start again from your phone."}</StatusBanner>}
       {error && <StatusBanner kind="error">{error}</StatusBanner>}
 
       {stage === "confirm" ? (
@@ -287,57 +288,57 @@ export function PairingCard() {
           <p>{pairing.message || "Compare this code with the one on your phone. Confirm on both devices."}</p>
           <output className="pairing-code" aria-label={`Pairing code ${pairing.confirmation.split("").join(" ")}`}>{pairing.confirmation}</output>
           <div className="button-row">
-            <Button variant="primary" size="lg" icon={Check} onClick={() => void action("approve")}>Codes match</Button>
-            <Button size="lg" onClick={() => void action("cancel")}>They don't match</Button>
+            <Button variant="primary" size="lg" icon={Check} onClick={() => void action("approve")}>{strings.codesMatch}</Button>
+            <Button size="lg" onClick={() => void action("cancel")}>{strings.theyDonTMatch}</Button>
           </div>
         </div>
       ) : stage === "offering" ? (
         <div className="pairing-offer">
-          <div className="qr-frame"><QRCodeSVG value={pairing.invitation} size={240} marginSize={2} role="img" aria-label="Pairing QR for your phone to scan" /></div>
+          <div className="qr-frame"><QRCodeSVG value={pairing.invitation} size={240} marginSize={2} role="img" aria-label={strings.pairingQrForYourPhoneTo} /></div>
           <div className="pairing-offer-text">
-            <p><strong>On your phone:</strong> open Devices &amp; sync, tap <em>Scan Windows QR</em>, and point it at this code.</p>
+            <p><strong>{strings.onYourPhone}</strong> open Devices &amp; sync, tap <em>{strings.scanWindowsQr}</em>, and point it at this code.</p>
             <p className="muted small">{pairing.message}</p>
-            <Button onClick={() => void action("cancel")} icon={X}>Cancel</Button>
+            <Button onClick={() => void action("cancel")} icon={X}>{strings.cancel}</Button>
           </div>
         </div>
       ) : stage === "connecting" || stage === "transferring" || stage === "canceling" ? (
         <div className="pairing-progress">
           <div className="pairing-progress-row"><Spinner /><span>{pairing.message || (stage === "transferring" ? "Receiving the encrypted vault copy…" : "Connecting…")}</span></div>
-          <ProgressBar label="Pairing progress" indeterminate />
-          <Button disabled={stage === "canceling"} onClick={() => void action("cancel")} icon={X}>Cancel</Button>
+          <ProgressBar label={strings.pairingProgress} indeterminate />
+          <Button disabled={stage === "canceling"} onClick={() => void action("cancel")} icon={X}>{strings.cancel}</Button>
         </div>
       ) : stage === "paired" ? (
-        <StatusBanner kind="success" title="Paired"
+        <StatusBanner kind="success" title={strings.paired}
           action={pairing.conflicts ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>Review {pairing.conflicts === 1 ? "1 conflict" : `${pairing.conflicts} conflicts`}</Button>
             : pairing.needsReview ? <Button size="sm" onClick={() => void router.navigate({ page: "trash" })}>Review {pairing.needsReview === 1 ? "1 item" : `${pairing.needsReview} items`}</Button> : undefined}>
           {pairing.message || "This PC and your phone now keep their own copies in sync."}
         </StatusBanner>
       ) : (
         <>
-          <Segmented label="Pairing method" value={mode} onChange={(value) => { setMode(value); setError(""); setFieldError({}); setScanning(false); }}
+          <Segmented label={strings.pairingMethod} value={mode} onChange={(value) => { setMode(value); setError(""); setFieldError({}); setScanning(false); }}
             options={[{ value: "scan", label: "Scan phone's QR", icon: ScanLine }, { value: "show", label: "Show QR to phone", icon: QrCode }]} />
           {mode === "scan" ? (
             <form className="form-stack" onSubmit={(event) => void start(event)} noValidate>
-              <p className="muted small">On your phone, open <strong>Devices &amp; sync</strong> and choose <strong>Create QR</strong>. Scan it with this PC's camera, or copy the link and paste it below.</p>
+              <p className="muted small">On your phone, open <strong>Devices &amp; sync</strong> and choose <strong>{strings.createQr}</strong>. Scan it with this PC's camera, or copy the link and paste it below.</p>
               <div className="button-row">
                 <Button icon={scanning ? CameraOff : Camera} onClick={() => { setScanNotice(""); setScanning((value) => !value); }}>{scanning ? "Stop camera" : "Use camera"}</Button>
-                <Button icon={ImageUp} onClick={() => qrImageInput.current?.click()}>Read QR image</Button>
-                <input ref={qrImageInput} type="file" accept="image/*" className="sr-only" tabIndex={-1} aria-label="Choose pairing QR image" onChange={(event) => void readQrImage(event.target.files?.[0])} />
+                <Button icon={ImageUp} onClick={() => qrImageInput.current?.click()}>{strings.readQrImage}</Button>
+                <input ref={qrImageInput} type="file" accept="image/*" className="sr-only" tabIndex={-1} aria-label={strings.choosePairingQrImage} onChange={(event) => void readQrImage(event.target.files?.[0])} />
               </div>
-              {scanning && <video ref={camera} className="pairing-camera" autoPlay muted playsInline aria-label="Camera preview for the phone's pairing QR" />}
+              {scanning && <video ref={camera} className="pairing-camera" autoPlay muted playsInline aria-label={strings.cameraPreviewForThePhoneS} />}
               {scanNotice && <p className="muted small" role="status">{scanNotice}</p>}
-              <PasswordField ref={linkInput} label="Setup link" value={setupLink} onValue={(value) => { setSetupLink(value); setFieldError((current) => ({ ...current, link: undefined })); }} autoComplete="off" hint="Starts with nuvori-pair://v3/. It contains a one-time secret." error={fieldError.link} />
-              <PasswordField ref={passwordInput} label="Phone's master password" value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError((current) => ({ ...current, password: undefined })); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
+              <PasswordField ref={linkInput} label={strings.setupLink} value={setupLink} onValue={(value) => { setSetupLink(value); setFieldError((current) => ({ ...current, link: undefined })); }} autoComplete="off" hint={strings.startsWithNuvoriPairV3It} error={fieldError.link} />
+              <PasswordField ref={passwordInput} label={strings.phoneSMasterPassword} value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError((current) => ({ ...current, password: undefined })); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
               <div className="form-actions start">
-                <Button variant="primary" type="submit" busy={busy}>Continue</Button>
+                <Button variant="primary" type="submit" busy={busy}>{strings.continue}</Button>
               </div>
             </form>
           ) : (
             <form className="form-stack" onSubmit={(event) => void startReverse(event)} noValidate>
-              <p className="muted small">Use this if your phone can't reach this PC. This PC shows a QR; your phone scans it with <strong>Scan Windows QR</strong>.</p>
-              <PasswordField ref={passwordInput} label="Phone's master password" value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError({}); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
+              <p className="muted small">Use this if your phone can't reach this PC. This PC shows a QR; your phone scans it with <strong>{strings.scanWindowsQr}</strong>.</p>
+              <PasswordField ref={passwordInput} label={strings.phoneSMasterPassword} value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError({}); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
               <div className="form-actions start">
-                <Button variant="primary" type="submit" icon={QrCode} busy={busy}>Show QR</Button>
+                <Button variant="primary" type="submit" icon={QrCode} busy={busy}>{strings.showQr}</Button>
               </div>
             </form>
           )}

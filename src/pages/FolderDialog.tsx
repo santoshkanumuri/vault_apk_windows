@@ -7,6 +7,7 @@ import { useConfirm } from "../app/confirm";
 import { useToast } from "../app/toast";
 import { useVault } from "../app/vault";
 import { api, type VaultGroup } from "../lib/api";
+import { strings } from "../strings";
 
 type Props = {
   open: boolean;
@@ -75,14 +76,14 @@ export function FolderDialog({ open, onClose, scope, scopeLabel, folder, onDelet
   return (
     <Dialog open={open} onClose={onClose} title={folder ? "Edit folder" : "New folder"} locked={busy}
       footer={<>
-        {folder && <Button variant="ghost" className="btn-danger-text push-start" icon={Trash2} onClick={() => void remove()} disabled={busy}>Delete</Button>}
-        <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button variant="primary" type="submit" form="folder-form" busy={busy}>Save</Button>
+        {folder && <Button variant="ghost" className="btn-danger-text push-start" icon={Trash2} onClick={() => void remove()} disabled={busy}>{strings.delete}</Button>}
+        <Button variant="ghost" onClick={onClose} disabled={busy}>{strings.cancel}</Button>
+        <Button variant="primary" type="submit" form="folder-form" busy={busy}>{strings.save}</Button>
       </>}>
       <form id="folder-form" className="form-stack" onSubmit={(event) => void save(event)}>
-        <TextField label="Name" value={name} onValue={(value) => { setName(value); setError(""); }} error={error} maxLength={120} required data-autofocus />
-        <SelectField label="Available in" value={folderType} onValue={setFolderType} options={[{ value: scope, label: scopeLabel }, { value: "", label: "All categories" }, ...(folder && folder.folderType !== scope && folder.folderType !== "" ? [{ value: folder.folderType, label: "Its original category" }] : [])]} />
-        <TextArea label="Notes" value={notes} onValue={setNotes} rows={3} hint="Optional" />
+        <TextField label={strings.name} value={name} onValue={(value) => { setName(value); setError(""); }} error={error} maxLength={120} required data-autofocus />
+        <SelectField label={strings.availableIn} value={folderType} onValue={setFolderType} options={[{ value: scope, label: scopeLabel }, { value: "", label: "All categories" }, ...(folder && folder.folderType !== scope && folder.folderType !== "" ? [{ value: folder.folderType, label: "Its original category" }] : [])]} />
+        <TextArea label={strings.notes} value={notes} onValue={setNotes} rows={3} hint={strings.optional} />
       </form>
     </Dialog>
   );

@@ -11,6 +11,7 @@ import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
 import { api, type SyncConflict } from "../../lib/api";
 import { formatDateTime, plural, relativeTime, toMillis } from "../../lib/format";
+import { strings } from "../../strings";
 
 const typeInfo: Record<SyncConflict["entityType"], { label: string; icon: LucideIcon }> = {
   entry: { label: "Item", icon: KeyRound },
@@ -54,16 +55,14 @@ export function ConflictsPage() {
 
   return (
     <div className="page page-narrow">
-      {conflicts.loading && !conflicts.data ? <div className="card card-padded center"><Spinner label="Loading" /></div>
+      {conflicts.loading && !conflicts.data ? <div className="card card-padded center"><Spinner label={strings.loading} /></div>
         : conflicts.error && !conflicts.data ? (
-          <StatusBanner kind="warning" title="Conflict review isn't available">This version of Nuvori can't list conflicts yet. Review them on your phone under Devices.</StatusBanner>
+          <StatusBanner kind="warning" title={strings.conflictReviewIsnTAvailable}>{strings.thisVersionOfNuvoriCanT}</StatusBanner>
         ) : list.length === 0 ? (
-          <div className="card"><EmptyState icon={CircleCheck} title="Nothing to review" body="Changes made on both devices will appear here." action={<Button onClick={() => void router.back()}>Back</Button>} /></div>
+          <div className="card"><EmptyState icon={CircleCheck} title={strings.nothingToReview} body="Changes made on both devices will appear here." action={<Button onClick={() => void router.back()}>{strings.back}</Button>} /></div>
         ) : (
           <>
-            <StatusBanner kind="warning" title={`${plural(list.length, "change")} edited on both devices`}>
-              Both versions are kept until you choose. Your choice syncs to every device.
-            </StatusBanner>
+            <StatusBanner kind="warning" title={`${plural(list.length, "change")} edited on both devices`}>{strings.bothVersionsAreKeptUntilYou}</StatusBanner>
             <ul className="conflict-list">
               {list.map((conflict) => {
                 const info = typeInfo[conflict.entityType] ?? typeInfo.entry;
@@ -80,14 +79,14 @@ export function ConflictsPage() {
                     </div>
                     <div className="conflict-sides">
                       <div className="conflict-side">
-                        <span className="conflict-side-label"><Laptop aria-hidden="true" />This PC{localNewer && <span className="newer">Newer</span>}</span>
+                        <span className="conflict-side-label"><Laptop aria-hidden="true" />This PC{localNewer && <span className="newer">{strings.newer}</span>}</span>
                         <span title={formatDateTime(conflict.localUpdatedAt)}>Updated {relativeTime(conflict.localUpdatedAt).toLowerCase()}</span>
-                        <Button variant={localNewer ? "primary" : "secondary"} block busy={busy === conflict.id} disabled={busy !== ""} onClick={() => void resolve(conflict, "local")}>Keep this PC's version</Button>
+                        <Button variant={localNewer ? "primary" : "secondary"} block busy={busy === conflict.id} disabled={busy !== ""} onClick={() => void resolve(conflict, "local")}>{strings.keepThisPcSVersion}</Button>
                       </div>
                       <div className="conflict-side">
-                        <span className="conflict-side-label"><Smartphone aria-hidden="true" />{conflict.remoteDevice || "Phone"}{!localNewer && <span className="newer">Newer</span>}</span>
+                        <span className="conflict-side-label"><Smartphone aria-hidden="true" />{conflict.remoteDevice || "Phone"}{!localNewer && <span className="newer">{strings.newer}</span>}</span>
                         <span title={formatDateTime(conflict.remoteUpdatedAt)}>Updated {relativeTime(conflict.remoteUpdatedAt).toLowerCase()}</span>
-                        <Button variant={!localNewer ? "primary" : "secondary"} block busy={busy === conflict.id} disabled={busy !== ""} onClick={() => void resolve(conflict, "remote")}>Keep phone version</Button>
+                        <Button variant={!localNewer ? "primary" : "secondary"} block busy={busy === conflict.id} disabled={busy !== ""} onClick={() => void resolve(conflict, "remote")}>{strings.keepPhoneVersion}</Button>
                       </div>
                     </div>
                   </li>

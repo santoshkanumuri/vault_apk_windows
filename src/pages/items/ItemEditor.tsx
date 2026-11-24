@@ -15,6 +15,7 @@ import { categories, emptyEntry, foldersFor, profileFields, profileFrom, type Ca
 import { cx } from "../../lib/format";
 import { passwordStrength } from "../../lib/strength";
 import { isValidSecret } from "../../lib/totp";
+import { strings } from "../../strings";
 
 /** Registers a "Discard changes?" guard while the form is dirty. */
 export function useUnsavedGuard(dirty: boolean) {
@@ -100,7 +101,7 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
   };
 
   if (id && !existing) {
-    return <div className="page page-narrow"><StatusBanner kind="warning" title="This item isn't available">It may have been deleted on another device.</StatusBanner></div>;
+    return <div className="page page-narrow"><StatusBanner kind="warning" title={strings.thisItemIsnTAvailable}>{strings.itMayHaveBeenDeletedOn}</StatusBanner></div>;
   }
 
   return (
@@ -111,52 +112,52 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
           <TextField label={type === "CARD" ? "Card name" : type === "PASSWORD" || type === "AUTHENTICATOR" ? "Service" : "Title"} value={draft.title} onValue={(v) => set("title", v)} error={errors.title} placeholder={type === "CARD" ? "e.g. Travel card" : type === "PASSWORD" ? "e.g. GitHub" : undefined} autoFocus={!existing} required maxLength={300} />
           {type === "PASSWORD" && <LoginFields draft={draft} set={set} errors={errors} />}
           {type === "CARD" && <>
-            <TextField label="Card number" value={draft.primaryValue} onValue={(v) => set("primaryValue", v.replace(/\D/g, "").slice(0, 19))} error={errors.primaryValue} inputMode="numeric" autoComplete="off" className="mono" required />
+            <TextField label={strings.cardNumber} value={draft.primaryValue} onValue={(v) => set("primaryValue", v.replace(/\D/g, "").slice(0, 19))} error={errors.primaryValue} inputMode="numeric" autoComplete="off" className="mono" required />
             <div className="field-row">
-              <SelectField label="Type" value={draft.cardKind} onValue={(v) => set("cardKind", v as EntryDraft["cardKind"])} options={[{ value: "CREDIT", label: "Credit" }, { value: "DEBIT", label: "Debit" }]} />
-              <TextField label="Network" value={draft.network} onValue={(v) => set("network", v)} placeholder="Visa, Mastercard…" />
+              <SelectField label={strings.type} value={draft.cardKind} onValue={(v) => set("cardKind", v as EntryDraft["cardKind"])} options={[{ value: "CREDIT", label: "Credit" }, { value: "DEBIT", label: "Debit" }]} />
+              <TextField label={strings.network} value={draft.network} onValue={(v) => set("network", v)} placeholder={strings.visaMastercard} />
             </div>
-            <TextField label="Name on card" value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} autoComplete="off" />
+            <TextField label={strings.nameOnCard} value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} autoComplete="off" />
             <div className="field-row">
-              <TextField label="Expiry" value={draft.tertiaryValue} onValue={(v) => set("tertiaryValue", formatExpiry(v))} placeholder="MM/YY" inputMode="numeric" autoComplete="off" className="mono" />
-              <PasswordField label="Security code" value={draft.fourthValue} onValue={(v) => set("fourthValue", v.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" autoComplete="off" />
+              <TextField label={strings.expiry} value={draft.tertiaryValue} onValue={(v) => set("tertiaryValue", formatExpiry(v))} placeholder={strings.mmYy} inputMode="numeric" autoComplete="off" className="mono" />
+              <PasswordField label={strings.securityCode} value={draft.fourthValue} onValue={(v) => set("fourthValue", v.replace(/\D/g, "").slice(0, 4))} inputMode="numeric" autoComplete="off" />
             </div>
             <CardColorPicker value={draft.color ?? DEFAULT_CARD_COLOR} onChange={(color) => set("color", color)}
               used={usedColors(otherCardColors)} title={draft.title} lastDigits={draft.primaryValue.slice(-4)} />
           </>}
           {type === "AUTHENTICATOR" && <>
-            <TextField label="Account" value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} placeholder="name@example.com" autoComplete="off" />
-            <PasswordField label="Setup key" value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v.replace(/[\s-]/g, "").toUpperCase())} error={errors.secondaryValue} hint="The text key shown under the QR when you set up two-step sign-in." autoComplete="off" required />
+            <TextField label={strings.account} value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} placeholder={strings.nameExampleCom} autoComplete="off" />
+            <PasswordField label={strings.setupKey} value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v.replace(/[\s-]/g, "").toUpperCase())} error={errors.secondaryValue} hint={strings.theTextKeyShownUnderThe} autoComplete="off" required />
             <details className="advanced">
-              <summary>Code settings</summary>
+              <summary>{strings.codeSettings}</summary>
               <div className="field-row three">
-                <SelectField label="Algorithm" value={draft.totpAlgorithm} onValue={(v) => set("totpAlgorithm", v)} options={[{ value: "SHA1", label: "SHA1" }, { value: "SHA256", label: "SHA256" }, { value: "SHA512", label: "SHA512" }]} />
-                <TextField label="Digits" type="number" min={6} max={8} value={String(draft.totpDigits)} onValue={(v) => set("totpDigits", Number(v))} error={errors.totpDigits} />
-                <TextField label="Period (s)" type="number" min={1} max={300} value={String(draft.totpPeriod)} onValue={(v) => set("totpPeriod", Number(v))} error={errors.totpPeriod} />
+                <SelectField label={strings.algorithm} value={draft.totpAlgorithm} onValue={(v) => set("totpAlgorithm", v)} options={[{ value: "SHA1", label: "SHA1" }, { value: "SHA256", label: "SHA256" }, { value: "SHA512", label: "SHA512" }]} />
+                <TextField label={strings.digits} type="number" min={6} max={8} value={String(draft.totpDigits)} onValue={(v) => set("totpDigits", Number(v))} error={errors.totpDigits} />
+                <TextField label={strings.periodS} type="number" min={1} max={300} value={String(draft.totpPeriod)} onValue={(v) => set("totpPeriod", Number(v))} error={errors.totpPeriod} />
               </div>
             </details>
           </>}
           {type === "QUESTION" && <>
-            <TextField label="Question" value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} error={errors.primaryValue} required />
-            <PasswordField label="Answer" value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue} autoComplete="off" required />
+            <TextField label={strings.question} value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} error={errors.primaryValue} required />
+            <PasswordField label={strings.answer} value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue} autoComplete="off" required />
           </>}
         </>}
 
-        <TextArea label="Notes" value={draft.notes} onValue={(v) => set("notes", v)} rows={3} />
-        <TextField label="Tags" value={draft.tags} onValue={(v) => set("tags", v)} placeholder="work, travel" hint="Separate with commas." />
+        <TextArea label={strings.notes} value={draft.notes} onValue={(v) => set("notes", v)} rows={3} />
+        <TextField label={strings.tags} value={draft.tags} onValue={(v) => set("tags", v)} placeholder={strings.workTravel} hint={strings.separateWithCommas} />
         {folders.length > 0 && (
           <fieldset className="fieldset">
-            <legend>Folders</legend>
+            <legend>{strings.folders}</legend>
             <div className="check-grid">
               {folders.map((folder) => <Checkbox key={folder.id} label={folder.name} checked={draft.groupIds.includes(folder.id)}
                 onChange={(checked) => set("groupIds", checked ? [...draft.groupIds, folder.id] : draft.groupIds.filter((value) => value !== folder.id))} />)}
             </div>
           </fieldset>
         )}
-        <Checkbox label="Favorite" checked={draft.favorite} onChange={(checked) => set("favorite", checked)} />
+        <Checkbox label={strings.favorite} checked={draft.favorite} onChange={(checked) => set("favorite", checked)} />
 
         <div className="form-actions">
-          <Button variant="ghost" onClick={() => void router.back()} disabled={busy}>Cancel</Button>
+          <Button variant="ghost" onClick={() => void router.back()} disabled={busy}>{strings.cancel}</Button>
           <Button variant="primary" type="submit" icon={Save} busy={busy}>{existing ? "Save changes" : `Save ${info.singular}`}</Button>
         </div>
       </form>
@@ -173,11 +174,11 @@ function LoginFields({ draft, set, errors }: { draft: EntryDraft; set: <K extend
   const quickGenerate = () => generateWithSavedSettings().then((value) => { setGenerateError(""); set("secondaryValue", value); },
     () => setGenerateError("Couldn't generate a passphrase. Open the generator options and try again."));
   return <>
-    <TextField label="Username or email" value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} autoComplete="off" spellCheck={false} />
-    <PasswordField label="Password" value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue || generateError || undefined} autoComplete="new-password" required
+    <TextField label={strings.usernameOrEmail} value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} autoComplete="off" spellCheck={false} />
+    <PasswordField label={strings.password} value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue || generateError || undefined} autoComplete="new-password" required
       trailing={<span className="password-tools">
         <button type="button" className="link-button" onClick={() => void quickGenerate()}><Wand2 aria-hidden="true" /> Generate</button>
-        <IconButton label="Generator options" icon={SlidersHorizontal} size="sm" onClick={() => setGenerator(true)} />
+        <IconButton label={strings.generatorOptions} icon={SlidersHorizontal} size="sm" onClick={() => setGenerator(true)} />
       </span>} />
     <PasswordGeneratorDialog open={generator} onClose={() => setGenerator(false)} onUse={(value) => { setGenerator(false); setGenerateError(""); set("secondaryValue", value); }} />
     {draft.secondaryValue && (
@@ -186,7 +187,7 @@ function LoginFields({ draft, set, errors }: { draft: EntryDraft; set: <K extend
         <span className="strength-label">{strength.label}</span>
       </div>
     )}
-    <TextField label="Website" value={draft.tertiaryValue} onValue={(v) => set("tertiaryValue", v)} placeholder="https://example.com" type="url" spellCheck={false} />
+    <TextField label={strings.website} value={draft.tertiaryValue} onValue={(v) => set("tertiaryValue", v)} placeholder={strings.httpsExampleCom} type="url" spellCheck={false} />
   </>;
 }
 
@@ -194,7 +195,7 @@ function ProfileFields({ draft, set, error }: { draft: EntryDraft; set: <K exten
   const profile = profileFrom(draft.primaryValue);
   const update = (key: keyof Profile, value: string) => set("primaryValue", JSON.stringify({ ...profile, [key]: value }));
   return <>
-    <TextField label="Profile name" value={draft.title} onValue={(v) => set("title", v)} placeholder="e.g. Home" required />
+    <TextField label={strings.profileName} value={draft.title} onValue={(v) => set("title", v)} placeholder={strings.eGHome} required />
     {error && <StatusBanner kind="error">{error}</StatusBanner>}
     <div className="field-row">
       {profileFields.map(([key, label]) => <TextField key={key} label={label} value={profile[key]} onValue={(v) => update(key, v)} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete="off" fieldClassName={key === "address1" || key === "address2" ? "span-2" : undefined} />)}

@@ -12,6 +12,7 @@ import { api, type MemberDevice, type MembershipStatus } from "../../lib/api";
 import { isUnavailable } from "../../lib/errors";
 import { cx, formatDateTime, plural, relativeTime } from "../../lib/format";
 import { isStale, removeHelp, splitDevices, staleHint } from "../../lib/deviceList";
+import { strings } from "../../strings";
 
 const platformIcon: Record<MemberDevice["platform"], LucideIcon> = { android: Smartphone, windows: Monitor, unknown: CircleHelp };
 
@@ -81,20 +82,20 @@ export function useLeaveGroup(managerName?: string) {
       : `This PC has no saved route to ${phone}, so it can't tell it. After leaving, remove this PC on your phone too (Devices & sync).`;
 
   const dialog = (
-    <Dialog open={open} title="Leave the sync group?" onClose={() => setOpen(false)} size="md"
-      description="This PC stops syncing. Your phone and other devices keep their copies."
+    <Dialog open={open} title={strings.leaveTheSyncGroup} onClose={() => setOpen(false)} size="md"
+      description={strings.thisPcStopsSyncingYourPhone}
       footer={<>
-        <Button variant="ghost" onClick={() => setOpen(false)} data-confirm-default="">Cancel</Button>
+        <Button variant="ghost" onClick={() => setOpen(false)} data-confirm-default="">{strings.cancel}</Button>
         <Button variant="danger" onClick={() => void leave()}>{choice === "keep" ? "Leave group" : "Leave and empty this PC"}</Button>
       </>}>
-      <div className="leave-choices" role="radiogroup" aria-label="What happens to this PC's items">
+      <div className="leave-choices" role="radiogroup" aria-label={strings.whatHappensToThisPcS}>
         <label className={cx("leave-choice", choice === "keep" && "is-selected")}>
           <input type="radio" name="leave-choice" checked={choice === "keep"} onChange={() => setChoice("keep")} />
-          <span><strong>Keep this PC's items</strong><small>Everything stays here as a separate vault. If this PC pairs again later, these items are added as new copies.</small></span>
+          <span><strong>{strings.keepThisPcSItems}</strong><small>{strings.everythingStaysHereAsASeparate}</small></span>
         </label>
         <label className={cx("leave-choice", choice === "empty" && "is-selected")}>
           <input type="radio" name="leave-choice" checked={choice === "empty"} onChange={() => setChoice("empty")} />
-          <span><strong>Start with an empty vault</strong><small>Remove every item from this PC, ready to join another sync group. Your master password stays the same.</small></span>
+          <span><strong>{strings.startWithAnEmptyVault}</strong><small>{strings.removeEveryItemFromThisPc}</small></span>
         </label>
       </div>
       {told && <StatusBanner kind={phoneAddress ? "info" : "warning"}>{told}</StatusBanner>}
@@ -122,8 +123,8 @@ export function RemovedNoticeBanner({ membership, reload }: { membership: Member
     }
   };
   return (
-    <StatusBanner kind="warning" title="This PC was removed from the sync group"
-      action={<Button size="sm" onClick={() => void dismiss()} busy={busy}>Dismiss</Button>}>
+    <StatusBanner kind="warning" title={strings.thisPcWasRemovedFromThe2}
+      action={<Button size="sm" onClick={() => void dismiss()} busy={busy}>{strings.dismiss}</Button>}>
       Removed by {notice.by || "the managing device"}{notice.at ? ` on ${formatDateTime(notice.at)}` : ""}. Your items stay on this PC. To sync again, pair from your phone: this PC joins as a new device, and its items are added to the group as new copies.
       {notice.kept ? ` ${plural(notice.kept, "item")} from your other devices had not finished syncing. ${notice.kept === 1 ? "It is" : "They are"} in Recently deleted; restore ${notice.kept === 1 ? "it" : "them"} there within 30 days.` : ""}
     </StatusBanner>
@@ -132,24 +133,24 @@ export function RemovedNoticeBanner({ membership, reload }: { membership: Member
 
 export function PendingLeaveChip({ membership }: { membership: MembershipStatus | null }) {
   if (!membership?.pendingLeave) return null;
-  return <StatusChip kind="progress" label="Leave request pending" title="Your phone is told the next time this PC reaches it." />;
+  return <StatusChip kind="progress" label={strings.leaveRequestPending} title={strings.yourPhoneIsToldTheNext} />;
 }
 
 const changes = (count: number) => plural(count, "change");
 
 /** The same states and words as the phone's device card. */
 function deviceChip(device: MemberDevice, membership: MembershipStatus) {
-  if (device.status === "removed") return <StatusChip kind="neutral" label="Removed" />;
+  if (device.status === "removed") return <StatusChip kind="neutral" label={strings.removed} />;
   if (membership.pendingTransferTo === device.deviceId) {
-    return membership.transferAccepted ? <StatusChip kind="progress" label="Accepted managing role" title="Accepted managing role" /> : <StatusChip kind="info" label="Waiting to accept managing role" title="Waiting to accept managing role" />;
+    return membership.transferAccepted ? <StatusChip kind="progress" label={strings.acceptedManagingRole} title={strings.acceptedManagingRole} /> : <StatusChip kind="info" label={strings.waitingToAcceptManagingRole} title={strings.waitingToAcceptManagingRole} />;
   }
-  if (device.isThisDevice) return <StatusChip kind="success" label="Active" />;
+  if (device.isThisDevice) return <StatusChip kind="success" label={strings.active} />;
   const counts = device.counts;
-  if (counts?.toApplyHere) return <StatusChip kind="warning" label="Waiting to apply" />;
-  if (counts && (counts.toSend || counts.toReceiveHere || counts.receivedThere)) return <StatusChip kind="warning" label="Changes waiting" />;
-  if (isStale(device)) return <StatusChip kind="warning" label="Not seen recently" />;
-  if (device.lastSeen) return <StatusChip kind="success" label="Active" />;
-  return <StatusChip kind="neutral" label="Not checked yet" />;
+  if (counts?.toApplyHere) return <StatusChip kind="warning" label={strings.waitingToApply} />;
+  if (counts && (counts.toSend || counts.toReceiveHere || counts.receivedThere)) return <StatusChip kind="warning" label={strings.changesWaiting} />;
+  if (isStale(device)) return <StatusChip kind="warning" label={strings.notSeenRecently} />;
+  if (device.lastSeen) return <StatusChip kind="success" label={strings.active} />;
+  return <StatusChip kind="neutral" label={strings.notCheckedYet} />;
 }
 
 /** One line about what still has to move, as on the phone. */
@@ -221,15 +222,13 @@ export function DevicesGroup({ membership, reload }: { membership: MembershipSta
   return (
     <>
       {membership.cleanupHint && (
-        <StatusBanner kind="info" title="Old sync history is kept">
+        <StatusBanner kind="info" title={strings.oldSyncHistoryIsKept}>
           {membership.cleanupHint[1]} {removeHelp(membership.managerName)}
         </StatusBanner>
       )}
       {membership.managerLost && (
         <StatusBanner kind="warning" title={`${phone} is marked as lost`}
-          action={<Button size="sm" variant="ghost" busy={lost.busy} onClick={() => void lost.run(false)}>It's back</Button>}>
-          This PC no longer takes changes from it. On the phone or tablet that now manages your devices, tap Create QR. Then pair this PC with it below. This PC keeps its items, with no duplicates.
-        </StatusBanner>
+          action={<Button size="sm" variant="ghost" busy={lost.busy} onClick={() => void lost.run(false)}>{strings.itSBack}</Button>}>{strings.thisPcNoLongerTakesChanges}</StatusBanner>
       )}
       {target && (
         <StatusBanner kind="info" title={`Managing role is moving to ${target.name}`}>
@@ -238,19 +237,19 @@ export function DevicesGroup({ membership, reload }: { membership: MembershipSta
             : `Waiting for ${target.name} to accept on that device. ${membership.managerName || "The managing device"} can cancel at any time.`}
         </StatusBanner>
       )}
-      <SettingsGroup title="Devices" description={`Only the managing device adds and removes devices; this PC can't. ${removeHelp(membership.managerName)}`}>
+      <SettingsGroup title={strings.devices} description={`Only the managing device adds and removes devices; this PC can't. ${removeHelp(membership.managerName)}`}>
         {active.map(row)}
-        <SettingsRow icon={LogOut} danger title="Leave group"
+        <SettingsRow icon={LogOut} danger title={strings.leaveGroup}
           description={self?.isManager ? "This device manages the group. Transfer the managing role on your phone first." : "Stop syncing. Keep this PC's items or start with an empty vault."}
-          control={<Button size="sm" variant="ghost" className="btn-danger-text" disabled={self?.isManager} busy={leave.busy} onClick={() => void leave.run()}>Leave group</Button>} />
+          control={<Button size="sm" variant="ghost" className="btn-danger-text" disabled={self?.isManager} busy={leave.busy} onClick={() => void leave.run()}>{strings.leaveGroup}</Button>} />
         {!self?.isManager && !membership.managerLost && (
           <SettingsRow icon={ShieldAlert} title={`Lost ${phone}?`}
-            description="Mark it as lost. This PC then stops taking changes from it, and can join a new group with its items."
-            control={<Button size="sm" variant="ghost" busy={lost.busy} onClick={() => void lost.run(true)}>Mark as lost</Button>} />
+            description={strings.markItAsLostThisPc}
+            control={<Button size="sm" variant="ghost" busy={lost.busy} onClick={() => void lost.run(true)}>{strings.markAsLost}</Button>} />
         )}
       </SettingsGroup>
       {removed.length > 0 && (
-        <SettingsGroup title="Removed devices" description="These devices were removed from the group. They can't sync with your devices and keep their own copies. A removed device can pair again from your phone as a new device.">
+        <SettingsGroup title={strings.removedDevices} description={strings.theseDevicesWereRemovedFromThe}>
           {removed.map(row)}
         </SettingsGroup>
       )}
