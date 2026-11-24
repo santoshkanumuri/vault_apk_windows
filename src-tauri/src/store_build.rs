@@ -37,7 +37,7 @@ use crate::{
 const HAND_OVER_WAIT: Duration = Duration::from_secs(10);
 
 /// This process's package family name, or `None` for the installer build.
-fn current_family() -> Option<String> {
+pub(crate) fn current_family() -> Option<String> {
     let mut length = 0u32;
     let _ = unsafe { GetCurrentPackageFamilyName(&mut length, None) };
     if length == 0 {

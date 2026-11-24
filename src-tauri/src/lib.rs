@@ -20,6 +20,7 @@ pub mod identity;
 pub mod incoming;
 pub mod incoming_apply;
 pub mod incoming_store;
+pub mod install_marker;
 pub mod join_match;
 pub mod keepass_import;
 pub mod local_recovery;
@@ -1629,6 +1630,10 @@ struct AppSnapshot {
     pending_changes: u32,
     revision: u64,
     chain_state: &'static str,
+    /// The vault here was last opened by an earlier install of Nuvori (`install_marker.rs`).
+    welcome_back: bool,
+    /// While locked: when the vault was last changed, in Unix milliseconds (a file time); 0 otherwise.
+    last_used_at: i64,
 }
 
 impl AppState {
@@ -1681,9 +1686,58 @@ impl AppState {
             } else {
                 "recorded"
             },
+            welcome_back: self.welcome_back(),
+            last_used_at: if self.unlocked.is_none() && self.store.is_initialized() {
+                self.store.last_used_millis().unwrap_or(0)
+            } else {
+                0
+            },
         })
     }
+
+    /// A locked vault that this install has never opened: the unlock screen says "Welcome back".
+    fn welcome_back(&self) -> bool {
+        self.welcome_back_for(install_marker::installed())
+    }
+
+    fn welcome_back_for(&self, marker: Option<&install_marker::InstallMarker>) -> bool {
+        self.unlocked.is_none()
+            && self.store.is_initialized()
+            && marker.is_some_and(|marker| marker.is_new_install(self.store.last_used_millis()))
+    }
+
+    /// "Start fresh on this PC": deletes this PC's vault without its password (`VaultStore::start_fresh`).
+    /// Never while the vault is unlocked in any window. Only local files go, and nothing is sent to
+    /// other devices. The activity log gets one line without secrets.
+    fn start_fresh(&mut self) -> Result<AppSnapshot, String> {
+        if self.unlocked.is_some() {
+            activity::log(Level::Warning, Category::Security, "Start fresh blocked: the vault is unlocked");
+            return Err(START_FRESH_UNLOCKED.to_owned());
+        }
+        let earlier_install = self.welcome_back();
+        self.store.start_fresh().map_err(|error| match error {
+            VaultError::InUse => {
+                activity::log(Level::Warning, Category::Security, "Start fresh blocked: the vault is open in another program");
+                START_FRESH_IN_USE.to_owned()
+            }
+            other => {
+                activity::diagnostic(Category::Security, "Could not start fresh", &other);
+                "Couldn't delete this PC's vault. Restart Nuvori and try again.".to_owned()
+            }
+        })?;
+        activity::log(Level::Warning, Category::Security, if earlier_install {
+            "Started fresh on this PC: deleted the vault from an earlier install without its password"
+        } else {
+            "Started fresh on this PC: deleted the vault without its password"
+        });
+        self.snapshot()
+    }
 }
+
+/// The word the person types to confirm "Start fresh on this PC".
+const START_FRESH_WORD: &str = "RESET";
+const START_FRESH_UNLOCKED: &str = "The vault is unlocked in another window. Lock it first, or reset it in Settings.";
+const START_FRESH_IN_USE: &str = "Another program has the vault open. Close it and try again.";
 
 #[tauri::command]
 fn app_snapshot(state: State<'_, ManagedState>) -> Result<AppSnapshot, String> {
@@ -2078,6 +2132,8 @@ fn lock_from_tray(app: &AppHandle) {
 /// small unlock window.
 fn vault_changed(app: &AppHandle, unlocked: bool) {
     if unlocked {
+        // This install has now opened the vault: no "Welcome back" on the next start.
+        install_marker::record_current();
         desktop::close_unlock_prompt(app);
     }
     let _ = app.emit("vault-changed", ());
@@ -2245,6 +2301,42 @@ async fn reset_vault(
     .await
     .map_err(|_| "Vault reset stopped unexpectedly".to_owned())??;
     vault_changed(&app_handle, false);
+    Ok(snapshot)
+}
+
+/// "Start fresh on this PC" on the unlock screen, for a forgotten password or an earlier
+/// install's vault. No password: `confirmation` must be the typed word RESET. Works only while the
+/// vault is locked (`AppState::start_fresh`). The Settings reset keeps its password check.
+#[tauri::command]
+async fn start_fresh(
+    confirmation: String,
+    app_handle: AppHandle,
+    state: State<'_, ManagedState>,
+    browser: State<'_, Arc<BrowserIpcServer>>,
+    pairing: State<'_, Arc<PairingController>>,
+) -> Result<AppSnapshot, String> {
+    if confirmation != START_FRESH_WORD {
+        return Err("Type RESET to confirm.".to_owned());
+    }
+    if pairing.is_active()? {
+        return Err("Finish or cancel pairing before you start fresh".to_owned());
+    }
+    pairing.cancel()?;
+    let state = state.inner().clone();
+    let browser = browser.inner().clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || -> Result<AppSnapshot, String> {
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        // The vault is locked, so the browser has nothing to ask; make sure it stays that way.
+        if app.unlocked.is_none() {
+            browser.set_provider(None);
+        }
+        app.start_fresh()
+    })
+    .await
+    .map_err(|_| "Starting fresh stopped unexpectedly".to_owned())??;
+    vault_changed(&app_handle, false);
+    // No vault now: this install creates the next one.
+    install_marker::record_current();
     Ok(snapshot)
 }
 
@@ -2702,6 +2794,7 @@ fn public_vault_error(error: VaultError) -> String {
             "Resolve the pending sync conflicts before leaving the group.".to_owned()
         }
         VaultError::Hello(message) => message,
+        VaultError::InUse => START_FRESH_IN_USE.to_owned(),
         other => {
             activity::diagnostic(Category::Vault, "Vault operation failed", &other);
             "The vault could not be opened. Check its local storage.".to_owned()
@@ -2844,6 +2937,11 @@ pub fn run() {
                 std::process::exit(1);
             }
             activity::set_diagnostics_file(directory.join("diagnostics.log"));
+            install_marker::install(&directory);
+            if !VaultStore::new(directory.clone()).is_initialized() {
+                // No vault to welcome back: this install is the one that will create it.
+                install_marker::record_current();
+            }
             // Installed and Store builds connect the browser extension by themselves. A
             // development build leaves the registration alone; use Settings to connect it.
             browsers::install(&directory);
@@ -2992,6 +3090,7 @@ pub fn run() {
             lock_vault,
             stop_sharing,
             reset_vault,
+            start_fresh,
             list_notes,
             save_note,
             delete_note,
@@ -3061,6 +3160,109 @@ pub fn run() {
             api.prevent_exit();
         }
     });
+}
+
+#[cfg(test)]
+mod start_fresh_tests {
+    use super::*;
+    use crate::install_marker::{Install, InstallMarker};
+
+    const PASSWORD: &str = "synthetic-test-password";
+
+    /// A locked vault with a note, a photo blob folder, a Hello file and a device identity, as an
+    /// earlier install left it.
+    fn earlier_vault() -> (PathBuf, AppState, identity::DeviceIdentity) {
+        let directory = std::env::temp_dir().join(format!("nuvori-start-fresh-{}", uuid::Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create(PASSWORD).unwrap();
+        vault.save_note(None, "Quartz ledger", "kept only here", Some(vec![])).unwrap();
+        drop(vault);
+        let old = store.identity_store().get_or_create().unwrap();
+        std::fs::create_dir_all(directory.join("photo-blobs")).unwrap();
+        std::fs::write(directory.join("photo-blobs").join("blob"), b"photo").unwrap();
+        std::fs::write(directory.join("hello-unlock-v1.bin"), b"sealed").unwrap();
+        InstallMarker::new(&directory, Install { id: "exe:earlier".into(), installed_at: 1 }).record().unwrap();
+        (directory, AppState { store, unlocked: None }, old)
+    }
+
+    #[test]
+    fn a_vault_from_an_earlier_install_is_welcomed_back_until_this_install_opens_it() {
+        let (directory, mut app, _) = earlier_vault();
+        let this_install = InstallMarker::new(&directory, Install { id: "exe:now".into(), installed_at: 2 });
+        assert!(app.welcome_back_for(Some(&this_install)));
+        let snapshot = app.snapshot().unwrap();
+        assert_eq!(snapshot.vault_state, "locked");
+        let now = activity::now_millis() as i64;
+        assert!(snapshot.last_used_at > now - 600_000 && snapshot.last_used_at <= now + 1_000, "a file time, not vault contents");
+        app.unlocked = Some(app.store.unlock(PASSWORD).unwrap());
+        assert!(!app.welcome_back_for(Some(&this_install)), "never while unlocked");
+        assert_eq!(app.snapshot().unwrap().last_used_at, 0);
+        this_install.record().unwrap();
+        app.unlocked = None;
+        assert!(!app.welcome_back_for(Some(&this_install)), "this install opened it");
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn starting_fresh_deletes_only_this_pcs_vault_files_without_the_password() {
+        let (directory, mut app, old) = earlier_vault();
+        std::fs::write(directory.join("diagnostics.log"), b"kept").unwrap();
+        let snapshot = app.start_fresh().unwrap();
+        assert_eq!(snapshot.vault_state, "notConfigured");
+        assert!(!snapshot.welcome_back);
+        for name in ["vault.db", "vault.db-wal", "vault-key-v1.json", "device-identity-v1.json", "hello-unlock-v1.bin", "photo-blobs"] {
+            assert!(!directory.join(name).exists(), "{name} is deleted");
+        }
+        assert!(directory.join("diagnostics.log").exists(), "files outside the vault stay");
+        let events = activity::global().recent(None);
+        assert!(events.iter().any(|event| event.message.starts_with("Started fresh on this PC") && event.level == Level::Warning));
+        for event in &events {
+            for secret in ["Quartz", "kept only here", PASSWORD] {
+                assert!(!event.message.contains(secret), "{secret} leaked into the activity log");
+            }
+        }
+        // Next: a new vault with a new device identity, which a phone can pair as a new device.
+        let mut vault = app.store.create("another-long-password").unwrap();
+        assert!(vault.list_notes().unwrap().is_empty());
+        assert!(!vault.is_enrolled().unwrap());
+        vault.save_note(None, "New", "Body", Some(vec![])).unwrap();
+        let new = app.store.identity_store().get_or_create().unwrap();
+        assert_ne!(new.device_id, old.device_id);
+        assert_ne!(new.public_key, old.public_key);
+        drop(vault);
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn starting_fresh_never_runs_while_the_vault_is_unlocked() {
+        let (directory, mut app, _) = earlier_vault();
+        app.unlocked = Some(app.store.unlock(PASSWORD).unwrap());
+        assert_eq!(app.start_fresh().err().unwrap(), START_FRESH_UNLOCKED);
+        let vault = app.unlocked.as_ref().unwrap();
+        assert_eq!(vault.list_notes().unwrap()[0].title, "Quartz ledger", "nothing was deleted");
+        assert!(directory.join("device-identity-v1.json").exists() && directory.join("photo-blobs").exists());
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn starting_fresh_stops_when_another_program_has_the_database_open() {
+        let (directory, mut app, _) = earlier_vault();
+        // Another process (a second Nuvori, a backup tool) with the database open.
+        let other = VaultStore::new(&directory).unlock(PASSWORD).unwrap();
+        assert_eq!(app.start_fresh().err().unwrap(), START_FRESH_IN_USE);
+        assert!(app.store.is_initialized());
+        for name in ["vault.db", "device-identity-v1.json", "hello-unlock-v1.bin", "photo-blobs"] {
+            assert!(directory.join(name).exists(), "{name} stays");
+        }
+        drop(other);
+        app.start_fresh().unwrap();
+        assert!(!app.store.is_initialized());
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 #[cfg(test)]

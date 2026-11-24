@@ -3169,6 +3169,95 @@ mod tests {
         std::fs::remove_dir_all(synthetic.directory).unwrap();
     }
 
+    /// Reinstall flow, "Unlock it": the phone removed this PC while Nuvori was uninstalled. The
+    /// new install shows "Welcome back", the old password unlocks, the first sync gets the
+    /// removal notice, and this PC gets the removed banner and a new identity, so it can pair again.
+    #[test]
+    fn a_reinstalled_pc_unlocks_learns_it_was_removed_and_can_pair_again() {
+        use crate::install_marker::{Install, InstallMarker};
+        let helper = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../pairing-helper/publish/Nuvori.PairingHelper.exe");
+        let synthetic = synthetic_vault(1);
+        InstallMarker::new(&synthetic.directory, Install { id: "exe:earlier".into(), installed_at: 1 }).record().unwrap();
+        let stored = {
+            let mut app = synthetic.state.lock().unwrap();
+            let stored = app.unlocked.as_ref().unwrap().stored_membership().unwrap();
+            app.unlocked = None;
+            stored
+        };
+        // The reinstall: same vault folder, a new install.
+        let reinstalled = InstallMarker::new(&synthetic.directory, Install { id: "exe:reinstalled".into(), installed_at: 2 });
+        {
+            let mut app = synthetic.state.lock().unwrap();
+            assert!(app.welcome_back_for(Some(&reinstalled)));
+            app.unlocked = Some(app.store.unlock("synthetic-test-password").unwrap());
+            reinstalled.record().unwrap();
+            assert!(!app.welcome_back_for(Some(&reinstalled)));
+            assert!(app.unlocked.as_ref().unwrap().is_enrolled().unwrap(), "it still thinks it is in the group");
+        }
+        let tracker = SyncTracker::default();
+        let removal = remove_event(&stored[1], &synthetic.local.device_id, true);
+        let (server, address) = removal_server(vec![stored[0].clone(), stored[1].clone(), removal]);
+        let result = exchange(&synthetic.state, &helper, &tracker, |_| TcpStream::connect(address).map_err(network_error));
+        server.join().unwrap();
+        assert_eq!(result.unwrap_err(), REMOVED_NOTICE);
+        {
+            let app = synthetic.state.lock().unwrap();
+            let vault = app.unlocked.as_ref().unwrap();
+            assert!(!vault.is_enrolled().unwrap());
+            assert_eq!(vault.list_notes().unwrap().len(), 1, "items stay on this PC");
+            assert!(vault.membership_status().unwrap().removed_notice.is_some(), "the removed banner shows");
+            let new = app.store.identity_store().get_or_create().unwrap();
+            assert_ne!(new.device_id, synthetic.local.device_id, "a removed PC gets a new identity");
+            assert_ne!(new.public_key, synthetic.local.public_key);
+        }
+        let controller = crate::PairingController {
+            progress: std::sync::Mutex::new(Default::default()),
+            approval: std::sync::Condvar::new(),
+            helper_path: helper.clone(),
+        };
+        if helper.is_file() {
+            crate::ensure_pairing_ready(&synthetic.state, &controller).unwrap();
+        }
+        // Locking and unlocking again keeps the new identity and the banner.
+        let mut app = synthetic.state.lock().unwrap();
+        let new = app.store.identity_store().get_or_create().unwrap();
+        app.unlocked = None;
+        assert!(!app.welcome_back_for(Some(&reinstalled)));
+        let vault = app.store.unlock("synthetic-test-password").unwrap();
+        assert_eq!(app.store.identity_store().get_or_create().unwrap(), new);
+        assert!(vault.membership_status().unwrap().removed_notice.is_some());
+        drop(vault);
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// Reinstall flow, "Unlock it": the PC applied the removal before the uninstall, and the
+    /// app stopped before it changed the identity. The unlock in the new install finishes it.
+    #[test]
+    fn a_reinstalled_pc_removed_before_the_uninstall_gets_a_new_identity_on_unlock() {
+        let synthetic = synthetic_vault(1);
+        let mut app = synthetic.state.lock().unwrap();
+        app.unlocked.as_mut().unwrap().leave_after_removal("Pixel 8", 1_000).unwrap();
+        let current = app.store.identity_store().get_or_create().unwrap();
+        assert_ne!(current.device_id, synthetic.local.device_id);
+        // As if the app stopped after the leave committed but before the identity changed: the
+        // retired identity file is what the reinstall finds.
+        crate::membership_exit::retire_identity(app.unlocked.as_mut().unwrap().connection(), &current.device_id, 2).unwrap();
+        app.unlocked = None;
+        let vault = app.store.unlock("synthetic-test-password").unwrap();
+        let after = app.store.identity_store().get_or_create().unwrap();
+        assert_ne!(after.device_id, current.device_id);
+        let notice = vault.membership_status().unwrap().removed_notice.unwrap();
+        assert_eq!(notice.by, "Pixel 8");
+        assert!(!vault.is_enrolled().unwrap());
+        drop(vault);
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
     /// A vault created by an older build has no tables added to the change store since, and
     /// only a completed LAN exchange used to create them. Unlocking must add them so status
     /// and leaving work before the first sync.

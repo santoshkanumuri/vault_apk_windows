@@ -15,6 +15,10 @@ export type AppSnapshot = {
   pendingChanges: number;
   revision: number;
   chainState: "empty" | "recorded" | "invalid";
+  /** A locked vault left by an earlier install of Nuvori: show "Welcome back" (install_marker.rs). */
+  welcomeBack?: boolean;
+  /** While locked: when the vault was last changed (Unix ms, a file time); 0 when unknown. */
+  lastUsedAt?: number;
 };
 
 export type EntryType = "CARD" | "PASSWORD" | "AUTHENTICATOR" | "QUESTION" | "AUTOFILL";
@@ -319,6 +323,8 @@ export const api = {
   lockVault: () => call<AppSnapshot>("lock_vault"),
   stopSharing: () => call<AppSnapshot>("stop_sharing"),
   resetVault: (password: string) => call<AppSnapshot>("reset_vault", { password }),
+  /** Deletes this PC's locked vault without its password. `confirmation` is the typed word RESET. */
+  startFresh: (confirmation: string) => call<AppSnapshot>("start_fresh", { confirmation }),
   showMainWindow: () => call<void>("show_main_window"),
   hideMainWindow: () => call<void>("hide_main_window"),
   /** Auto-lock lives in the backend (auto_lock.rs): it locks with no window open. */

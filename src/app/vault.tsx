@@ -9,7 +9,9 @@ export const fallbackSnapshot: AppSnapshot = {
   enrolled: false,
   pendingChanges: 0,
   revision: 0,
-  chainState: "empty"
+  chainState: "empty",
+  welcomeBack: false,
+  lastUsedAt: 0
 };
 
 type VaultValue = {

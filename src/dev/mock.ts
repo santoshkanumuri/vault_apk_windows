@@ -67,6 +67,8 @@ state.conflicts = [
   { id: "c-2", entityType: "note", entityId: state.notes[0].id, title: state.notes[0].title, localUpdatedAt: minutes(300), remoteUpdatedAt: minutes(260), remoteDevice: "Pixel 8", summary: "Note text edited on both devices" }
 ];
 state.sync.conflicts = state.conflicts.length;
+// Preview "Welcome back" (a vault from an earlier install, last used 9 days ago) with ?welcome in the URL.
+const mockInstall = { welcomeBack: window.location.search.includes("welcome"), lastUsedAt: minutes(60 * 24 * 9 + 35) };
 // Preview the "removed from group" notice with ?removed in the URL.
 if (window.location.search.includes("removed")) {
   state.enrolled = false;
@@ -118,7 +120,9 @@ function snapshot(): AppSnapshot {
   return {
     vaultState: state.vault, helloEnabled: state.hello,
     counts: { cards: count("CARD"), logins: count("PASSWORD"), codes: count("AUTHENTICATOR"), questions: count("QUESTION"), autofill: count("AUTOFILL"), notes: state.notes.length },
-    pairedDevices: state.enrolled ? 2 : 0, enrolled: state.enrolled, pendingChanges: 3, revision: state.revision, chainState: "recorded"
+    pairedDevices: state.enrolled ? 2 : 0, enrolled: state.enrolled, pendingChanges: 3, revision: state.revision, chainState: "recorded",
+    // Like install_marker.rs: only for a locked vault, and only until this install opens it.
+    welcomeBack: state.vault === "locked" && mockInstall.welcomeBack, lastUsedAt: state.vault === "locked" ? mockInstall.lastUsedAt : 0
   };
 }
 
@@ -180,13 +184,21 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "hello_available": return true;
     case "unlock_vault": case "create_vault":
       if (args.password === "wrong") { log("error", "security", "Unlock failed"); throw "Wrong password or damaged vault key."; }
-      state.vault = "unlocked"; log("success", "vault", "Vault unlocked"); return snapshot();
-    case "unlock_hello": state.vault = "unlocked"; log("success", "vault", "Vault unlocked with Windows Hello"); return snapshot();
+      state.vault = "unlocked"; mockInstall.welcomeBack = false; log("success", "vault", "Vault unlocked"); return snapshot();
+    case "unlock_hello": state.vault = "unlocked"; mockInstall.welcomeBack = false; log("success", "vault", "Vault unlocked with Windows Hello"); return snapshot();
     case "enable_hello": state.hello = true; log("success", "security", "Windows Hello turned on"); return snapshot();
     case "disable_hello": state.hello = false; log("info", "security", "Windows Hello turned off"); return snapshot();
     case "lock_vault": state.vault = "locked"; log("info", "vault", "Vault locked"); return snapshot();
     case "stop_sharing": state.enrolled = false; log("info", "pairing", "Stopped sharing"); return snapshot();
     case "reset_vault": state.vault = "notConfigured"; state.enrolled = false; return snapshot();
+    // Like AppState::start_fresh in lib.rs: no password, the typed word, and only while locked.
+    case "start_fresh":
+      if (args.confirmation !== "RESET") throw "Type RESET to confirm.";
+      if (state.vault === "unlocked") throw "The vault is unlocked in another window. Lock it first, or reset it in Settings.";
+      state.vault = "notConfigured"; state.enrolled = false; state.hello = false; mockInstall.welcomeBack = false;
+      state.entries = []; state.notes = []; state.groups = []; state.passkeys = []; state.conflicts = []; state.sync.conflicts = 0; state.removedNotice = null;
+      log("warning", "security", "Started fresh on this PC: deleted the vault without its password");
+      return snapshot();
     case "auto_lock_status": return { minutes: mockAutoLock.minutes, saved: mockAutoLock.saved };
     case "set_auto_lock": mockAutoLock.minutes = Number(args.minutes) || 0; mockAutoLock.saved = true; return { minutes: mockAutoLock.minutes, saved: true };
     case "note_user_activity": return undefined;

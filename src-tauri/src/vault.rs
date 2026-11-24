@@ -188,6 +188,44 @@ impl VaultStore {
         Ok(())
     }
 
+    /// When the vault was last changed, in Unix milliseconds: the newest write time of its
+    /// database and key files. Reads file times only, never the files.
+    pub fn last_used_millis(&self) -> Option<i64> {
+        [DATABASE_FILE, "vault.db-wal", BOOTSTRAP_FILE]
+            .into_iter()
+            .filter_map(|name| fs::metadata(self.directory.join(name)).and_then(|metadata| metadata.modified()).ok())
+            .map(crate::install_marker::millis)
+            .max()
+    }
+
+    /// "Start fresh on this PC": deletes the same files as the password-checked reset, without the
+    /// password. Only for a locked vault: the caller makes sure this process has it closed, and
+    /// this refuses when any other process still has the database open. Nothing is read from
+    /// the vault and nothing is sent to other devices.
+    pub fn start_fresh(&self) -> Result<(), VaultError> {
+        self.ensure_database_closed()?;
+        self.reset_files()
+    }
+
+    /// Opens the database files with no sharing, which Windows refuses while any other handle to
+    /// them is open (SQLite never shares delete access). Opens them for reading and reads nothing.
+    fn ensure_database_closed(&self) -> Result<(), VaultError> {
+        use std::os::windows::fs::OpenOptionsExt;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        const ERROR_LOCK_VIOLATION: i32 = 33;
+        for name in [DATABASE_FILE, "vault.db-wal"] {
+            match fs::OpenOptions::new().read(true).share_mode(0).open(self.directory.join(name)) {
+                Ok(file) => drop(file),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) if matches!(error.raw_os_error(), Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)) => {
+                    return Err(VaultError::InUse);
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(())
+    }
+
     pub fn reset_files(&self) -> Result<(), VaultError> {
         for name in [
             DATABASE_FILE,
@@ -3039,6 +3077,8 @@ pub enum VaultError {
     ManagingDevice,
     #[error("note has no matching change record")]
     MissingNoteChange,
+    #[error("the vault database is open in another program")]
+    InUse,
 }
 
 /// An "AUTOFILL" item's profile; unknown or missing fields are empty.
