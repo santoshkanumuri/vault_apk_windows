@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { StatusIcon } from "../components/Status";
 import { humanError } from "../lib/errors";
@@ -104,23 +105,58 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => { timers.current.forEach((timer) => window.clearTimeout(timer)); }, []);
 
+  // Hovering or focusing a toast (e.g. tabbing to Undo) holds it open; leaving restarts its timer.
+  const pause = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer) { window.clearTimeout(timer); timers.current.delete(id); }
+  }, []);
+  const resume = useCallback((toast: ToastItem) => schedule(toast.id, toast.kind, toast.action ? 6000 : undefined), [schedule]);
+
+  // A modal <dialog> sits in the top layer above any z-index and makes the rest of the page inert, so
+  // toasts live inside the topmost open modal (where Undo stays clickable) and show as a manual
+  // popover, which puts them in the top layer above that dialog.
+  const host = useTopModalDialog();
+  const region = useCallback((element: HTMLDivElement | null) => {
+    if (element && "showPopover" in element && !element.matches(":popover-open")) {
+      try { element.showPopover(); } catch { /* not connected yet; the next mount shows it */ }
+    }
+  }, []);
+
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="toasts" aria-live="polite" aria-relevant="additions text">
+      {createPortal(<div ref={region} key={host ? "dialog" : "page"} popover="manual" className="toasts" aria-live="polite" aria-relevant="additions text">
         {toasts.map((toast) => (
           <div key={toast.id} className={cx("toast", `tone-${toast.kind}`, toast.leaving && "is-leaving")} role={toast.kind === "error" ? "alert" : "status"}
-            onMouseEnter={() => { const timer = timers.current.get(toast.id); if (timer) { window.clearTimeout(timer); timers.current.delete(toast.id); } }}
-            onMouseLeave={() => schedule(toast.id, toast.kind, toast.action ? 6000 : undefined)}>
+            onMouseEnter={() => pause(toast.id)}
+            onMouseLeave={(event) => { if (!event.currentTarget.contains(document.activeElement)) resume(toast); }}
+            onFocus={() => pause(toast.id)}
+            onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !event.currentTarget.matches(":hover")) resume(toast); }}>
             <StatusIcon kind={toast.kind} size={18} />
             <span className="toast-message">{toast.message}</span>
             {toast.action && <button type="button" className="toast-action" onClick={() => { const action = toast.action!; remove(toast.id); void action.run(); }}>{toast.action.label}</button>}
             {toast.kind !== "progress" && <button type="button" className="toast-close" aria-label="Dismiss notification" onClick={() => remove(toast.id)}><X aria-hidden="true" /></button>}
           </div>
         ))}
-      </div>
+      </div>, host ?? document.body)}
     </ToastContext.Provider>
   );
+}
+
+/** The topmost open modal dialog, or null. Re-renders when dialogs open, close or unmount. */
+function useTopModalDialog(): HTMLDialogElement | null {
+  const [dialog, setDialog] = useState<HTMLDialogElement | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const open = document.querySelectorAll<HTMLDialogElement>("dialog:modal");
+      setDialog(open.length ? open[open.length - 1] : null);
+    };
+    const observer = new MutationObserver(update);
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] });
+    update();
+    return () => observer.disconnect();
+  }, []);
+  return dialog;
 }
 
 export function useToast(): ToastApi {

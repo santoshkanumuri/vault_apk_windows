@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ComponentPropsWithRef, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ComponentPropsWithRef, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import { Eye, EyeOff, TriangleAlert } from "lucide-react";
 import { cx } from "../lib/format";
 
@@ -113,10 +113,27 @@ export function Checkbox({ checked, onChange, label, disabled }: { checked: bool
 }
 
 export function Segmented<T extends string>({ value, onChange, options, label, size }: { value: T; onChange: (value: T) => void; options: ReadonlyArray<{ value: T; label: string; icon?: ComponentType<{ "aria-hidden"?: boolean | "true" }> }>; label: string; size?: "sm" }) {
+  const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
+  // A radio group with one tab stop: arrows move and select, as in AppearancePicker.
+  const move = (event: KeyboardEvent, index: number) => {
+    const last = options.length - 1;
+    let next = index;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = index === last ? 0 : index + 1;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = index === 0 ? last : index - 1;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = last;
+    else return;
+    event.preventDefault();
+    refs.current[next]?.focus();
+    onChange(options[next].value);
+  };
   return (
     <div className={cx("segmented", size === "sm" && "segmented-sm")} role="radiogroup" aria-label={label}>
-      {options.map(({ value: optionValue, label: optionLabel, icon: Icon }) => (
-        <button key={optionValue} type="button" role="radio" aria-checked={value === optionValue} className={cx(value === optionValue && "is-selected")} onClick={() => onChange(optionValue)}>
+      {options.map(({ value: optionValue, label: optionLabel, icon: Icon }, index) => (
+        <button key={optionValue} type="button" role="radio" aria-checked={value === optionValue} className={cx(value === optionValue && "is-selected")}
+          tabIndex={index === selectedIndex ? 0 : -1} ref={(node) => { refs.current[index] = node; }}
+          onClick={() => onChange(optionValue)} onKeyDown={(event) => move(event, index)}>
           {Icon && <Icon aria-hidden="true" />}<span>{optionLabel}</span>
         </button>
       ))}
