@@ -493,6 +493,8 @@ fn insert_snapshot(
     for operation in &metadata.operations {
         insert_operation(transaction, operation)?;
     }
+    // M4: held changes of a kind this version doesn't know wait and apply after an update.
+    crate::lan_sync::hold_unknown_kinds(transaction, &metadata.operations)?;
     for head in &metadata.heads {
         transaction.execute(
             "INSERT INTO sync_device_heads (vault_id, device_id, sequence, hash) VALUES (?1, ?2, ?3, ?4)",

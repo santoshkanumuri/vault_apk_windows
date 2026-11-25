@@ -1524,8 +1524,14 @@ pub(crate) fn progress(db: &Connection, id: &str) -> Result<SyncProgress> {
     let mut applied = received.clone();
     // Snapshot and local operations are already materialized. A received marker
     // distinguishes new remote operations until dependency checks can apply them.
+    // M4: a change of a kind this version doesn't know counts as applied, as on Android. It stays
+    // stored (compaction keeps unknown kinds) and applies after an update, so it never holds up
+    // the frontier that other devices see.
+    db.execute_batch(NEEDS_UPDATE_SCHEMA).map_err(storage_error)?;
     let first_waiting: BTreeMap<String, i64> = db
-        .prepare(&format!("SELECT o.device_id, min(o.sequence) FROM {UNAPPLIED_RECEIVED} AND o.vault_id = ?1 GROUP BY o.device_id"))
+        .prepare(&format!("SELECT o.device_id, min(o.sequence) FROM {UNAPPLIED_RECEIVED} AND o.vault_id = ?1
+             AND NOT EXISTS (SELECT 1 FROM sync_needs_update_operations u WHERE u.mutation_id = r.mutation_id)
+             GROUP BY o.device_id"))
         .map_err(storage_error)?
         .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
         .map_err(storage_error)?
@@ -1547,8 +1553,22 @@ pub(crate) fn progress(db: &Connection, id: &str) -> Result<SyncProgress> {
     Ok(SyncProgress { received, applied })
 }
 
+const RECEIVED_SCHEMA: &str =
+    "CREATE TABLE IF NOT EXISTS sync_received_operations (mutation_id TEXT NOT NULL PRIMARY KEY REFERENCES sync_operations(mutation_id))";
+
 fn initialize_received(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE IF NOT EXISTS sync_received_operations (mutation_id TEXT NOT NULL PRIMARY KEY REFERENCES sync_operations(mutation_id))").map_err(storage_error)
+    db.execute_batch(RECEIVED_SCHEMA).map_err(storage_error)
+}
+
+/// M4: changes in a pairing snapshot of a kind this version doesn't know were never applied here.
+/// Marked as received, they wait with the others and apply after an update, as on Android.
+pub(crate) fn hold_unknown_kinds(db: &Connection, operations: &[ChangeRecord]) -> rusqlite::Result<usize> {
+    db.execute_batch(RECEIVED_SCHEMA)?;
+    let mut held = 0;
+    for operation in operations.iter().filter(|operation| !known_entity_type(&operation.entity_type)) {
+        held += db.execute("INSERT OR IGNORE INTO sync_received_operations (mutation_id) VALUES (?1)", [&operation.mutation_id])?;
+    }
+    Ok(held)
 }
 
 fn operation_from_wire(bytes: &[u8]) -> Result<ChangeRecord> {
@@ -1662,6 +1682,10 @@ const NEEDS_UPDATE_SCHEMA: &str =
     "CREATE TABLE IF NOT EXISTS sync_needs_update_operations (mutation_id TEXT NOT NULL PRIMARY KEY)";
 
 /// Entity types this version applies. Anything else waits for an update ([NEEDS_UPDATE_SCHEMA]).
+/// A build writes a new kind only once every other active member announced the feature that reads
+/// it (`SYNC_FEATURES`), as appearance, site icons and sign-in methods do. The version that adds a
+/// kind must also apply held changes of that kind after a pairing snapshot: an older host stored
+/// them without applying them.
 fn known_entity_type(entity_type: &str) -> bool {
     matches!(entity_type, "entry" | "group" | "passkey" | "photo" | "photo_cover" | "device_name")
         || entity_type == crate::appearance::ENTITY_TYPE
@@ -1693,6 +1717,23 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
     let db = vault.connection();
     db.execute_batch(SET_ASIDE_SCHEMA).map_err(storage_error)?;
     db.execute_batch(NEEDS_UPDATE_SCHEMA).map_err(storage_error)?;
+    // M4: after an update, a kind that waited is known now. Until it applies it holds the
+    // applied frontier again (`progress`), like any received change.
+    let now_known: Vec<String> = db
+        .prepare("SELECT u.mutation_id, o.entity_type FROM sync_needs_update_operations u
+                  JOIN sync_operations o ON o.mutation_id = u.mutation_id")
+        .and_then(|mut query| {
+            query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<(String, String)>>>()
+        })
+        .map_err(storage_error)?
+        .into_iter()
+        .filter(|(_, entity_type)| known_entity_type(entity_type))
+        .map(|(mutation_id, _)| mutation_id)
+        .collect();
+    for mutation_id in &now_known {
+        db.execute("DELETE FROM sync_needs_update_operations WHERE mutation_id = ?1", [mutation_id]).map_err(storage_error)?;
+    }
     loop {
         let mut advanced = false;
         for operation in waiting(db, id)? {
@@ -3409,7 +3450,24 @@ mod tests {
         assert_eq!(set_aside_count(db, "vault-a"), 0, "an unknown type is never set aside");
         assert_eq!(needs_update(db, "vault-a"), vec![("phone".to_owned(), 1)]);
         let heads = progress(db, "vault-a").unwrap();
-        assert_eq!((heads.received["phone"].0, heads.applied["phone"].0), (2, 0), "counted as received, not as applied");
+        assert_eq!((heads.received["phone"].0, heads.applied["phone"].0), (2, 2),
+            "counted as applied, so other devices don't wait on it (it stays stored here)");
+        // Without its row (a kind known after an update) it holds the frontier until it applies.
+        db.execute("DELETE FROM sync_needs_update_operations", []).unwrap();
+        assert_eq!(progress(db, "vault-a").unwrap().applied["phone"].0, 0, "a received change that hasn't applied holds the frontier");
+        // A row whose kind this version knows goes on the next pass; the unknown one comes back.
+        db.execute("INSERT INTO sync_needs_update_operations (mutation_id) SELECT mutation_id FROM sync_operations
+                    WHERE device_id = 'phone' AND sequence = 2", []).unwrap();
+        drop(app);
+        let mut app = synthetic.state.lock().unwrap();
+        let vault = app.unlocked.as_mut().unwrap();
+        apply_waiting(vault, "vault-a", &[4; 32]).unwrap();
+        let db = vault.connection();
+        assert_eq!(needs_update(db, "vault-a"), vec![("phone".to_owned(), 1)]);
+        let known_rows: i64 = db.query_row("SELECT count(*) FROM sync_needs_update_operations u JOIN sync_operations o
+            ON o.mutation_id = u.mutation_id WHERE o.entity_type = 'entry'", [], |row| row.get(0)).unwrap();
+        assert_eq!(known_rows, 0);
+        assert_eq!(progress(db, "vault-a").unwrap().applied["phone"].0, 2);
         drop(app);
         let mut app = synthetic.state.lock().unwrap();
         let status = status(app.unlocked.as_mut().unwrap()).unwrap();

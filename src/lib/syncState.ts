@@ -1,5 +1,6 @@
 import type { AppSnapshot, BrowserStatus, CloudStatus, SyncStatus } from "./api";
 import type { StatusKind } from "../components/Status";
+import { waitingToApplyHere } from "./syncOverview.ts";
 
 export type Indicator = { kind: StatusKind; label: string; detail?: string };
 
@@ -83,7 +84,9 @@ export function syncIndicator(snapshot: AppSnapshot, status: SyncStatus | null, 
   if (lastError.includes("busy syncing")) return { kind: "warning", label: SYNC_WORDS.searching, detail: lastError };
   if (failed) return { kind: "warning", label: SYNC_WORDS.searching, detail: text };
   if (status.conflicts > 0) return { kind: "warning", label: "Needs review", detail: `${status.conflicts} edited on both devices` };
-  const waiting = status.waitingToApply - (status.setAside ?? 0);
+  const update = (status.needsUpdate ?? []).reduce((sum, device) => sum + device.count, 0);
+  if (update > 0) return { kind: "warning", label: SYNC_WORDS.attention, detail: `Update Nuvori to apply ${update} ${update === 1 ? "change" : "changes"} from another device.` };
+  const waiting = waitingToApplyHere(status);
   if (waiting > 0) return { kind: "info", label: SYNC_WORDS.received, detail: "Received changes apply on a later sync." };
   if (lastSync || status.lastSync) return { kind: "success", label: SYNC_WORDS.checked };
   return { kind: "info", label: SYNC_WORDS.searching };
