@@ -15,6 +15,7 @@ pub mod drive_refill;
 mod desktop;
 pub mod dpapi;
 pub mod enrollment;
+pub mod entry_merge;
 pub mod epoch_keys;
 pub mod hello;
 pub mod identity;

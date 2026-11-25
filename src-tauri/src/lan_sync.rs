@@ -1702,6 +1702,11 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
             Duration::from_secs(6 * 60 * 60),
         );
     }
+    // M2: a conflict whose two sides changed different fields closes with both edits. One that
+    // can't yet stays for review, and never fails the pass.
+    if let Err(error) = vault.merge_conflicts() {
+        crate::activity::diagnostic(crate::activity::Category::Sync, "Conflicting edits could not be combined", &error);
+    }
     Ok(())
 }
 

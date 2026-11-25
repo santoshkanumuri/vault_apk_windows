@@ -16,7 +16,7 @@ use crate::{
     incoming_apply::{self, ApplyError},
     payload,
     photo_blobs::PhotoBlobs,
-    protocol::RecordVersion,
+    protocol::{RecordVersion, VersionRelation},
     snapshot::SnapshotMember,
     sync::{ChangeKind, ChangeRecord, GENESIS_HASH},
 };
@@ -328,30 +328,125 @@ pub fn resolve<E>(
     }
     let sides = sides(db, &conflict)?;
     let selected = if keep_remote { &sides.remote } else { &sides.local };
-    let mut counters = sides.local_version.counters().clone();
-    for (device, counter) in conflict.remote_version.counters() {
-        let entry = counters.entry(device.clone()).or_default();
-        *entry = (*entry).max(*counter);
-    }
+    let mut counters = sides.local_version.merged(&conflict.remote_version).counters().clone();
     let own = counters.entry(device_id.to_owned()).or_default();
     *own = own.checked_add(1).ok_or(ConflictError::Data)?;
     let plaintext = Zeroizing::new(payload::decrypt(content_key, selected).map_err(|_| ConflictError::Data)?);
-    let payload_json: Value = serde_json::from_slice(&plaintext).map_err(|_| ConflictError::Data)?;
+    write_change(db, &conflict.id, selected, selected.kind.clone(), RecordVersion::new(counters), sides.revision,
+        &plaintext, content_key, device_id, blobs, sign)
+}
+
+/// The per-device minimum of two versions, zero counters dropped: the version of the change both
+/// sides of a conflict started from (Android `ConflictVersions.meet`).
+pub(crate) fn meet(local: &RecordVersion, remote: &RecordVersion) -> RecordVersion {
+    RecordVersion::new(
+        local
+            .counters()
+            .iter()
+            .filter_map(|(device, counter)| {
+                let lower = (*counter).min(remote.counters().get(device).copied().unwrap_or_default());
+                (lower > 0).then(|| (device.clone(), lower))
+            })
+            .collect(),
+    )
+}
+
+/// M2, rule `entry-merge-v1` (Android `SyncConflictResolver.autoMerge`): closes each open
+/// conflict of a login or folder whose two sides changed different fields, with a signed change
+/// that holds both edits ([`crate::entry_merge`]). Its version is the per-device maximum of the
+/// two sides with no extra count, so every device, older versions included, sees it as newer than
+/// both sides and closes its copy, and a peer that merged the same pair wrote an equal change.
+/// A conflict that can't merge yet (it waits for a folder or a photo, or a side can't be read)
+/// stays for review and is tried again after the next sync. Returns how many closed.
+pub fn auto_merge<E>(
+    db: &mut Connection,
+    content_key: &[u8],
+    device_id: &str,
+    blobs: Option<&PhotoBlobs>,
+    sign: impl Fn(&[u8]) -> Result<[u8; 64], E>,
+) -> Result<usize, ConflictError> {
+    let mut merged = 0;
+    for conflict in open_conflicts(db, None)? {
+        if !crate::entry_merge::ENTITY_TYPES.contains(&conflict.entity_type.as_str()) {
+            continue;
+        }
+        match merge_one(db, &conflict, content_key, device_id, blobs, &sign) {
+            Ok(true) => merged += 1,
+            Ok(false) => {}
+            Err(ConflictError::Storage(error)) => return Err(ConflictError::Storage(error)),
+            Err(_) => {}
+        }
+    }
+    Ok(merged)
+}
+
+fn merge_one<E>(
+    db: &mut Connection,
+    conflict: &OpenConflict,
+    content_key: &[u8],
+    device_id: &str,
+    blobs: Option<&PhotoBlobs>,
+    sign: &impl Fn(&[u8]) -> Result<[u8; 64], E>,
+) -> Result<bool, ConflictError> {
+    let sides = sides(db, conflict)?;
+    if sides.local_version.relation_to(&conflict.remote_version) != VersionRelation::Concurrent {
+        return Ok(false);
+    }
+    let base_version = meet(&sides.local_version, &conflict.remote_version);
+    let operations = operations_for(db, &conflict.entity_type, &conflict.entity_id)?;
+    // The first by author and sequence, as on Android.
+    let base = operations
+        .iter()
+        .find(|operation| operation.kind == ChangeKind::Upsert && !base_version.counters().is_empty() && operation.record_version == base_version)
+        .map(|operation| decrypt(content_key, operation))
+        .transpose()?;
+    let side = |operation: &ChangeRecord| match operation.kind {
+        ChangeKind::Delete => Ok(serde_json::json!({"deleted": true})),
+        ChangeKind::Upsert => decrypt(content_key, operation),
+    };
+    let (local, remote) = (side(&sides.local)?, side(&sides.remote)?);
+    let Some(merged) = crate::entry_merge::merge(&conflict.entity_type, base.as_ref(), &local, &remote) else {
+        return Ok(false);
+    };
+    let kind = if crate::entry_merge::is_delete(&merged) { ChangeKind::Delete } else { ChangeKind::Upsert };
+    let plaintext = Zeroizing::new(serde_json::to_vec(&merged).map_err(|_| ConflictError::Data)?);
+    write_change(db, &conflict.id, &sides.local, kind, sides.local_version.merged(&conflict.remote_version),
+        sides.revision, &plaintext, content_key, device_id, blobs, |bytes| sign(bytes))?;
+    Ok(true)
+}
+
+/// Signs `plaintext` as this device's next change of `record`'s entity and applies it, in one
+/// transaction that only commits when conflict `conflict_id` closed.
+#[allow(clippy::too_many_arguments)]
+fn write_change<E>(
+    db: &mut Connection,
+    conflict_id: &str,
+    record: &ChangeRecord,
+    kind: ChangeKind,
+    version: RecordVersion,
+    revision: u64,
+    plaintext: &[u8],
+    content_key: &[u8],
+    device_id: &str,
+    blobs: Option<&PhotoBlobs>,
+    sign: impl FnOnce(&[u8]) -> Result<[u8; 64], E>,
+) -> Result<ChangeRecord, ConflictError> {
+    let payload_json: Value = serde_json::from_slice(plaintext).map_err(|_| ConflictError::Data)?;
     let mutation_id = uuid::Uuid::new_v4().to_string();
-    let encrypted = payload::encrypt_in(db, content_key, &selected.entity_type, &selected.vault_id, &mutation_id, &selected.entity_id, &plaintext)
+    let encrypted = payload::encrypt_in(db, content_key, &record.entity_type, &record.vault_id, &mutation_id, &record.entity_id, plaintext)
         .map_err(|_| ConflictError::Data)?;
     let head: Option<(i64, String)> = db
         .query_row(
             "SELECT sequence, hash FROM sync_device_heads WHERE vault_id = ?1 AND device_id = ?2",
-            params![selected.vault_id, device_id],
+            params![record.vault_id, device_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
     let (sequence, previous) = head.map_or((1, GENESIS_HASH.to_owned()), |(sequence, hash)| (sequence as u64 + 1, hash));
     let occurred = OffsetDateTime::now_utc().format(&Rfc3339).map_err(|_| ConflictError::Data)?;
     let operation = ChangeRecord::create_signed_with(
-        &selected.vault_id, device_id, sequence, previous, mutation_id, &selected.entity_type,
-        &selected.entity_id, selected.kind.clone(), sides.revision, RecordVersion::new(counters),
+        &record.vault_id, device_id, sequence, previous, mutation_id, &record.entity_type,
+        &record.entity_id, kind, revision, version,
         occurred, encrypted.ciphertext, encrypted.nonce, sign,
     )
     .map_err(|_| ConflictError::Data)?;
@@ -380,7 +475,7 @@ pub fn resolve<E>(
     incoming_apply::materialize_checked(&transaction, &operation, &payload_json, content_key, blobs)?;
     let open: bool = transaction.query_row(
         "SELECT EXISTS(SELECT 1 FROM sync_conflicts WHERE conflict_id = ?1 AND resolved_at_utc = '')",
-        [id],
+        [conflict_id],
         |row| row.get(0),
     )?;
     if open {
@@ -467,6 +562,20 @@ mod tests {
         serde_json::from_str::<Value>(&json).unwrap()["title"].as_str().unwrap().to_owned()
     }
 
+    fn password(db: &Connection) -> String {
+        let json: String = db.query_row("SELECT data_json FROM local_entries WHERE id = 'entry-a'", [], |row| row.get(0)).unwrap();
+        serde_json::from_str::<Value>(&json).unwrap()["secondaryValue"].as_str().unwrap().to_owned()
+    }
+
+    fn merge_by(db: &mut Connection, device: &str, seed: u8) -> usize {
+        let signer = SigningKey::from_bytes(&[seed; 32]);
+        auto_merge(db, &KEY, device, None, |bytes| Ok::<_, ()>(signer.sign(bytes).to_bytes())).unwrap()
+    }
+
+    fn last_change_by(db: &Connection, device: &str) -> ChangeRecord {
+        operations_for(db, "entry", "entry-a").unwrap().into_iter().filter(|operation| operation.device_id == device).last().unwrap()
+    }
+
     fn open_count(db: &Connection) -> i64 {
         db.query_row("SELECT count(*) FROM sync_conflicts WHERE resolved_at_utc = ''", [], |row| row.get(0)).unwrap()
     }
@@ -504,6 +613,64 @@ mod tests {
             }
             assert_eq!((title(&device), open_count(&device)), ("Phone name".to_owned(), 0));
         }
+    }
+
+    /// M2: Windows renamed the login while the phone changed its password. Both edits stay, on
+    /// every device and whatever order the changes arrive in, with no conflict to review.
+    #[test]
+    fn edits_to_different_fields_merge_everywhere() {
+        let base = change(42, "phone", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1)]), 0, entry("Base", "one"), "2026-10-01T10:00:00Z");
+        let windows = change(41, "windows", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1), ("windows", 1)]), 1, entry("Windows name", "one"), "2026-10-01T11:00:00Z");
+        let phone = change(42, "phone", 2, &base.hash, RecordVersion::from_entries([("phone", 2)]), 1, entry("Base", "three"), "2026-10-01T12:00:00Z");
+
+        let mut pc = database();
+        for operation in [&base, &windows, &phone] {
+            receive(&mut pc, operation);
+        }
+        assert_eq!(open_count(&pc), 1);
+        assert_eq!(merge_by(&mut pc, "windows", 41), 1);
+        assert_eq!((title(&pc), password(&pc), open_count(&pc)), ("Windows name".to_owned(), "three".to_owned(), 0));
+        let merge = last_change_by(&pc, "windows");
+        // Both versions, with no extra count: an older app sees it as newer than both sides.
+        assert_eq!(merge.record_version, RecordVersion::from_entries([("phone", 2), ("windows", 1)]));
+        assert_eq!(merge_by(&mut pc, "windows", 41), 0);
+
+        for order in [[&base, &phone, &windows, &merge], [&base, &windows, &phone, &merge], [&base, &windows, &merge, &phone], [&base, &phone, &merge, &windows]] {
+            let mut device = database();
+            for operation in order {
+                receive(&mut device, operation);
+            }
+            assert_eq!((title(&device), password(&device), open_count(&device)), ("Windows name".to_owned(), "three".to_owned(), 0));
+        }
+
+        // The phone merges the same pair before the PC's merge arrives. The two merges are equal, so
+        // each device sets the other's aside and no new conflict starts.
+        let mut phone_db = database();
+        for operation in [&base, &phone, &windows] {
+            receive(&mut phone_db, operation);
+        }
+        assert_eq!(merge_by(&mut phone_db, "phone", 42), 1);
+        let phone_merge = last_change_by(&phone_db, "phone");
+        assert_eq!(phone_merge.record_version, merge.record_version);
+        assert_eq!(receive(&mut phone_db, &merge), ApplyOutcome::Obsolete);
+        assert_eq!(receive(&mut pc, &phone_merge), ApplyOutcome::Obsolete);
+        for device in [&phone_db, &pc] {
+            assert_eq!((title(device), password(device), open_count(device)), ("Windows name".to_owned(), "three".to_owned(), 0));
+        }
+    }
+
+    #[test]
+    fn the_same_field_changed_on_both_sides_stays_for_review() {
+        let base = change(42, "phone", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1)]), 0, entry("Base", "one"), "2026-10-01T10:00:00Z");
+        let windows = change(41, "windows", 1, GENESIS_HASH, RecordVersion::from_entries([("phone", 1), ("windows", 1)]), 1, entry("Windows name", "two"), "2026-10-01T11:00:00Z");
+        let phone = change(42, "phone", 2, &base.hash, RecordVersion::from_entries([("phone", 2)]), 1, entry("Phone name", "three"), "2026-10-01T12:00:00Z");
+        let mut pc = database();
+        for operation in [&base, &windows, &phone] {
+            receive(&mut pc, operation);
+        }
+        assert_eq!(merge_by(&mut pc, "windows", 41), 0);
+        assert_eq!((title(&pc), open_count(&pc)), ("Windows name".to_owned(), 1));
+        assert_eq!(last_change_by(&pc, "windows").sequence, 1);
     }
 
     #[test]

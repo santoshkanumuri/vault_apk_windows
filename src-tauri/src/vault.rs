@@ -1318,6 +1318,34 @@ impl UnlockedVault {
         Ok(())
     }
 
+    /// M2: closes each open conflict of a login or folder whose two sides changed different
+    /// fields, with one change that holds both edits (`conflicts::auto_merge`). Only an active
+    /// member writes it, since the other devices refuse a change by a device that left the group.
+    /// Returns how many closed.
+    pub(crate) fn merge_conflicts(&mut self) -> Result<usize, crate::conflicts::ConflictError> {
+        use crate::conflicts::ConflictError;
+        let open: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sync_conflicts WHERE resolved_at_utc = '' AND entity_type IN ('entry', 'group'))",
+            [],
+            |row| row.get(0),
+        )?;
+        if !open || !self.identity_store.exists() {
+            return Ok(0);
+        }
+        let Some(key) = self.sync_content_key().map_err(|_| ConflictError::Data)? else { return Ok(0) };
+        let device = self.identity_store.get_or_create().map_err(|_| ConflictError::Data)?;
+        let events = self.membership_events().map_err(|_| ConflictError::Data)?;
+        let active = crate::membership::verify(&events)
+            .ok()
+            .and_then(|membership| membership.members.get(&device.device_id).map(|member| member.active))
+            .unwrap_or(false);
+        if !active {
+            return Ok(0);
+        }
+        let identity = &self.identity_store;
+        crate::conflicts::auto_merge(&mut self.connection, &*key, &device.device_id, Some(&self.blobs), |bytes| identity.sign(bytes))
+    }
+
     /// Photo uploads received from another device whose blob has not arrived yet.
     pub fn photos_waiting_for_data(&self) -> Result<usize, VaultError> {
         Ok(self.waiting_photo_blobs()?.into_iter().filter(|(hash, size)| !self.blobs.has(hash, *size)).count())

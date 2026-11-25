@@ -1,0 +1,1607 @@
+{
+  "format": "nuvori-sync-entry-merge-vectors",
+  "version": 1,
+  "rule": "entry-merge-v1",
+  "latestWins": [
+    "lastOpenedAt",
+    "updatedAt"
+  ],
+  "cases": [
+    {
+      "name": "different fields of one login merge",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "new-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@work.example",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 3000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@work.example",
+          "secondaryValue": "new-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 3000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      }
+    },
+    {
+      "name": "the same field changed to different values is a conflict",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "phone-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "pc-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 3000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": null
+    },
+    {
+      "name": "the same field changed to the same value merges",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "same",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail account",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "same",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1500
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail account",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "same",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      }
+    },
+    {
+      "name": "last opened and updated take the later time",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": true,
+          "lastOpenedAt": 5000,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "Recovery codes in the safe",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 4000,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2500
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "Recovery codes in the safe",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": true,
+          "lastOpenedAt": 5000,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2500
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      }
+    },
+    {
+      "name": "folders added and removed on either side combine",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a",
+          "group-b"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a",
+          "group-b",
+          "group-c"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail (work)",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2100
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail (work)",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2100
+        },
+        "groupIds": [
+          "group-a",
+          "group-c"
+        ]
+      }
+    },
+    {
+      "name": "a changed item type is a conflict",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "NOTE",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail account",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2100
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": null
+    },
+    {
+      "name": "a field a newer app added is kept from the side that changed it",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000,
+          "passwordHistory": "h1"
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail account",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1900
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail account",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000,
+          "passwordHistory": "h1"
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      }
+    },
+    {
+      "name": "a field removed on one side and unchanged on the other is removed",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000,
+          "passwordHistory": "h1"
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail account",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1900,
+          "passwordHistory": "h1"
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail account",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      }
+    },
+    {
+      "name": "without a base, equal sides merge with the later times",
+      "entityType": "entry",
+      "base": null,
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "chosen",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 10,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "chosen",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 9,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2500
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "chosen",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 10,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2500
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      }
+    },
+    {
+      "name": "without a base, different sides are a conflict",
+      "entityType": "entry",
+      "base": null,
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "phone",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Other",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2500
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": null
+    },
+    {
+      "name": "without a base, different folders are a conflict",
+      "entityType": "entry",
+      "base": null,
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-b"
+        ]
+      },
+      "expected": null
+    },
+    {
+      "name": "a deleted base counts as no base",
+      "entityType": "entry",
+      "base": {
+        "deleted": true
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "phone",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Other",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": null
+    },
+    {
+      "name": "two deletes merge into a delete",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "deleted": true
+      },
+      "remote": {
+        "deleted": true
+      },
+      "expected": {
+        "deleted": true
+      }
+    },
+    {
+      "name": "an edit against a delete is a conflict",
+      "entityType": "entry",
+      "base": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Edited",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 2000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "deleted": true
+      },
+      "expected": null
+    },
+    {
+      "name": "different ids never merge",
+      "entityType": "entry",
+      "base": null,
+      "local": {
+        "entry": {
+          "id": "entry-1",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "remote": {
+        "entry": {
+          "id": "entry-2",
+          "type": "PASSWORD",
+          "title": "Mail",
+          "primaryValue": "sam@example.com",
+          "secondaryValue": "old-password",
+          "tertiaryValue": "https://mail.example.com",
+          "fourthValue": "",
+          "cardKind": "CREDIT",
+          "network": "",
+          "totpAlgorithm": "SHA1",
+          "totpDigits": 6,
+          "totpPeriod": 30,
+          "linkedApps": "",
+          "autofillSignatures": "",
+          "autofillOrigins": "",
+          "linkedAuthenticatorId": "",
+          "notes": "",
+          "color": 4278743114,
+          "tags": "",
+          "favorite": false,
+          "lastOpenedAt": 0,
+          "sortOrder": 1000,
+          "createdAt": 1000,
+          "updatedAt": 1000
+        },
+        "groupIds": [
+          "group-a"
+        ]
+      },
+      "expected": null
+    },
+    {
+      "name": "a folder's name and notes merge",
+      "entityType": "group",
+      "base": {
+        "group": {
+          "id": "group-1",
+          "name": "Work",
+          "notes": "",
+          "folderType": ""
+        }
+      },
+      "local": {
+        "group": {
+          "id": "group-1",
+          "name": "Work accounts",
+          "notes": "",
+          "folderType": ""
+        }
+      },
+      "remote": {
+        "group": {
+          "id": "group-1",
+          "name": "Work",
+          "notes": "Shared with the team",
+          "folderType": ""
+        }
+      },
+      "expected": {
+        "group": {
+          "id": "group-1",
+          "name": "Work accounts",
+          "notes": "Shared with the team",
+          "folderType": ""
+        }
+      }
+    },
+    {
+      "name": "a folder renamed differently on both sides is a conflict",
+      "entityType": "group",
+      "base": {
+        "group": {
+          "id": "group-1",
+          "name": "Work",
+          "notes": "",
+          "folderType": ""
+        }
+      },
+      "local": {
+        "group": {
+          "id": "group-1",
+          "name": "Office",
+          "notes": "",
+          "folderType": ""
+        }
+      },
+      "remote": {
+        "group": {
+          "id": "group-1",
+          "name": "Job",
+          "notes": "",
+          "folderType": ""
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "other kinds of change never merge",
+      "entityType": "passkey",
+      "base": {
+        "passkey": {
+          "id": "p"
+        }
+      },
+      "local": {
+        "passkey": {
+          "id": "p",
+          "username": "a"
+        }
+      },
+      "remote": {
+        "passkey": {
+          "id": "p",
+          "rpId": "b"
+        }
+      },
+      "expected": null
+    }
+  ],
+  "versions": [
+    {
+      "local": {
+        "phone": 2
+      },
+      "remote": {
+        "phone": 1,
+        "pc": 1
+      },
+      "meet": {
+        "phone": 1
+      },
+      "join": {
+        "pc": 1,
+        "phone": 2
+      }
+    },
+    {
+      "local": {
+        "phone": 3,
+        "pc": 2
+      },
+      "remote": {
+        "phone": 2,
+        "pc": 3,
+        "tablet": 1
+      },
+      "meet": {
+        "pc": 2,
+        "phone": 2
+      },
+      "join": {
+        "pc": 3,
+        "phone": 3,
+        "tablet": 1
+      }
+    },
+    {
+      "local": {
+        "pc": 1
+      },
+      "remote": {
+        "phone": 1
+      },
+      "meet": {},
+      "join": {
+        "pc": 1,
+        "phone": 1
+      }
+    }
+  ]
+}
