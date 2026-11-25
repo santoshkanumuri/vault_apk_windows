@@ -207,6 +207,7 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "reset_vault": state.vault = "notConfigured"; state.enrolled = false; return snapshot();
     case "change_master_password":
       requireUnlocked();
+      if (state.enrolled) throw new Error("Master password changes are unavailable while devices share a vault. Paired devices must keep the same master password.");
       if (String(args.replacement ?? "").length < 12) throw new Error("Use a new master password with at least 12 characters.");
       if (args.current === "wrong password") throw new Error("The current password is wrong.");
       log("success", "security", "Master password changed");

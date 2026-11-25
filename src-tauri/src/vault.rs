@@ -905,6 +905,20 @@ impl UnlockedVault {
             .filter(|name| !name.trim().is_empty())
     }
 
+    /// Android `activeMembershipCount(vaultId) > 1`: true while this PC shares its vault with
+    /// another active device. Every device in a sync group keeps the managing device's master
+    /// password, so the password can't change here until this PC is the only active member. A
+    /// membership that doesn't verify counts as shared, so an unreadable group never unlocks the change.
+    pub fn shares_with_other_devices(&self) -> Result<bool, VaultError> {
+        if !self.is_enrolled()? {
+            return Ok(false);
+        }
+        Ok(match crate::membership::verify(&self.membership_events()?) {
+            Ok(verified) => verified.members.values().filter(|member| member.active).count() > 1,
+            Err(_) => true,
+        })
+    }
+
     /// Android `LocalDeviceNameChangeWriter`: this PC names itself in the sync group. The name goes
     /// out as a signed `device_name` change, `{"name": ...}` under this PC's own device ID, that each
     /// paired device applies to its device list; the verified device ID stays the same. Only an
@@ -4540,6 +4554,22 @@ mod tests {
         store.unlock("first-master-password").unwrap();
         store.change_password(&key, "first-master-password", "second-master-password").unwrap();
         store.unlock("second-master-password").unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Android blocks a password change while another device shares the vault, so every paired
+    /// device keeps the managing device's password. A PC on its own may change it.
+    #[test]
+    fn a_paired_pc_shares_its_vault_and_an_unpaired_one_does_not() {
+        let directory = std::env::temp_dir().join(format!("nuvori-password-shared-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("first-master-password").unwrap();
+        assert!(!vault.shares_with_other_devices().unwrap());
+        enroll_this_pc(&mut vault, "android-vault", [7; 32], None);
+        assert!(vault.shares_with_other_devices().unwrap());
+        vault.connection().execute("DELETE FROM sync_membership_events WHERE sequence = 1", []).unwrap();
+        assert!(vault.shares_with_other_devices().unwrap(), "a membership that doesn't verify counts as shared");
+        drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }
 

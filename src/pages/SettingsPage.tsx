@@ -223,8 +223,9 @@ function ChangePasswordRow() {
 
   return (
     <>
-      <SettingsRow icon={KeyRound} title={accountText.changeMasterPassword} description={accountText.changeMasterPasswordRow}
-        control={<Button size="sm" onClick={() => setOpen(true)}>{accountText.changePassword}</Button>} />
+      <SettingsRow icon={KeyRound} title={accountText.changeMasterPassword}
+        description={snapshot.enrolled ? accountText.pairedKeepSamePassword : accountText.changeMasterPasswordRow}
+        control={<Button size="sm" disabled={snapshot.enrolled} onClick={() => setOpen(true)}>{accountText.changePassword}</Button>} />
       <Dialog open={open} onClose={close} title={accountText.changeMasterPassword} locked={busy}
         footer={<>
           <Button variant="ghost" onClick={close} disabled={busy}>{strings.cancel}</Button>
@@ -249,7 +250,7 @@ function ChangePasswordRow() {
           <PasswordField label={accountText.confirmNewPassword} value={confirmation} onValue={(value) => { setConfirmation(value); setError(""); }}
             autoComplete="new-password" disabled={busy} error={mismatch ? accountText.passwordsDontMatch : undefined} />
           <StatusBanner kind="warning">{accountText.cantReset}</StatusBanner>
-          <p className="muted">{snapshot.enrolled ? `${accountText.thisPcOnly} ` : ""}{snapshot.helloEnabled ? accountText.hello : ""}</p>
+          {snapshot.helloEnabled && <p className="muted">{accountText.hello}</p>}
         </form>
       </Dialog>
     </>
