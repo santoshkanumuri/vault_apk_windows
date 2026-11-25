@@ -61,6 +61,9 @@ export type KeepassSummary = {
 };
 
 /** A login's earlier password, kept on this PC only (newest first, up to 10). */
+export type { ColumnMapping, ImportChoices, ImportPreview, ImportSummary } from "./passwordImport";
+import type { ColumnMapping, ImportChoices, ImportPreview, ImportSummary } from "./passwordImport";
+
 export type PreviousPassword = { password: string; replacedAt: number };
 
 /** The "Website icons" setting and the icons the browser extension saved: site -> `data:image/png;base64,...`. */
@@ -361,6 +364,8 @@ export const api = {
   /** Opens a KeePass file (base64) in memory and lists what an import would add. */
   keepassPreview: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_preview", { data, password, keyFile }),
   keepassImport: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_import", { data, password, keyFile }),
+  passwordsPreview: (data: string, mapping: ColumnMapping | null) => call<ImportPreview>("passwords_preview", { data, mapping }),
+  passwordsImport: (data: string, mapping: ColumnMapping | null, choices: ImportChoices) => call<ImportSummary>("passwords_import", { data, mapping, choices }),
   previousPasswords: (entryId: string) => call<PreviousPassword[]>("previous_passwords", { entryId }),
   clearPreviousPasswords: (entryId: string) => call<void>("clear_previous_passwords", { entryId }),
   siteIcons: () => call<SiteIconsState>("site_icons"),

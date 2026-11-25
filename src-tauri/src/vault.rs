@@ -2215,6 +2215,57 @@ impl UnlockedVault {
         Ok(summary)
     }
 
+    /// Saved logins, as a password import compares them (password_import.rs).
+    fn saved_logins(&self) -> Result<Vec<crate::password_import::SavedLogin>, VaultError> {
+        Ok(self.list_entries()?.iter().filter_map(crate::password_import::SavedLogin::from_entry).collect())
+    }
+
+    /// What a password import would do with each login of an export (password_import.rs).
+    pub fn review_password_import(
+        &self,
+        rows: usize,
+        logins: &[crate::password_import::ImportedLogin],
+    ) -> Result<crate::password_import::Review, VaultError> {
+        Ok(crate::password_import::review(rows, logins, &self.saved_logins()?))
+    }
+
+    /// Saves a reviewed password import as Android's `importLogins` does: the new logins the user
+    /// kept are added, and a saved login's password is replaced only where the user chose the
+    /// imported one; nothing else of it changes. Each is an ordinary change that syncs. Nothing is
+    /// saved when the file or the saved logins it matches changed since the review.
+    pub fn import_passwords(
+        &mut self,
+        rows: usize,
+        logins: &[crate::password_import::ImportedLogin],
+        choices: &crate::password_import::Choices,
+    ) -> Result<crate::password_import::Summary, VaultError> {
+        use crate::password_import::{Status, Summary};
+        let (planned, token) = crate::password_import::plan(logins, &self.saved_logins()?);
+        if token != choices.token {
+            return Err(VaultError::ImportChanged);
+        }
+        let mut summary = Summary { duplicate_rows: rows.saturating_sub(logins.len()), ..Default::default() };
+        for (row, (login, (status, matched))) in logins.iter().zip(planned).enumerate() {
+            match (status, matched) {
+                (Status::New, _) if choices.skip_new.contains(&row) => {}
+                (Status::New, _) => {
+                    self.save_entry(serde_json::json!({
+                        "type": "PASSWORD", "title": login.title, "primaryValue": login.username,
+                        "secondaryValue": login.password, "tertiaryValue": login.url, "notes": login.notes,
+                    }))?;
+                    summary.added += 1;
+                }
+                (Status::AlreadySaved, _) => summary.skipped_exact += 1,
+                (Status::PasswordDiffers, Some(id)) if choices.use_imported.contains(&row) => {
+                    self.save_entry(serde_json::json!({"id": id, "secondaryValue": login.password}))?;
+                    summary.updated += 1;
+                }
+                _ => summary.skipped_conflicts += 1,
+            }
+        }
+        Ok(summary)
+    }
+
     // Previous passwords and Recently deleted: this PC only (local_recovery.rs).
 
     pub fn previous_passwords(&self, entry_id: &str) -> Result<Vec<crate::local_recovery::PreviousPassword>, VaultError> {
@@ -3057,6 +3108,8 @@ pub enum VaultError {
     EntryNotFound,
     #[error("a different password is already saved for this website account")]
     BrowserLoginConflict,
+    #[error("saved passwords changed after the import review")]
+    ImportChanged,
     #[error("group fields are invalid")]
     InvalidGroup,
     #[error("group was not found")]
@@ -3363,6 +3416,50 @@ mod tests {
         assert_eq!((again.logins, again.duplicates), (0, 4));
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_password_import_adds_new_logins_and_replaces_only_chosen_passwords() {
+        use crate::password_import::{Choices, ImportedLogin, Status};
+        let directory = std::env::temp_dir().join(format!("nuvori-password-import-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let saved = |vault: &mut UnlockedVault, url: &str, password: &str| vault.save_entry(serde_json::json!({"type": "PASSWORD",
+            "title": "Saved", "primaryValue": "me", "secondaryValue": password, "tertiaryValue": url, "notes": "kept"})).unwrap()["id"].as_str().unwrap().to_owned();
+        let same = saved(&mut vault, "https://same.example", "same");
+        let changed = saved(&mut vault, "https://changed.example", "stale");
+        let kept = saved(&mut vault, "https://kept.example", "old");
+        let login = |url: &str, password: &str| ImportedLogin { title: "Imported".into(), username: "me".into(), password: password.into(), url: url.into(), notes: String::new() };
+        let logins = vec![login("https://new.example/login", "n1"), login("https://skipped.example", "n2"), login("https://same.example/x", "same"),
+            login("https://changed.example", "fresh"), login("https://kept.example", "new")];
+        let review = vault.review_password_import(6, &logins).unwrap();
+        assert_eq!(review.items.iter().map(|item| item.status).collect::<Vec<_>>(),
+            [Status::New, Status::New, Status::AlreadySaved, Status::PasswordDiffers, Status::PasswordDiffers]);
+        let choices = Choices { token: review.token.clone(), skip_new: vec![1], use_imported: vec![3] };
+
+        // A matched login changed after the review (here its password, as a sync could): the
+        // import is refused and nothing is saved.
+        vault.save_entry(serde_json::json!({"id": kept, "secondaryValue": "older"})).unwrap();
+        let before = vault.list_entries().unwrap().len();
+        assert!(matches!(vault.import_passwords(6, &logins, &choices), Err(VaultError::ImportChanged)));
+        assert_eq!(vault.list_entries().unwrap().len(), before);
+
+        let choices = Choices { token: vault.review_password_import(6, &logins).unwrap().token, ..choices };
+        let summary = vault.import_passwords(6, &logins, &choices).unwrap();
+        assert_eq!((summary.added, summary.updated, summary.skipped_exact, summary.skipped_conflicts, summary.duplicate_rows), (1, 1, 1, 1, 1));
+        let entries = vault.list_entries().unwrap();
+        let by_url = |url: &str| entries.iter().find(|entry| entry["tertiaryValue"] == url).cloned();
+        let added = by_url("https://new.example/login").unwrap();
+        assert_eq!((added["type"].as_str(), added["title"].as_str(), added["secondaryValue"].as_str()), (Some("PASSWORD"), Some("Imported"), Some("n1")));
+        assert!(by_url("https://skipped.example").is_none(), "an unticked new login isn't added");
+        let updated = entries.iter().find(|entry| entry["id"] == changed.as_str()).unwrap();
+        assert_eq!((updated["secondaryValue"].as_str(), updated["title"].as_str(), updated["notes"].as_str()), (Some("fresh"), Some("Saved"), Some("kept")),
+            "only the password changes");
+        assert_eq!(entries.iter().find(|entry| entry["id"] == kept.as_str()).unwrap()["secondaryValue"], "older");
+        assert_eq!(entries.iter().find(|entry| entry["id"] == same.as_str()).unwrap()["secondaryValue"], "same");
+        assert_eq!(vault.previous_passwords(&changed).unwrap().len(), 1, "the replaced password is kept in Previous passwords");
+        drop(vault);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
