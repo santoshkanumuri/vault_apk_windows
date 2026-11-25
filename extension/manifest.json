@@ -20,6 +20,15 @@
         "https://*/*"
       ],
       "js": [
+        "guard.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "js": [
         "fields.js",
         "appearance-palette.js",
         "signins.js",

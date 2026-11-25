@@ -104,7 +104,46 @@
     isElement: (node) => node instanceof Element,
     matches: (node, selector) => { try { return DOM.matches.call(node, selector); } catch { return false; } },
     body: () => DOM.body.call(doc),
+    /** Calls `callback` (at most every 700 ms, for 5 minutes) while the page changes: sign-in steps are single-page apps. */
+    observe: (callback) => {
+      if (typeof MutationObserver !== "function") return;
+      const until = now() + 5 * 60 * 1000;
+      let timer = 0;
+      const observer = new MutationObserver(() => {
+        if (timer) return;
+        timer = setTimeout(() => {
+          timer = 0;
+          if (now() > until) { observer.disconnect(); return; }
+          callback();
+        }, 700);
+      });
+      try { observer.observe(docRoot(), { childList: true, subtree: true, characterData: true }); } catch { /* no page to watch */ }
+    },
   };
+
+  // A sign-in popup that closes by itself answers this page by postMessage. The page then usually
+  // navigates; if it only stores its new session, a new key name shows it. Names only, never a value,
+  // and the names never leave this page: the background only learns "changed" or not.
+  const cookieOf = Object.getOwnPropertyDescriptor(Document.prototype, "cookie")?.get;
+  const NOISE_KEYS = /^[lsc]:(_ga|_gid|_gat|_gcl|_fbp|_fbc|_hj|_uet|_clck|_clsk|_dd_s|amp_|ajs_|mp_|g_state|__cf|optimizely|intercom|OptanonConsent|AWSALB|ab\.|_pk_|_ym)/i;
+  function storageKeyNames() {
+    const names = new Set();
+    for (const area of ["localStorage", "sessionStorage"]) {
+      try {
+        const storage = globalThis[area];
+        for (let index = 0; index < Math.min(storage.length, 500); index++) names.add(`${area[0]}:${storage.key(index)}`);
+      } catch { /* storage blocked */ }
+    }
+    try {
+      for (const part of String(cookieOf?.call(doc) || "").split(";")) {
+        const name = part.split("=")[0].trim();
+        if (name) names.add(`c:${name}`);
+      }
+    } catch { /* cookies blocked */ }
+    return names;
+  }
+  let storageMark = null;
+  const storageChanged = () => storageMark !== null && [...storageKeyNames()].some((name) => !storageMark.has(name) && !NOISE_KEYS.test(name));
   // Marks are built with the captured createElement, never a method the page could replace.
   const markDoc = { createElement: (tag) => DOM.createElement.call(doc, tag), createElementNS: (ns, tag) => DOM.createElementNS.call(doc, ns, tag) };
   const signInMark = (provider, size) => SIGNINS.markNode(markDoc, provider, size);
@@ -138,13 +177,33 @@
   };
   const TONE_ICON = { success: "check", info: "info", progress: "loader", warning: "lock", error: "alert", neutral: "info" };
 
+  // Events inside Nuvori's surfaces. The page must not see keys typed into a card's field (its
+  // shortcuts would act on them) or clicks on its buttons (a focus trap swallows them), so each
+  // surface owns these event types: guard.js hands them over from the page's window before any page
+  // listener runs, else a capture listener on the shadow root does. Either way they then stop, and
+  // the surface runs these handlers itself, from the element the event is for up to its frame.
+  const OWNED_TYPES = ["keydown", "keyup", "keypress", "beforeinput", "input", "textInput", "compositionstart", "compositionupdate", "compositionend",
+    "paste", "copy", "cut", "focusin", "focusout", "focus", "blur", "pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick",
+    "auxclick", "contextmenu", "touchstart", "touchend"];
+  const OWNED = new Set(OWNED_TYPES);
+  const HANDLERS = new WeakMap(); // element -> { type: [callback] }
+  /** Adds a handler on an element of a surface (owned types run through the surface; others natively). */
+  function on(node, type, callback) {
+    if (!OWNED.has(type)) { node.addEventListener(type, callback); return; }
+    let byType = HANDLERS.get(node);
+    if (!byType) HANDLERS.set(node, (byType = {}));
+    (byType[type] ||= []).push(callback);
+  }
+  // While a surface runs its handlers: the event and the element inside the surface it is for.
+  let ownedEvent = null;
+
   function el(tag, props = {}, ...children) {
     const node = DOM.createElement.call(doc, tag);
     for (const [key, value] of Object.entries(props)) {
       if (value === undefined || value === null || value === false) continue;
       if (key === "class") node.className = value;
       else if (key === "text") node.textContent = value;
-      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else if (key.startsWith("on")) on(node, key.slice(2), value);
       else node.setAttribute(key, value === true ? "" : String(value));
     }
     for (const child of children) if (child) node.append(child);
@@ -338,13 +397,72 @@
         unobscured = visible;
       }, { trackVisibility: true, delay: 100, threshold: [1] });
     } catch { io = null; }
-    // Keyboard use starts its own delay when focus first enters this surface.
-    frame.addEventListener("focusin", () => {
-      if (!focusInside) { focusInside = true; focusEnteredAt = now(); }
-    });
-    frame.addEventListener("focusout", (event) => {
-      if (!event.relatedTarget || !frame.contains(event.relatedTarget)) focusInside = false;
-    });
+    // The element inside this surface an owned event is for. A listener on the root sees the real
+    // target; guard.js, on the page's window, sees only the host: then the point under the pointer,
+    // or the focused element for keys (and for a click made with the keyboard, detail 0).
+    const innerTarget = (event) => {
+      const first = event.composedPath?.()[0] ?? event.target;
+      if (first instanceof Element && first !== host && frame.contains(first)) return first;
+      const keyboardClick = event.type === "click" && event.detail === 0;
+      if (!keyboardClick && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+        const hit = DOM.shadowElementFromPoint.call(root, event.clientX, event.clientY);
+        if (hit instanceof Element && frame.contains(hit)) return hit;
+      }
+      const active = DOM.shadowActiveElement.call(root);
+      return active instanceof Element && frame.contains(active) ? active : frame;
+    };
+    // A text field here keeps the focus the user gave it: a page's focus trap that moves focus back
+    // (by script, with no click or Tab from the user) gets it returned, a few times at most.
+    let focusedField = null;
+    let refocusTimes = [];
+    const keepFocus = (event) => {
+      const field = focusedField;
+      const related = event.relatedTarget;
+      if (!field || !shown || !host.isConnected || !related || ["IFRAME", "FRAME"].includes(tagOf(related))) return;
+      const time = now();
+      if (time - lastOutsidePointer < 600 || time - lastTabKey < 600) return; // the user moved on
+      refocusTimes = refocusTimes.filter((at) => time - at < 2000);
+      if (refocusTimes.length >= 3) return;
+      refocusTimes.push(time);
+      setTimeout(() => { if (shown && field.isConnected) field.focus({ preventScroll: true }); }, 0);
+    };
+    const own = (event) => {
+      const type = event.type;
+      if (type === "focusin" || type === "focus") {
+        // Keyboard use starts its own delay when focus first enters this surface.
+        if (!focusInside) { focusInside = true; focusEnteredAt = now(); }
+        const field = innerTarget(event);
+        focusedField = tagOf(field) === "INPUT" ? field : null;
+        return;
+      }
+      if (type === "focusout" || type === "blur") {
+        const related = event.relatedTarget;
+        if (!related || !(related === host || (related instanceof Node && frame.contains(related)))) {
+          focusInside = false;
+          keepFocus(event);
+        }
+        return;
+      }
+      if (type === "keydown" && event.key === "Tab") lastTabKey = now();
+      const target = innerTarget(event);
+      const previous = ownedEvent;
+      ownedEvent = { event, target };
+      try {
+        for (let node = target; node; node = node === frame ? null : DOM.parentElement.call(node)) {
+          for (const callback of HANDLERS.get(node)?.[type] || []) callback(event);
+          if (event.cancelBubble) break;
+        }
+      } finally {
+        ownedEvent = previous;
+      }
+    };
+    globalThis.__nuvoriGuard?.own(host, own);
+    for (const type of OWNED_TYPES) {
+      root.addEventListener(type, (event) => {
+        own(event);
+        event.stopPropagation?.();
+      }, true);
+    }
 
     const paint = () => paintAppearance(frame, frame.getAttribute("data-theme"));
     const surface = {
@@ -435,18 +553,27 @@
   // Another popover, dialog or fullscreen element may now sit above us: until the
   // IntersectionObserver confirms we are visible again (and the delay passes), nothing activates.
   const ours = (node) => SURFACES.some((surface) => surface.host === node);
+  // The last trusted pointer press on the page itself, and the last Tab key in a surface (keepFocus).
+  let lastOutsidePointer = -Infinity;
+  let lastTabKey = -Infinity;
+  listen(doc, "pointerdown", (event) => { if (event.isTrusted && !ours(event.composedPath?.()[0] ?? event.target)) lastOutsidePointer = now(); }, true);
   const invalidateAll = () => { for (const surface of SURFACES) surface.invalidate(); };
+  // Only something that opens can cover us. A popover or dialog that closes (often the page's own
+  // menu closing because the user pressed on our card) never restarts the delay: before, the first
+  // click on Save after such a close was refused, and Save took two or three clicks.
   for (const type of ["beforetoggle", "toggle", "fullscreenchange"]) {
-    listen(doc, type, (event) => { if (!ours(event.target)) invalidateAll(); }, true);
+    listen(doc, type, (event) => { if (!ours(event.target) && event.newState !== "closed") invalidateAll(); }, true);
   }
+  const opens = (record) => !(record.target instanceof Element) || record.attributeName !== "open" || DOM.getAttribute.call(record.target, "open") !== null;
   new MutationObserver((records) => {
-    if (records.some((record) => !ours(record.target))) invalidateAll();
+    if (records.some((record) => !ours(record.target) && opens(record))) invalidateAll();
   }).observe(docRoot(), { attributes: true, attributeFilter: ["open", "popover"], subtree: true });
 
   // ---------------------------------------------------------------------------
   // Field helpers
 
-  const eventTarget = (event) => event.composedPath()[0] || event.target;
+  // Inside a surface handler, the element the owned event is for (guard.js sees only the host).
+  const eventTarget = (event) => (ownedEvent?.event === event ? ownedEvent.target : event.composedPath()[0] || event.target);
   const isInput = (node) => node instanceof HTMLInputElement;
   const viewport = () => ({ width: window.innerWidth || 0, height: window.innerHeight || 0 });
 
@@ -669,8 +796,8 @@
       dropdown.body,
       el("div", { class: "foot" }, dontSuggest, searchAll, showAll));
     // Keep focus in the page field while the pointer is used on the list.
-    dropdown.panel.addEventListener("mousedown", (event) => event.preventDefault());
-    dropdown.panel.addEventListener("keydown", onListKey);
+    on(dropdown.panel, "mousedown", (event) => event.preventDefault());
+    on(dropdown.panel, "keydown", onListKey);
     surface.frame.append(dropdown.panel);
     dropdown.surface = surface;
   }
@@ -702,7 +829,7 @@
       // Saved for another page of this site, such as login.example.com on www.example.com.
       else if (account.related) option.append(el("span", { class: "kind tag", text: "Same site" }));
       if (account.passkey) option.append(passkeyTag());
-      option.addEventListener("click", (event) => {
+      on(option, "click", (event) => {
         if (!dropdown.surface.canActivate(event, option)) return;
         void choose(account);
       });
@@ -770,7 +897,7 @@
         el("span", { class: "text" },
           el("span", { class: "title", text: row.title }),
           el("span", { class: "sub", text: row.sub })));
-      option.addEventListener("click", (event) => {
+      on(option, "click", (event) => {
         if (!dropdown.surface.canActivate(event, option)) return;
         void chooseItem(item);
       });
@@ -860,7 +987,7 @@
             el("span", { class: "title", text: account.title || account.username || "Saved login" }),
             el("span", { class: "sub", text: [account.username, account.site].filter(Boolean).join(" · ") || "No username" })));
         if (account.passkey) option.append(passkeyTag());
-        option.addEventListener("click", (event) => {
+        on(option, "click", (event) => {
           if (!dropdown.surface.canActivate(event, option)) return;
           pickFromSearch(account, host);
         });
@@ -871,7 +998,7 @@
       if (found.length) list.replaceChildren(...dropdown.options);
       else list.replaceChildren(el("li", { class: "empty", text: "No login matches." }));
     };
-    input.addEventListener("input", draw);
+    on(input, "input", draw);
     draw();
     dropdown.every = true;
     dropdown.search = input;
@@ -1300,7 +1427,7 @@
       const row = el("button", { class: "reminder", type: "button", title: `Show the ${name} sign-in button on this page`,
         "aria-label": `Last time you signed in with ${name}${method.account ? ` as ${method.account}` : ""}. Show its button on this page.` },
         signInMark(method.provider, 18), label);
-      row.addEventListener("click", (event) => {
+      on(row, "click", (event) => {
         if (!surface.canActivate(event, row)) return;
         if (!pointTo(method.provider)) {
           label.replaceChildren(el("span", { class: "reminder-label", text: `No ${name} button on this page` }));
@@ -1386,7 +1513,7 @@
     const panel = el("div", { class: "panel", role: "dialog", "aria-label": "Nuvori" },
       el("div", { class: "head" }, el("span", { class: "mark" }, icon("key")), el("span", { class: "brand", text: "Nuvori" }), el("span", { class: "host", text: location.host })),
       card.body);
-    panel.addEventListener("keydown", (event) => {
+    on(panel, "keydown", (event) => {
       if (event.isTrusted && event.key === "Escape") { event.stopPropagation(); hideCard(); }
     });
     surface.frame.append(panel);
@@ -1410,7 +1537,7 @@
     // The prefill (og:site_name or host) is only a hint; the real host is always shown beside it.
     const input = el("input", { class: "input", type: "text", maxlength: "200", autocomplete: "off", spellcheck: "false", "aria-label": `Name for ${prompt.host}` });
     input.value = prompt.title || prompt.host;
-    input.addEventListener("keydown", (event) => {
+    on(input, "keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
       if (!card.busy && card.surface.canActivate(event, input)) void decide("save");
@@ -1435,8 +1562,8 @@
         card.updateButton?.setAttribute("aria-disabled", "false");
         card.surface.resetActivation(); // Update needs its own deliberate click.
       };
-      row.addEventListener("click", pick);
-      row.addEventListener("keydown", (event) => {
+      on(row, "click", pick);
+      on(row, "keydown", (event) => {
         if (event.key !== " " && event.key !== "Enter") return;
         event.preventDefault();
         pick(event);
@@ -1450,7 +1577,7 @@
   function usernameField(prompt) {
     const input = el("input", { class: "input inline", type: "text", maxlength: "1024", autocomplete: "off", spellcheck: "false", "aria-label": "Username", placeholder: "No username" });
     input.value = prompt.username || "";
-    input.addEventListener("keydown", (event) => {
+    on(input, "keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
       if (!card.busy && card.surface.canActivate(event, input)) void decide("save");
@@ -1493,7 +1620,7 @@
       // A normal full-width field under its label, like "Name" in the save prompt: the text starts at the left.
       const input = el("input", { class: "input", type: "text", maxlength: "256", autocomplete: "off", spellcheck: "false", "aria-label": `Account you used with ${name}`, placeholder: "Not known" });
       input.value = prompt.account || "";
-      input.addEventListener("keydown", (event) => {
+      on(input, "keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
         if (!card.busy && card.surface.canActivate(event, input)) void decide("save");
@@ -1854,6 +1981,15 @@
     }
     if (message.action === "signin_point") {
       sendResponse({ status: typeof message.provider === "string" && pointTo(message.provider) ? "ok" : "missing" });
+      return false;
+    }
+    if (message.action === "signin_watch") {
+      storageMark = storageKeyNames();
+      sendResponse({ status: "ok" });
+      return false;
+    }
+    if (message.action === "signin_changed") {
+      sendResponse({ status: "ok", changed: storageChanged() });
       return false;
     }
     if (message.action === "show_notice") {

@@ -7,11 +7,20 @@
 // Detection (background.js wires the events):
 // 1. A tab, or a popup a page opened, requests a provider's OAuth / OpenID Connect authorize endpoint
 //    (webRequest, main frame; Google One Tap also in a frame). The page that started it must not be
-//    the provider's own site.
+//    the provider's own site. A popup belongs to the tab that opened it: Chrome reports that as
+//    openerTabId; Firefox does not for a tab in another window, nor does a page that opens it with
+//    noopener, so background.js also links a popup to its opener when it opens (`opened`).
 // 2. The provider sends the tab back to a site: a redirect off the provider's hosts, or a form POST
 //    whose initiator is the provider. An `error` answer (the user cancelled) ends the flow.
-// 3. The tab settles on a page that is not the provider's: that page's site is the site signed in to.
-//    For a popup, the opener's page is.
+//    Popup modes that answer by postMessage (Google's storagerelay and "postmessage" redirect, Google
+//    Identity Services' /gsi/select) never leave the provider: the popup closes itself. Then the
+//    opener's next navigation, or new keys in its storage, within POPUP_RETURN_MS is the answer.
+// 3. The tab settles on a page that is not the provider's and not a sign-in broker (Auth0, Okta,
+//    Firebase's /__/auth/handler and the like): that page's site is the site signed in to. For a
+//    popup, the opener's page is.
+// Not visible to any extension: sign-ins finished in the browser's own account dialog (FedCM, which
+// Chrome uses for Google One Tap and some "Sign in with Google" buttons). No page or request of the
+// provider runs in a tab, so nothing here can see them.
 // It counts only with evidence that this was a sign-in and not "connect your calendar": the user
 // clicked a "Sign in / Continue with <provider>" button on the site, or the flow asked for identity
 // scopes only. The user still confirms before anything is remembered.
@@ -45,7 +54,11 @@ var NuvoriSignIns = (() => {
       labels: ["google"],
       authorize: [
         { host: host(/^accounts\.google\.com$/), path: /^\/o\/oauth2\/(v2\/)?auth(\/oauthchooseaccount)?$/ },
-        { host: host(/^accounts\.google\.com$/), path: /^\/gsi\/(iframe\/)?select$/, kind: "onetap" },
+        // Google Identity Services: the button's popup (main frame) or One Tap's frame on the site.
+        { host: host(/^accounts\.google\.com$/), path: /^\/gsi\/(iframe\/)?select$/, kind: "gsi" },
+        // The chooser and sign-in steps an OAuth request moves through, when a popup starts there
+        // (only with a client_id: Google's own sign-ins to Gmail or YouTube carry none).
+        { host: host(/^accounts\.google\.com$/), path: /^\/(v3\/)?signin\/(oauth(\/[a-z0-9/_-]*)?|accountchooser|identifier|v2\/identifier|(v2\/)?challenge\/[a-z0-9/_-]+|selectchallenge)$/i, needs: "client_id" },
       ],
       watch: ["https://accounts.google.com/*"],
       scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/plus.me"],
@@ -71,7 +84,8 @@ var NuvoriSignIns = (() => {
       ],
       watch: ["https://login.microsoftonline.com/*", "https://login.microsoft.com/*", "https://login.windows.net/*", "https://login.live.com/*"],
       scopes: ["openid", "profile", "email", "offline_access", "user.read", "https://graph.microsoft.com/user.read", "https://graph.microsoft.com/openid", "https://graph.microsoft.com/email", "https://graph.microsoft.com/profile"],
-      accountPages: /^login\.(microsoftonline\.com|microsoft\.com|live\.com)$/,
+      // account.live.com: the consent page of a personal Microsoft account ("Let this app access your info?").
+      accountPages: /^(login\.(microsoftonline\.com|microsoft\.com|live\.com)|account\.live\.com)$/,
       accountPaths: /^\//,
     },
     {
@@ -175,8 +189,11 @@ var NuvoriSignIns = (() => {
    * "storagerelay://https/example.com?id=..." form, or of the `origin` parameter. `message` marks the
    * popup modes that answer by postMessage instead of a navigation.
    */
-  function answerTarget(params) {
-    const redirect = params.get("redirect_uri") || params.get("redirect_url") || "";
+  function answerTarget(params, depth = 0) {
+    const redirect = params.get("redirect_uri") || params.get("redirect_url") || params.get("login_uri") || "";
+    // Google's chooser and sign-in steps carry the original authorize request in `continue`.
+    const inner = !redirect && depth === 0 ? parse(params.get("continue") || "") : null;
+    if (inner && inner.protocol === "https:" && inner.hostname === "accounts.google.com") return answerTarget(inner.searchParams, 1);
     const relay = /^storagerelay:\/\/https\/([a-z0-9.-]+(?::\d+)?)(?:[/?]|$)/i.exec(redirect);
     if (relay) return { origin: httpsOrigin(`https://${relay[1]}`), message: true };
     const message = redirect === "postmessage" || params.get("response_mode") === "web_message";
@@ -194,11 +211,15 @@ var NuvoriSignIns = (() => {
     for (const provider of PROVIDERS) {
       for (const endpoint of provider.authorize) {
         if (!endpoint.host.test(name) || !endpoint.path.test(parsed.pathname)) continue;
+        if (endpoint.needs && !parsed.searchParams.get(endpoint.needs)) continue;
         const scopes = scopesOf(parsed.searchParams);
-        const identityOnly = endpoint.kind === "onetap" || scopes.every((scope) => provider.scopes.includes(scope));
+        // Google Identity Services only ever asks who the user is (an ID token).
+        const identityOnly = endpoint.kind === "gsi" || scopes.every((scope) => provider.scopes.includes(scope));
         if (endpoint.identityOnly && (!identityOnly || scopes.length === 0)) return null;
         const target = answerTarget(parsed.searchParams);
-        return { provider: provider.id, kind: endpoint.kind || "oauth", redirectOrigin: target.origin, message: target.message, identityOnly };
+        // GIS answers the page through its own channel; a ux_mode=redirect request names a login_uri.
+        const message = target.message || (endpoint.kind === "gsi" && parsed.searchParams.get("ux_mode") !== "redirect");
+        return { provider: provider.id, kind: endpoint.kind || "oauth", redirectOrigin: target.origin, message, identityOnly };
       }
     }
     return null;
@@ -213,12 +234,38 @@ var NuvoriSignIns = (() => {
     return has("error") && !has("code") && !has("id_token") && !has("access_token");
   }
 
+  /**
+   * Sign-in brokers: hosted login pages that stand between a site and the provider (Auth0, Okta,
+   * Cognito, Firebase's auth handler, ...). A flow passes through them on the way back; landing there
+   * is not the site the user signed in to, so the tracker waits for the next page.
+   */
+  const BROKERS = /(^|\.)(auth0\.com|okta\.com|oktapreview\.com|okta-emea\.com|onelogin\.com|firebaseapp\.com|amazoncognito\.com|b2clogin\.com|accounts\.dev|kinde\.com|supabase\.co|stytch\.com|authkit\.app|fusionauth\.io|logto\.app|frontegg\.com|descope\.com|cloudflareaccess\.com|ciamlogin\.com)$/;
+  function isBroker(value) {
+    const url = typeof value === "string" ? parse(value) : null;
+    if (!url) return false;
+    // Firebase Auth's handler, also on a site's own domain (authDomain: "auth.example.com").
+    return BROKERS.test(url.hostname.toLowerCase()) || /^\/__\/auth\//.test(url.pathname);
+  }
+
+  /**
+   * Frames a provider puts on a site to draw its own sign-in button. A click in one is the user's
+   * "Sign in with <provider>" click on that site (the frame belongs to the provider's host).
+   */
+  function buttonFrameProvider(hostname, pathname = "/") {
+    const name = String(hostname || "").toLowerCase();
+    const path = String(pathname || "/");
+    if (name === "accounts.google.com" && /^\/gsi\/button$/.test(path)) return "google";
+    if (/^(www\.)?facebook\.com$/.test(name) && /^\/(v[\d.]+\/)?plugins\/login_button\.php$/.test(path)) return "facebook";
+    return null;
+  }
+
   /** Every URL pattern to watch for redirects and account pages (webRequest filters). */
   const watchPatterns = () => [...new Set(PROVIDERS.flatMap((provider) => provider.watch))];
   /** The authorize endpoints only, for the request listener. */
   function authorizePatterns() {
     return [
-      "https://accounts.google.com/o/oauth2/*", "https://accounts.google.com/gsi/*", "https://appleid.apple.com/auth/*",
+      "https://accounts.google.com/o/oauth2/*", "https://accounts.google.com/gsi/*", "https://accounts.google.com/signin/*",
+      "https://accounts.google.com/v3/signin/*", "https://appleid.apple.com/auth/*",
       "https://login.microsoftonline.com/*", "https://login.microsoft.com/*", "https://login.windows.net/*", "https://login.live.com/*",
       "https://github.com/login/oauth/*", "https://*.facebook.com/*", "https://facebook.com/*",
       "https://x.com/i/oauth2/*", "https://twitter.com/i/oauth2/*", "https://api.x.com/oauth/*", "https://api.twitter.com/oauth/*", "https://x.com/oauth/*", "https://twitter.com/oauth/*",
@@ -281,23 +328,32 @@ var NuvoriSignIns = (() => {
   const CLICK_MAX_MS = 2 * 60 * 1000;
   const SETTLE_MS = 2500;
   const MAX_FLOWS = 32;
+  const MAX_POPUPS = 32;
+  // A popup that closed itself: how long its opener has to navigate, or store new keys, after that.
+  const POPUP_RETURN_MS = 20 * 1000;
+  // A sign-in button click this recent links a popup that has no opener id to the clicked tab.
+  const POPUP_CLICK_MS = 30 * 1000;
 
   function createTracker(saved) {
     let flows = {};
     let clicks = {};
+    let popups = {};
     if (saved && typeof saved === "object") {
       if (saved.flows && typeof saved.flows === "object") flows = { ...saved.flows };
       if (saved.clicks && typeof saved.clicks === "object") clicks = { ...saved.clicks };
+      if (saved.popups && typeof saved.popups === "object") popups = { ...saved.popups };
     }
 
+    const since = (flow) => (flow.phase === "authorizing" ? flow.at : flow.phase === "awaiting" ? flow.closedAt : flow.returnedAt);
+    const limit = (flow) => (flow.phase === "authorizing" ? FLOW_MAX_MS : flow.phase === "awaiting" ? POPUP_RETURN_MS : RETURN_WAIT_MS);
     const purge = (at) => {
-      for (const [key, flow] of Object.entries(flows)) {
-        const age = at - (flow.phase === "authorizing" ? flow.at : flow.returnedAt);
-        if (!(age <= (flow.phase === "authorizing" ? FLOW_MAX_MS : RETURN_WAIT_MS))) delete flows[key];
-      }
+      for (const [key, flow] of Object.entries(flows)) if (!(at - since(flow) <= limit(flow))) delete flows[key];
       for (const [key, click] of Object.entries(clicks)) if (!(at - click.at <= CLICK_MAX_MS)) delete clicks[key];
+      for (const [key, popup] of Object.entries(popups)) if (!(at - popup.at <= FLOW_MAX_MS)) delete popups[key];
       const keys = Object.keys(flows).sort((a, b) => flows[a].at - flows[b].at);
       for (const key of keys.slice(0, Math.max(0, keys.length - MAX_FLOWS))) delete flows[key];
+      const opened = Object.keys(popups).sort((a, b) => popups[a].at - popups[b].at);
+      for (const key of opened.slice(0, Math.max(0, opened.length - MAX_POPUPS))) delete popups[key];
     };
 
     /** The finished sign-in, or null when the evidence or the site does not hold up. */
@@ -305,7 +361,7 @@ var NuvoriSignIns = (() => {
       delete flows[flow.tabId];
       const origin = httpsOrigin(landing || "");
       const provider = BY_ID.get(flow.provider);
-      if (!origin || !provider || onProvider(provider, hostOf(origin))) return null;
+      if (!origin || !provider || onProvider(provider, hostOf(origin)) || isBroker(landing)) return null;
       if (!flow.clicked && !flow.identityOnly) return null;
       return { tabId: flow.homeTabId, provider: flow.provider, origin, account: flow.account || "", providerTabId: flow.tabId,
         providerOrigin: flow.providerOrigin, evidence: flow.clicked ? "click" : "scope" };
@@ -319,11 +375,41 @@ var NuvoriSignIns = (() => {
     };
 
     return {
+      /**
+       * A popup window, or a blank tab a page opened, and the tab that opened it, noted when it opens
+       * (from openerTabId, or guessed where the browser gives none); every later request in the popup
+       * uses it, also after the popup first went to a broker's page.
+       */
+      opened({ tabId, homeTabId, at }) {
+        purge(at);
+        if (!Number.isInteger(tabId) || !Number.isInteger(homeTabId) || tabId === homeTabId) return;
+        popups[tabId] = { home: homeTabId, at };
+        const flow = flows[tabId];
+        if (flow && flow.homeTabId === tabId) flow.homeTabId = homeTabId;
+      },
+
+      /** The opener noted for a popup, or null. */
+      homeOf(tabId) { return popups[tabId] ? popups[tabId].home : null; },
+
+      /** The tab of the latest sign-in button click within POPUP_CLICK_MS (never `except`), or null. */
+      recentClick({ at, except }) {
+        let best = null;
+        for (const [key, click] of Object.entries(clicks)) {
+          const tab = Number(key);
+          if (tab === except || !(at - click.at <= POPUP_CLICK_MS)) continue;
+          if (!best || click.at > best.at) best = { tab, at: click.at };
+        }
+        return best ? best.tab : null;
+      },
+
       /** A main-frame or frame request in `tabId`. `homeTabId` is the opener for a popup, else the tab. */
       request({ tabId, url, type = "main_frame", initiator, startUrl, homeTabId = tabId, at }) {
         purge(at);
+        if (homeTabId === tabId && popups[tabId]) homeTabId = popups[tabId].home;
         const auth = parseAuthorize(url);
         if (auth) {
+          // GIS: /gsi/select in a frame is One Tap on the site's own page; in a main frame, the button's popup.
+          if (auth.kind === "gsi") auth.kind = type === "main_frame" ? "oauth" : "onetap";
           if (type !== "main_frame" && auth.kind !== "onetap") return null;
           const provider = BY_ID.get(auth.provider);
           const start = [initiator, startUrl].map((value) => httpsOrigin(value || "")).find((origin) => origin && !onProvider(provider, hostOf(origin)));
@@ -339,12 +425,13 @@ var NuvoriSignIns = (() => {
           const clicked = Boolean(click && click.provider === auth.provider && at - click.at <= CLICK_MAX_MS);
           const kept = previous && previous.provider === auth.provider ? previous : null;
           flows[tabId] = {
-            tabId, homeTabId, provider: auth.provider, kind: auth.kind, start: start || kept?.start || null, message: auth.message,
-            redirectOrigin: auth.redirectOrigin, identityOnly: auth.identityOnly || Boolean(kept?.identityOnly), clicked: clicked || Boolean(kept?.clicked),
-            account: kept?.account || "", chosen: Boolean(kept?.chosen), providerOrigin: httpsOrigin(url), phase: "authorizing", at,
+            tabId, homeTabId, provider: auth.provider, kind: auth.kind, start: start || kept?.start || null, message: auth.message || Boolean(kept?.message),
+            redirectOrigin: auth.redirectOrigin || kept?.redirectOrigin || null, identityOnly: auth.identityOnly || Boolean(kept?.identityOnly),
+            clicked: clicked || Boolean(kept?.clicked), account: kept?.account || "", chosen: Boolean(kept?.chosen),
+            providerOrigin: httpsOrigin(url), phase: "authorizing", at,
           };
           if (!flows[tabId].start) { delete flows[tabId]; return null; }
-          return { started: auth.provider };
+          return { started: auth.provider, homeTabId, message: flows[tabId].message };
         }
         const flow = flows[tabId];
         if (!flow || flow.phase !== "authorizing" || type !== "main_frame") return null;
@@ -376,7 +463,10 @@ var NuvoriSignIns = (() => {
         if (!flow || flow.phase !== "returned") return false;
         const provider = BY_ID.get(flow.provider);
         if (onProvider(provider, hostOf(url)) || !httpsOrigin(url)) return false;
-        flow.landing = flow.homeTabId === tabId ? url : homeUrl || "";
+        const landing = flow.homeTabId === tabId ? url : homeUrl || "";
+        // A broker's page (Auth0, Okta, Firebase's handler) passes the answer on: wait for the next page.
+        if (isBroker(landing)) return false;
+        flow.landing = landing;
         flow.landedAt = at;
         return true;
       },
@@ -388,19 +478,54 @@ var NuvoriSignIns = (() => {
         return finish(flow, flow.landing);
       },
 
-      /** A tab closed. A popup that got the provider's answer finishes on its opener's page. */
+      /**
+       * A tab closed. A popup that got the provider's answer finishes on its opener's page. A popup
+       * that answers by postMessage and closed by itself without a choice seen here (one account,
+       * consent given before) waits for its opener to take the answer (`homeChanged`).
+       */
       closed({ tabId, homeUrl, at }) {
         purge(at);
         for (const flow of Object.values(flows)) if (flow.homeTabId === tabId && flow.tabId !== tabId) delete flows[flow.tabId];
         delete clicks[tabId];
+        delete popups[tabId];
+        for (const [key, popup] of Object.entries(popups)) if (popup.home === tabId) delete popups[key];
         const flow = flows[tabId];
         if (!flow) return null;
         if (flow.homeTabId === tabId) { delete flows[tabId]; return null; }
         // Popup modes that answer by postMessage never leave the provider: the user's choice there counts.
         if (flow.phase === "returned" || (flow.message && flow.chosen)) return finish(flow, homeUrl);
+        if (flow.message && flow.phase === "authorizing" && !flow.cancelled) {
+          flow.phase = "awaiting";
+          flow.closedAt = at;
+          return null;
+        }
         delete flows[tabId];
         return null;
       },
+
+      /**
+       * The opener of a popup that closed by itself navigated (a new page, a pushState address, a
+       * reload) or stored new keys. Within POPUP_RETURN_MS that is the site taking the provider's
+       * answer, and its page is the landing page. Returns the flow keys to settle.
+       */
+      homeChanged({ tabId, url, at }) {
+        purge(at);
+        const keys = [];
+        for (const flow of Object.values(flows)) {
+          if (flow.homeTabId !== tabId || flow.tabId === tabId || flow.phase !== "awaiting") continue;
+          const provider = BY_ID.get(flow.provider);
+          if (!httpsOrigin(url || "") || onProvider(provider, hostOf(url)) || isBroker(url)) continue;
+          flow.phase = "returned";
+          flow.returnedAt = at;
+          flow.landing = url;
+          flow.landedAt = at;
+          keys.push(flow.tabId);
+        }
+        return keys;
+      },
+
+      /** Popups that closed by themselves and wait on the opener `tabId`. */
+      awaiting(tabId) { return Object.values(flows).filter((flow) => flow.homeTabId === tabId && flow.phase === "awaiting").map((flow) => flow.tabId); },
 
       /**
        * The provider's page in `tabId` showed an account, or the user chose one (`chosen`). A choice in
@@ -414,7 +539,7 @@ var NuvoriSignIns = (() => {
         if (!onProvider(provider, hostOf(url))) return null;
         const clean = cleanAccount(account);
         if (clean) flow.account = clean;
-        if (chosen) flow.chosen = !cancel;
+        if (chosen) { flow.chosen = !cancel; flow.cancelled = Boolean(cancel); }
         if (cancel && flow.kind === "onetap") { delete flows[tabId]; return null; }
         if (flow.kind === "onetap" && chosen && !cancel && flow.phase === "authorizing") {
           flow.phase = "returned";
@@ -429,25 +554,35 @@ var NuvoriSignIns = (() => {
       click({ tabId, provider, at }) {
         if (!BY_ID.has(provider)) return;
         clicks[tabId] = { provider, at };
-        const flow = flows[tabId];
-        if (flow && flow.provider === provider) flow.clicked = true;
+        for (const flow of Object.values(flows)) if (flow.homeTabId === tabId && flow.provider === provider) flow.clicked = true;
       },
 
-      forget(tabId) { delete flows[tabId]; delete clicks[tabId]; },
+      forget(tabId) { delete flows[tabId]; delete clicks[tabId]; delete popups[tabId]; },
       /** Tabs with a sign-in under way (for cheap early returns). */
       active() { return Object.keys(flows).length; },
       flowOf(tabId) { return flows[tabId] ? { ...flows[tabId] } : null; },
-      toJSON() { return { flows, clicks }; },
+      toJSON() { return { flows, clicks, popups }; },
     };
   }
 
   // ---------------------------------------------------------------------------
   // Page helpers (content script). `api` carries DOM functions captured before the page could replace them.
 
+  // Where each provider's pages show the account in use: Google's account tiles and identity chip
+  // (data-identifier, data-email, the chip on the password and consent steps), Microsoft's identity
+  // banner (#displayName on the password, "Approve sign in" and "Stay signed in?" steps) and its
+  // "Pick an account" tiles (data-test-id holds the address).
   const SELECTORS = {
-    google: ["[data-email]", "[data-identifier]"],
-    microsoft: ["#displayName", "[data-testid='identityBanner']", ".identityBanner", "#identityBanner"],
+    google: ["[data-identifier]", "[data-email]", "[data-profile-identifier]", "#profileIdentifier"],
+    microsoft: ["#displayName", "[data-testid='identityBanner']", "#identityBanner", ".identityBanner", "[data-testid='userDisplayName']",
+      "#userDisplayName", "[data-test-id]"],
   };
+
+  /** The account one element names: an account attribute, or the one address in its text. */
+  function accountOfNode(node, api) {
+    return cleanAccount(api.attr(node, "data-email")) || cleanAccount(api.attr(node, "data-identifier"))
+      || oneEmail(api.attr(node, "data-test-id")) || oneEmail(api.attr(node, "title")) || oneEmail(api.text(node));
+  }
 
   /**
    * Sign in with Apple asks "Share My Email" (the Apple ID address) or "Hide My Email" (a private relay
@@ -468,7 +603,10 @@ var NuvoriSignIns = (() => {
     return "";
   }
 
-  /** The account the provider's page shows as the one in use, or "". */
+  /**
+   * The account the provider's page shows as the one in use, or "". A list of several accounts (a
+   * chooser before the user picks one) names none: the click on a tile tells (`accountFromClick`).
+   */
   function accountFromPage(providerId, api) {
     if (providerId === "apple") {
       const chosen = appleChoice(api);
@@ -480,10 +618,14 @@ var NuvoriSignIns = (() => {
       if (login) return login;
     }
     for (const selector of SELECTORS[providerId] || []) {
-      for (const node of api.query(selector).slice(0, 4)) {
-        const value = cleanAccount(api.attr(node, "data-email") || api.attr(node, "data-identifier") || "") || oneEmail(api.text(node));
-        if (value) return value;
+      const found = new Set();
+      for (const node of api.query(selector).slice(0, 8)) {
+        const value = accountOfNode(node, api);
+        if (value) found.add(value);
       }
+      const distinct = [...new Set([...found].map((value) => value.toLowerCase()))];
+      if (distinct.length === 1) return [...found][0];
+      if (distinct.length > 1) return "";
     }
     const text = api.text(api.body());
     return signedInAs(text) || oneEmail(text);
@@ -491,9 +633,9 @@ var NuvoriSignIns = (() => {
 
   /** The account a click on the provider's page chose (an account tile), or "". `path` is the event path. */
   function accountFromClick(path, api) {
-    for (const node of path.slice(0, 8)) {
+    for (const node of path.slice(0, 12)) {
       if (!api.isElement(node)) continue;
-      const value = cleanAccount(api.attr(node, "data-email") || api.attr(node, "data-identifier") || "") || oneEmail(api.text(node));
+      const value = accountOfNode(node, api);
       if (value) return value;
     }
     return "";
@@ -501,6 +643,7 @@ var NuvoriSignIns = (() => {
 
   const CANCEL = /\b(cancel|deny|decline|not now|back|use another account|abbrechen|annuler|cancelar)\b/i;
   const BUTTON = "button, a[href], [role='button'], input[type='submit'], input[type='button'], input[type='image']";
+  const CHOICE = `${BUTTON}, [data-identifier], [data-email], [data-test-id], li, [role='link'], [role='option']`;
 
   /** The text a button is known by: aria-label, title, its text, or an image's alt. */
   function buttonText(node, api) {
@@ -536,12 +679,24 @@ var NuvoriSignIns = (() => {
     return PROVIDERS.find((provider) => provider.accountPages.test(name) && provider.accountPaths.test(String(pathname || "/")))?.id || null;
   }
 
+  // An activation: a trusted click, or Enter or Space on a focused control (keyboard users pick tiles too).
+  const activates = (event) => event.isTrusted && (event.type === "click" || event.key === "Enter" || event.key === " ");
+
   /**
-   * Content-script side. On a provider's page: report the account it shows and the account the user
-   * clicks (the background keeps it only for a tab with a sign-in under way). On any other page: report
-   * a click on a "Continue with <provider>" button, the evidence that a flow is a sign-in.
+   * Content-script side. On a provider's page: report the account it shows (again whenever the page
+   * changes, as the sign-in steps are single-page apps) and the account the user picks (the
+   * background keeps it only for a tab with a sign-in under way). In a provider's button frame on a
+   * site (Google's GIS button): report the click. On any other page or frame: report a click on a
+   * "Continue with <provider>" button, the evidence that a flow is a sign-in.
    */
   function watchPage({ send, listen, doc, api, hostname, pathname, inFrame }) {
+    const buttonProvider = buttonFrameProvider(hostname, pathname);
+    if (buttonProvider && inFrame) {
+      const onButton = (event) => { if (activates(event)) void send({ action: "signin_click", provider: buttonProvider, frame: "button" }); };
+      listen(doc, "click", onButton, true);
+      listen(doc, "keydown", onButton, true);
+      return;
+    }
     const providerId = providerOfPage(hostname, pathname);
     if (providerId) {
       let last = "";
@@ -553,24 +708,28 @@ var NuvoriSignIns = (() => {
         void send({ action: "signin_account", account, ...extra });
       };
       setTimeout(() => report(), 600);
-      listen(doc, "click", (event) => {
-        if (!event.isTrusted) return;
+      // The identity chip, a "Check your phone" step or a consent page can appear without a click.
+      api.observe?.(() => report());
+      const choose = (event) => {
+        if (!activates(event)) return;
         const path = event.composedPath();
-        const button = path.slice(0, 6).find((node) => api.isElement(node) && api.matches(node, `${BUTTON}, [data-identifier], [data-email], li, [role='link']`));
+        const button = path.slice(0, 8).find((node) => api.isElement(node) && api.matches(node, CHOICE));
         if (!button) return;
         const cancel = CANCEL.test(buttonText(button, api));
         // Apple: the selected email option wins over an address inside the clicked control.
         const account = (providerId === "apple" && appleChoice(api)) || accountFromClick(path, api) || accountFromPage(providerId, api);
         last = "";
         void send({ action: "signin_account", account, chosen: true, cancel });
-      }, true);
+      };
+      listen(doc, "click", choose, true);
+      listen(doc, "keydown", choose, true);
       return;
     }
-    if (inFrame) return;
+    // Frames too: a site's sign-in box can be a frame from its own login service.
     listen(doc, "click", (event) => {
       if (!event.isTrusted) return;
       const provider = providerOfClick(event.composedPath(), api);
-      if (provider) void send({ action: "signin_click", provider });
+      if (provider) void send({ action: "signin_click", provider, ...(inFrame ? { frame: "site" } : {}) });
     }, true);
   }
 
@@ -616,6 +775,7 @@ var NuvoriSignIns = (() => {
     PROVIDERS: PROVIDERS.map(({ id, name }) => ({ id, name })), MARKS, nameOf,
     parseAuthorize, isErrorAnswer, onProvider: (providerId, hostname) => onProvider(BY_ID.get(providerId), hostname),
     watchPatterns, authorizePatterns, cleanAccount, oneEmail, signedInAs, providerOfText, providerOfPage,
-    createTracker, accountFromPage, accountFromClick, providerOfClick, findButtons, watchPage, markNode, SETTLE_MS,
+    createTracker, accountFromPage, accountFromClick, providerOfClick, findButtons, watchPage, markNode, SETTLE_MS, POPUP_RETURN_MS,
+    isBroker, buttonFrameProvider,
   };
 })();

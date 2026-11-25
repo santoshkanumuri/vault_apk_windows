@@ -5,6 +5,7 @@ import vm from "node:vm";
 
 const fieldsSource = readFileSync(new URL("./fields.js", import.meta.url), "utf8");
 const source = readFileSync(new URL("./suggestions.js", import.meta.url), "utf8");
+const guardSource = readFileSync(new URL("./guard.js", import.meta.url), "utf8");
 
 // --- A tiny DOM with real prototype chains (EventTarget > Node > Element / Document /
 // DocumentFragment > ShadowRoot), so the script's captured prototype methods work and
@@ -13,13 +14,48 @@ const source = readFileSync(new URL("./suggestions.js", import.meta.url), "utf8"
 function makeDom() {
   let doc;
   const silent = (node, event) => { for (const callback of node.listeners[event.type] || []) callback(event); };
+  const captures = new WeakMap(); // target -> callbacks added for the capture phase
+  /**
+   * dispatchEvent as the browser does it: capture from the window down, the target, then bubbling up,
+   * through a shadow root to its host. Listeners outside a closed shadow root see the host as the
+   * target and a path that starts at it. stopPropagation and stopImmediatePropagation work.
+   */
+  function propagate(target, event) {
+    const path = [];
+    for (let node = target; node; node = node instanceof ShadowRootF ? node.host : node.parent) path.push(node);
+    if (path[path.length - 1] === doc._root) { path.push(doc); if (doc.window) path.push(doc.window); }
+    const shadow = path.findIndex((node) => node instanceof ShadowRootF);
+    let stopped = false;
+    let immediate = false;
+    event.cancelBubble = false;
+    event.stopPropagation = () => { stopped = true; event.cancelBubble = true; };
+    event.stopImmediatePropagation = () => { stopped = true; immediate = true; event.cancelBubble = true; };
+    const call = (node, index, phase) => {
+      const set = captures.get(node);
+      const seen = shadow < 0 || index <= shadow ? { target, path } : { target: path[shadow].host, path: path.slice(shadow + 1) };
+      for (const callback of [...(node.listeners[event.type] || [])]) {
+        const capture = Boolean(set?.has(callback));
+        if ((phase === "capture" && !capture) || (phase === "bubble" && capture)) continue;
+        event.target = seen.target;
+        event.currentTarget = node;
+        event.composedPath = () => seen.path;
+        callback(event);
+        if (immediate) return;
+      }
+    };
+    for (let index = path.length - 1; index > 0 && !stopped; index--) call(path[index], index, "capture");
+    if (!stopped) call(path[0], 0, "target");
+    if (event.bubbles !== false) for (let index = 1; index < path.length && !stopped; index++) call(path[index], index, "bubble");
+  }
   class EventTargetF {
     constructor() { this.listeners = {}; }
-    addEventListener(type, callback) { (this.listeners[type] ||= []).push(callback); }
+    addEventListener(type, callback, options) {
+      (this.listeners[type] ||= []).push(callback);
+      if (options === true || options?.capture) { if (!captures.has(this)) captures.set(this, new Set()); captures.get(this).add(callback); }
+    }
     dispatchEvent(event) {
       (this.dispatched ||= []).push(event.type);
-      event.composedPath ||= () => [this];
-      silent(this, event);
+      propagate(this, event);
       return true;
     }
   }
@@ -78,8 +114,9 @@ function makeDom() {
   }
   class ShadowRootF extends DocumentFragmentF {
     constructor(host) { super(); this.host = host; host.closedRoot = this; }
-    get activeElement() { return null; }
-    elementFromPoint(x, y) { return doc.hit(x, y); }
+    get activeElement() { const focused = doc.focused; return focused && this.contains(focused) ? focused : null; }
+    // The element under the pointer inside this root: the one a test clicks.
+    elementFromPoint(x, y) { return doc.pointed && this.contains(doc.pointed) ? doc.pointed : doc.hit(x, y); }
   }
   class DocumentF extends NodeF {
     constructor() { super(); this._root = new ElementF("html"); this._body = new ElementF("body"); this._root.append(this._body); this._active = null; this._visibility = "visible"; }
@@ -156,7 +193,7 @@ function makeDom() {
   return { doc, Node: NodeF, Element: ElementF, Input, Form, Label, ShadowRoot: ShadowRootF, DocumentFragment: DocumentFragmentF, Document: DocumentF, EventTarget: EventTargetF };
 }
 
-async function page({ protocol = "https:", reply = () => ({ status: "none" }), build, before, intersection = true, firefox = false } = {}) {
+async function page({ protocol = "https:", reply = () => ({ status: "none" }), build, before, intersection = true, firefox = false, guard = false } = {}) {
   const dom = makeDom();
   const { doc, Input, Form } = dom;
   const form = new Form();
@@ -177,8 +214,9 @@ async function page({ protocol = "https:", reply = () => ({ status: "none" }), b
   const visibility = { visible: true };
   const observers = [];
   const userActivation = { isActive: true };
-  const window = { innerWidth: 1200, innerHeight: 800, listeners: {}, addEventListener(type, callback) { (this.listeners[type] ||= []).push(callback); } };
+  const window = Object.assign(new dom.EventTarget(), { innerWidth: 1200, innerHeight: 800 });
   window.top = window;
+  doc.window = window;
   const context = vm.createContext({
     window, document: doc, location: { protocol, host: "example.com" }, crypto: globalThis.crypto,
     navigator: { userActivation },
@@ -200,6 +238,8 @@ async function page({ protocol = "https:", reply = () => ({ status: "none" }), b
     Event: class { constructor(type, init = {}) { this.type = type; Object.assign(this, init); } },
     chrome: { runtime: { sendMessage: async (message) => { requests.push(message); return reply(message); } } },
   });
+  // guard.js runs at document_start, before any page script; the page's listeners come next.
+  if (guard) vm.runInContext(guardSource, context);
   before?.(dom, { form, username, password, context });
   vm.runInContext(fieldsSource, context);
   vm.runInContext(source, context);
@@ -217,7 +257,7 @@ async function page({ protocol = "https:", reply = () => ({ status: "none" }), b
     focus: async (node) => { node.focus(); await settle(); },
     runTimers: async () => { for (const timer of timers.splice(0)) if (!timer.cancelled) timer.callback(); await settle(); },
     find: (host, predicate) => inside(host).find(predicate),
-    click: async (node, init = {}) => { node.dispatchEvent({ type: "click", isTrusted: true, detail: 1, clientX: 10, clientY: 10, preventDefault() {}, stopPropagation() {}, ...init }); await settle(); },
+    click: async (node, init = {}) => { doc.pointed = node; node.dispatchEvent({ type: "click", isTrusted: true, detail: 1, clientX: 10, clientY: 10, preventDefault() {}, stopPropagation() {}, ...init }); doc.pointed = null; await settle(); },
     key: async (node, key, init = {}) => { node.dispatchEvent({ type: "keydown", key, isTrusted: true, preventDefault() {}, stopPropagation() {}, ...init }); await settle(); },
   };
 }
@@ -1067,4 +1107,135 @@ test("Firefox: the list has this site's logins only, never 'Search all logins'",
   const [list] = empty.hosts();
   assert.doesNotMatch(textOf(list.closedRoot), /search all your logins/);
   assert.equal(empty.find(list, (node) => node._tag === "BUTTON" && node.className === "btn" && node.textContent === "Search all logins"), undefined);
+});
+
+// --- Sign-in prompt ("Remember that you use … ?"): keyboard isolation, focus, and one-click Save ----
+
+const signInPrompt = { id: "signin-1", kind: "signin", provider: "google", providerName: "Google", host: "example.com", account: "", locked: false };
+const signInReply = (message) => message.action === "inline_pending" ? { status: "ok", prompt: signInPrompt }
+  : message.action === "inline_approve" ? { status: "remembered" } : { status: "none" };
+
+/** A page with its own keyboard shortcuts and a focus trap, like netlify.com's "t" for team search. */
+function pageListeners() {
+  const seen = [];
+  const record = (where) => (event) => seen.push(`${where}:${event.type}:${event.key || ""}`);
+  return {
+    seen,
+    install: ({ doc }, { context }) => {
+      for (const type of ["keydown", "keyup", "keypress", "beforeinput", "input", "click", "mousedown", "pointerdown", "focusin", "focusout"]) {
+        context.window.addEventListener(type, record("window-capture"), true);
+        doc.addEventListener(type, record("document-capture"), true);
+        doc.addEventListener(type, record("document"));
+        context.window.addEventListener(type, record("window"));
+      }
+    },
+  };
+}
+
+async function signInCard(options) {
+  const state = await page({ reply: signInReply, ...options });
+  const [card] = state.hosts();
+  const input = state.find(card, (node) => node._tag === "INPUT" && /Account you used/.test(node.attrs["aria-label"] || ""));
+  const save = state.find(card, (node) => node.attrs["data-decision"] === "save");
+  return { state, card, input, save };
+}
+
+async function typeInto(state, input, text) {
+  for (const key of text) {
+    await state.key(input, key);
+    input._value += key;
+    input.dispatchEvent({ type: "input", isTrusted: true, inputType: "insertText", data: key });
+    await state.key(input, key, { type: "keyup" });
+  }
+}
+
+test("sign-in prompt: with guard.js no page listener, in any phase, sees the keys typed or the click on Save", async () => {
+  const spy = pageListeners();
+  const { state, card, input, save } = await signInCard({ guard: true, before: spy.install });
+  assert.ok(input, "the account field is there");
+  state.clock.now += 450;
+  await state.focus(input);
+  await typeInto(state, input, "t@example.com");
+  assert.deepEqual(spy.seen.filter((entry) => /key|input/.test(entry)), [], "the page's shortcuts never get a key");
+  // Enter in the field still saves (after the keyboard delay), with what was typed.
+  state.clock.now += 450;
+  await state.key(input, "Enter");
+  const approvals = state.requests.filter((request) => request.action === "inline_approve");
+  assert.deepEqual(approvals.map(({ decision, account }) => [decision, account]), [["save", "t@example.com"]]);
+  assert.match(textOf(card.closedRoot), /Remembered/);
+  assert.deepEqual(spy.seen.filter((entry) => /click|mousedown|pointerdown|key/.test(entry)), []);
+  // A click on a card button is the surface's alone, too.
+  const other = await signInCard({ guard: true, before: spy.install });
+  other.state.clock.now += 450;
+  spy.seen.length = 0;
+  await other.state.click(other.save);
+  assert.deepEqual(spy.seen, [], "no page listener saw the click");
+  assert.equal(other.state.requests.filter((request) => request.action === "inline_approve").length, 1);
+  void save;
+});
+
+test("sign-in prompt: without guard.js the shadow root still stops keys before the page's bubbling listeners", async () => {
+  const spy = pageListeners();
+  const { state, input } = await signInCard({ before: spy.install });
+  state.clock.now += 450;
+  await state.focus(input);
+  await typeInto(state, input, "t");
+  const keys = spy.seen.filter((entry) => /key|input/.test(entry));
+  // Capture listeners on the page's window and document run before any content script's: only
+  // guard.js (document_start) can stop those. Bubbling listeners, where shortcuts live, see nothing.
+  assert.ok(keys.length > 0 && keys.every((entry) => /capture/.test(entry)), keys.join(", "));
+});
+
+test("sign-in prompt: one click saves after typing, even when the page's own menu closes on that press", async () => {
+  const { state, input, save } = await signInCard({ guard: true });
+  state.clock.now += 450;
+  await state.focus(input);
+  await typeInto(state, input, "me@example.com");
+  // The press on Save closes a popover of the page (its search, a menu): a closing overlay can't cover us.
+  state.doc.fire("beforetoggle", { target: { id: "team-search" }, newState: "closed" });
+  state.doc.fire("toggle", { target: { id: "team-search" }, newState: "closed" });
+  await settle();
+  await state.click(save);
+  const approvals = state.requests.filter((request) => request.action === "inline_approve");
+  assert.equal(approvals.length, 1, "the first click saves");
+  assert.equal(approvals[0].account, "me@example.com");
+  // An overlay that opens still restarts the delay (it could sit above the card).
+  const other = await signInCard({ guard: true });
+  other.state.clock.now += 450;
+  other.state.doc.fire("toggle", { target: { id: "page-dialog" }, newState: "open" });
+  await settle();
+  await other.state.click(other.save);
+  assert.equal(other.state.requests.some((request) => request.action === "inline_approve"), false);
+});
+
+test("sign-in prompt: a dialog closing (open attribute removed) does not restart the delay; one opening does", async () => {
+  // The page-wide observer watches the root element; the fake reports records for it.
+  const closing = await signInCard({ guard: true });
+  closing.state.clock.now += 450;
+  delete closing.state.doc._root.attrs.open;
+  closing.state.doc._root.mutated("open");
+  await closing.state.click(closing.save);
+  assert.equal(closing.state.requests.filter((request) => request.action === "inline_approve").length, 1, "a closed dialog can't cover the card");
+  const opening = await signInCard({ guard: true });
+  opening.state.clock.now += 450;
+  opening.state.doc._root.attrs.open = "";
+  opening.state.doc._root.mutated("open");
+  await opening.state.click(opening.save);
+  assert.equal(opening.state.requests.some((request) => request.action === "inline_approve"), false, "an opened dialog restarts the delay");
+});
+
+test("sign-in prompt: a page focus trap that pulls focus back is undone; the user's own click elsewhere is not", async () => {
+  const { state, input } = await signInCard({ guard: true });
+  await state.focus(input);
+  assert.equal(state.doc.focused, input);
+  // The page's script moves focus back to its own field (no click, no Tab from the user).
+  state.username.focus();
+  await state.runTimers();
+  assert.equal(state.doc.focused, input, "the field got its focus back");
+  // The user presses on the page: focus may leave.
+  state.clock.now += 1000;
+  state.doc.fire("pointerdown", { target: state.username, isTrusted: true });
+  state.username.focus();
+  await state.runTimers();
+  assert.equal(state.doc.focused, state.username);
 });

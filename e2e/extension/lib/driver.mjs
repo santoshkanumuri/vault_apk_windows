@@ -9,14 +9,15 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(here, "..");
-export const EXTENSION = path.join(ROOT, "..", "..", "extension");
+// NUVORI_EXTENSION: another unpacked copy, such as an older release to compare.
+export const EXTENSION = process.env.NUVORI_EXTENSION || path.join(ROOT, "..", "..", "extension");
 export const STATE_DIR = path.join(ROOT, ".state");
 const CHROMIUM = process.env.NUVORI_CHROMIUM
   || path.join(process.env.LOCALAPPDATA, "ms-playwright", "chromium-1234", "chrome-win64", "chrome.exe");
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function launch({ headless = process.env.HEADED ? false : true, profile = "profile" } = {}) {
+export async function launch({ headless = process.env.HEADED ? false : true, profile = "profile", args = [] } = {}) {
   const userDataDir = path.join(STATE_DIR, profile);
   fs.rmSync(userDataDir, { recursive: true, force: true });
   const context = await chromium.launchPersistentContext(userDataDir, {
@@ -30,6 +31,7 @@ export async function launch({ headless = process.env.HEADED ? false : true, pro
       "--ignore-certificate-errors",
       "--disable-features=PasswordManagerOnboarding,AutofillServerCommunication",
       "--password-store=basic",
+      ...args,
     ],
   });
   let worker = context.serviceWorkers()[0];
@@ -159,4 +161,12 @@ export async function shot(page, name) {
   const file = path.join(dir, name.replace(/[^a-z0-9-]+/gi, "_") + ".png");
   await page.screenshot({ path: file }).catch(() => {});
   return file;
+}
+
+/** The value of an input Nuvori drew (closed shadow root), by its DevTools node id from surfaces(). */
+export async function inputValue(page, nodeId) {
+  const session = await cdp(page);
+  const { object } = await session.send("DOM.resolveNode", { nodeId });
+  const { result } = await session.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: "function () { return this.value; }", returnByValue: true });
+  return result.value;
 }

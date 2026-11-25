@@ -353,10 +353,15 @@ test("manifest: least privilege, HTTPS-only hosts, no activeTab", () => {
   assert.deepEqual([...manifest.permissions].sort(), ["alarms", "clipboardWrite", "nativeMessaging", "offscreen", "scripting", "storage", "webRequest"]);
   assert.deepEqual(manifest.optional_permissions, ["privacy"], "privacy is asked for only when the user turns the switch on");
   assert.equal(manifest.minimum_chrome_version, "127");
-  assert.deepEqual(manifest.content_scripts[0].matches, ["https://*/*"]);
+  // guard.js runs first, at document_start in the top page only: its window listeners must come
+  // before the page's own, so the page never sees keys typed into Nuvori's UI.
+  const [guard, main] = manifest.content_scripts;
+  assert.deepEqual(guard, { matches: ["https://*/*"], js: ["guard.js"], run_at: "document_start" });
+  assert.deepEqual(main.matches, ["https://*/*"]);
+  assert.deepEqual(main.js, ["fields.js", "appearance-palette.js", "signins.js", "suggestions.js"]);
   // Frames get the script for card, address and code forms; no permission was added for it.
-  assert.equal(manifest.content_scripts[0].all_frames, true);
-  assert.equal(manifest.content_scripts[0].match_about_blank, undefined);
+  assert.equal(main.all_frames, true);
+  assert.equal(main.match_about_blank, undefined);
 });
 
 // --- Browser password manager (chrome.privacy) -------------------------------
