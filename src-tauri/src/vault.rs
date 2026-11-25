@@ -2968,17 +2968,54 @@ impl UnlockedVault {
         self.master_password_switch.as_ref()
     }
 
-    /// Reads the switch again from the stored changes and the membership. On an error the last
-    /// answer stays, so a sync that waits keeps waiting.
+    /// Reads the switch again from the stored changes and the membership, and keeps the check it
+    /// asks for (`held_master_password_check`). On an error the last answer stays, so a sync that
+    /// waits keeps waiting.
     pub fn refresh_master_password(&mut self) -> Result<(), VaultError> {
-        self.master_password_switch = self.read_master_password_switch()?;
+        let switch = self.read_master_password_switch()?;
+        self.connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS local_master_password_switch (
+                id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+                vault_id TEXT NOT NULL,
+                check_hash TEXT NOT NULL
+            );",
+        )?;
+        match &switch {
+            Some(pending) => self.connection.execute(
+                "INSERT OR REPLACE INTO local_master_password_switch (id, vault_id, check_hash) VALUES (1, ?1, ?2)",
+                params![pending.vault_id, pending.current.hash],
+            )?,
+            None => self.connection.execute("DELETE FROM local_master_password_switch", [])?,
+        };
+        self.master_password_switch = switch;
         Ok(())
     }
 
-    /// The current check (`master_password::current`) when this PC is an active member that has
-    /// not switched to it and was added before it. Checks come only from changes this PC applied,
-    /// which verified their author's signature and chain; a check from a device that was not the
-    /// managing device at the membership event it names is ignored there.
+    /// The change hash of the check this PC was last asked to switch to in `vault_id`: it stays
+    /// asked for while the managing phone has no check of its own yet (`current_or_held`).
+    fn held_master_password_check(&self, vault_id: &str) -> Result<Option<String>, VaultError> {
+        let exists: bool = self.connection.query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'local_master_password_switch')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Ok(None);
+        }
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT check_hash FROM local_master_password_switch WHERE id = 1 AND vault_id = ?1",
+                [vault_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// The current check (`master_password::current_or_held`) when this PC is an active member that
+    /// has not switched to it and was added before it. Checks come only from changes this PC applied,
+    /// which verified their author's signature and chain, and only the managing phone's count: a
+    /// check from any other device, a former managing phone's included, is ignored there.
     fn read_master_password_switch(&self) -> Result<Option<crate::master_password::PendingSwitch>, VaultError> {
         use crate::master_password as rules;
         if !self.is_enrolled()? {
@@ -3014,17 +3051,21 @@ impl UnlockedVault {
             let plaintext = Zeroizing::new(plaintext);
             let Ok(value) = serde_json::from_slice::<serde_json::Value>(&plaintext) else { continue };
             match rules::read(&verified.vault_id, &author, &entity_id, kind == "upsert", &value) {
-                Some(rules::Record::Check(check)) => candidates.push(rules::Candidate { author, hash, check }),
+                Some(rules::Record::Check(check)) => {
+                    // A device's own check holds its password as much as a switch does.
+                    if author == local {
+                        switched = switched.max(Some(check.epoch));
+                    }
+                    candidates.push(rules::Candidate { author, hash, check });
+                }
                 Some(rules::Record::Switched(epoch)) if author == local => switched = switched.max(Some(epoch)),
                 _ => {}
             }
         }
         let steps: Vec<(rules::Step, &str)> = events.iter().map(|event| (membership_step(event.action), event.subject_device_id.as_str())).collect();
-        let managers = rules::managers_after(&steps);
         let head = events.len() as u64;
-        let current = rules::current(candidates, head, |sequence| {
-            sequence.checked_sub(1).and_then(|index| managers.get(usize::try_from(index).ok()?)).cloned()
-        });
+        let held = self.held_master_password_check(&verified.vault_id)?;
+        let current = rules::current_or_held(&candidates, head, &verified.manager_device_id, held.as_deref());
         Ok(current
             .filter(|current| !rules::satisfied(&local, current, switched, rules::added_at(&steps, &local)))
             .map(|current| rules::PendingSwitch { vault_id: verified.vault_id.clone(), current }))

@@ -179,21 +179,33 @@ pub struct Candidate {
 }
 
 /// The check every device must hold: the highest epoch, then the highest membership sequence, then
-/// the highest change hash, among the checks whose membership sequence is within `head` and whose
-/// author was the managing device once that membership event applied (`manager_after`). Checks of
-/// any other device are ignored, so a former manager's check from before a transfer still counts
-/// and one it wrote afterwards does not.
-pub fn current(candidates: Vec<Candidate>, head: u64, manager_after: impl Fn(u64) -> Option<String>) -> Option<Candidate> {
+/// the highest change hash, among the checks whose membership sequence is from 1 to `head` and whose
+/// author is `manager`, the managing device after the newest membership event. Every other device's
+/// check is ignored, a former managing device's included, whatever membership event it names. A
+/// transfer carries the current check over: the phone accepting the role signs a copy of it first.
+pub fn current(candidates: &[Candidate], head: u64, manager: &str) -> Option<Candidate> {
     candidates
-        .into_iter()
-        .filter(|candidate| {
-            let sequence = candidate.check.membership_sequence;
-            (1..=head).contains(&sequence) && manager_after(sequence).as_deref() == Some(candidate.author.as_str())
-        })
+        .iter()
+        .filter(|candidate| (1..=head).contains(&candidate.check.membership_sequence) && candidate.author == manager)
         .max_by(|a, b| {
             (a.check.epoch, a.check.membership_sequence, a.hash.as_bytes())
                 .cmp(&(b.check.epoch, b.check.membership_sequence, b.hash.as_bytes()))
         })
+        .cloned()
+}
+
+/// `current`, or while `manager` has no check of its own yet (a transfer that arrived here before
+/// the new managing phone's copy), the check this PC was last asked to switch to (`held`, a change
+/// hash). That hash was recorded only while its check was current, so no other device's check can
+/// take its place.
+pub fn current_or_held(candidates: &[Candidate], head: u64, manager: &str, held: Option<&str>) -> Option<Candidate> {
+    current(candidates, head, manager).or_else(|| {
+        let held = held?;
+        candidates
+            .iter()
+            .find(|candidate| candidate.hash == held && (1..=head).contains(&candidate.check.membership_sequence))
+            .cloned()
+    })
 }
 
 /// True when `device_id` holds the password of `current`: it wrote the check, it switched to that
@@ -406,15 +418,34 @@ mod tests {
     }
 
     #[test]
-    fn the_current_check_comes_from_the_manager_of_its_time() {
+    fn only_the_current_managing_devices_check_counts() {
         for case in vectors()["current"].as_array().unwrap() {
-            let managers: Vec<String> = case["managers"].as_array().unwrap().iter().map(|m| text(m).to_owned()).collect();
-            let candidates = case["candidates"].as_array().unwrap().iter().map(candidate).collect();
-            let chosen = current(candidates, case["head"].as_u64().unwrap(), |sequence| {
-                managers.get(usize::try_from(sequence).ok()?.checked_sub(1)?).cloned()
-            });
-            assert_eq!(chosen.map(|c| c.hash), case["expected"].as_str().map(str::to_owned), "{}", case["name"]);
+            let head = case["head"].as_u64().unwrap();
+            let managers = case["managers"].as_array().unwrap();
+            let manager = text(&managers[usize::try_from(head).unwrap() - 1]);
+            let candidates: Vec<Candidate> = case["candidates"].as_array().unwrap().iter().map(candidate).collect();
+            let held = case["held"].as_str();
+            let expected = case["expected"].as_str().map(str::to_owned);
+            let chosen = current_or_held(&candidates, head, manager, held);
+            assert_eq!(chosen.map(|c| c.hash), expected, "{}", case["name"]);
+            if held.is_none() {
+                assert_eq!(current(&candidates, head, manager).map(|c| c.hash), expected, "{}", case["name"]);
+            }
         }
+    }
+
+    #[test]
+    fn a_former_managing_devices_new_check_is_refused() {
+        // phone-a managed until event 5 moved the role to phone-b. Still paired, it writes a check for
+        // a password of its choosing, naming an event from when it managed and a higher epoch.
+        let check = |epoch, sequence, tag| PasswordCheck { epoch, membership_sequence: sequence, salt: [0; 16], iterations: MIN_ITERATIONS, check: [tag; 32] };
+        let genuine = Candidate { author: "phone-b".into(), hash: "copy".into(), check: check(3, 4, 0) };
+        let forged = Candidate { author: "phone-a".into(), hash: "forged".into(), check: check(99, 4, 1) };
+        let both = [genuine.clone(), forged.clone()];
+        assert_eq!(current(&both, 6, "phone-b").map(|c| c.hash).as_deref(), Some("copy"));
+        assert!(current(&[forged.clone()], 6, "phone-b").is_none());
+        // Nor can it replace the check this PC was asked for while phone-b has none yet.
+        assert!(current_or_held(&[forged], 6, "phone-b", Some("earlier")).is_none());
     }
 
     #[test]
