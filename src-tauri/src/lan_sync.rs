@@ -68,7 +68,13 @@ const MORE_REMAIN: &str = "More changes remain. Sync will continue on the next p
 const TOO_LARGE: &str = "A saved change is too large to sync. Existing items are kept.";
 /// Android serves and requests at most 32 photos per exchange (`servePhotos` `require(requests.size <= 32)`).
 const MAX_PHOTO_REQUESTS: usize = 32;
-const PHOTO_FAILED: &str = "A photo failed its integrity check. It will download again next time.";
+/// A photo a peer said it lacks (`-1`) is not asked from that peer again for this long, so the
+/// next missing photos get their turn within the 32 per session (M13).
+const PHOTO_LACKING_WAIT: Duration = Duration::from_secs(60 * 60);
+/// A photo whose bytes from a peer failed the integrity check is not asked from that peer again
+/// for this long: its copy is bad. Another device can still send it (M5).
+const PHOTO_CORRUPT_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
+const PHOTO_SKIPS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS sync_photo_skips (vault_id TEXT NOT NULL, peer_device_id TEXT NOT NULL, hash TEXT NOT NULL, until_millis INTEGER NOT NULL, PRIMARY KEY (vault_id, peer_device_id, hash))";
 /// Internal: a received change does not continue this PC's copy of its author's chain (a fork).
 /// [named_refusal] turns it into a message that names the devices.
 const FORKED_CHANGE: &str = "Peer sent a conflicting change";
@@ -99,6 +105,10 @@ pub struct SyncReport {
     /// Authors whose changes this PC holds above a gap in the drive's copy that it cannot fill (C1).
     #[serde(skip)]
     pub drive_gaps: Vec<String>,
+    /// Photos the peer lacked or sent corrupt in this session. They are not asked from it again
+    /// for a while, so a session that only skipped photos still made progress (M13).
+    #[serde(skip)]
+    pub photos_skipped: usize,
 }
 
 #[derive(Serialize)]
@@ -667,11 +677,12 @@ fn run_sessions(mut session: impl FnMut() -> Result<(SyncReport, bool)>) -> Resu
         total.conflicts = report.conflicts;
         total.photos_received += report.photos_received;
         total.photos_sent += report.photos_sent;
+        total.photos_skipped += report.photos_skipped;
         total.peer_device_id = report.peer_device_id;
         if complete {
             return Ok(total);
         }
-        if report.sent == 0 && report.received == 0 && report.photos_received == 0 {
+        if report.sent == 0 && report.received == 0 && report.photos_received == 0 && report.photos_skipped == 0 {
             break;
         }
     }
@@ -967,24 +978,33 @@ fn exchange_role(
         }
     };
     // Photo blobs, in Android's order: the phone serves our requests first, then asks for its own.
+    // Photos this peer recently lacked or sent corrupt are left out, so the next ones get their
+    // turn within the 32 a session may ask for (M13).
+    let started = crate::activity::now_millis() as i64;
     let wanted = with_vault(state, &vault_id, &accepted.head, |vault| {
-        vault.waiting_photo_blobs().map_err(storage_error)
+        let skips = photo_skips(vault.connection(), &vault_id, &session.peer.device_id, started)?;
+        Ok(vault.waiting_photo_blobs().map_err(storage_error)?.into_iter()
+            .filter(|(hash, _)| !skips.contains(hash)).collect::<Vec<_>>())
     })?;
     let missing: Vec<(String, u64)> =
         wanted.into_iter().filter(|(hash, size)| !blobs.has(hash, *size)).collect();
     let more_photos = missing.len() > MAX_PHOTO_REQUESTS;
     if server { report.photos_sent = serve_photos(&mut channel, &blobs, tracker)?; }
-    report.photos_received = request_photos(
+    let photos = request_photos(
         &mut channel,
         &blobs,
         &missing[..missing.len().min(MAX_PHOTO_REQUESTS)],
         tracker,
     )?;
+    report.photos_received = photos.received;
+    report.photos_skipped = photos.lacking.len() + photos.corrupt.len();
     if !server { report.photos_sent = serve_photos(&mut channel, &blobs, tracker)?; }
-    let complete = complete && !(more_photos && report.photos_received > 0);
+    // Skipped photos count as progress: the next session asks for the photos after them.
+    let complete = complete && !(more_photos && report.photos_received + report.photos_skipped > 0);
     tracker.set_phase(Phase::Applying);
     let peer_id = session.peer.device_id.clone();
     with_vault(state, &vault_id, &accepted.head, |vault| {
+        record_photo_skips(vault.connection(), &vault_id, &peer_id, &photos, started)?;
         apply_waiting(vault, &vault_id, &content_key)?;
         vault.record_peer_seen(&peer_id).map_err(storage_error)?;
         report.peer_device_id = peer_id.clone();
@@ -1919,6 +1939,16 @@ fn send_batch<R: Read, W: Write>(
     Ok(pending.len())
 }
 
+/// What one photo request brought: the photos saved, and the photos the peer lacks or sent with
+/// bytes that failed the integrity check. [record_photo_skips] keeps the last two from being
+/// asked from that peer again for a while (M5, M13).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PhotoOutcome {
+    received: usize,
+    lacking: Vec<String>,
+    corrupt: Vec<String>,
+}
+
 /// Android `requestPhotos` counterpart: asks for missing blobs, resuming partial downloads.
 /// Chunks go straight to blob files, so no vault lock is held while bytes arrive.
 fn request_photos<R: Read, W: Write>(
@@ -1926,7 +1956,7 @@ fn request_photos<R: Read, W: Write>(
     blobs: &PhotoBlobs,
     missing: &[(String, u64)],
     tracker: &SyncTracker,
-) -> Result<usize> {
+) -> Result<PhotoOutcome> {
     let mut requests = Vec::with_capacity(missing.len());
     for (hash, size) in missing {
         let mut offset = blobs.partial_size(hash).map_err(storage_error)?;
@@ -1943,7 +1973,7 @@ fn request_photos<R: Read, W: Write>(
     if !requests.is_empty() {
         tracker.set_phase(Phase::Receiving);
     }
-    let mut received = 0;
+    let mut outcome = PhotoOutcome::default();
     for request in &requests {
         let hash = request["hash"].as_str().unwrap_or_default();
         let offset = request["offset"].as_u64().unwrap_or_default();
@@ -1957,6 +1987,7 @@ fn request_photos<R: Read, W: Write>(
             continue;
         }
         if size < 0 {
+            outcome.lacking.push(hash.to_owned());
             continue;
         }
         let size = size as u64;
@@ -1974,11 +2005,54 @@ fn request_photos<R: Read, W: Write>(
             position += chunk.len() as u64;
             tracker.photo_moved(chunk.len() as u64);
         }
-        blobs.finish(hash, size).map_err(|_| PHOTO_FAILED)?;
+        // M5: a photo whose bytes fail the check is dropped and skipped, not a failed session.
+        // The sender only checks that the acknowledgement names the photo (Android `servePhotos`
+        // too), so it is acknowledged like any other and the session goes on.
+        let verified = blobs.finish(hash, size).is_ok();
         channel.send(hash.as_bytes()).map_err(network_error)?;
-        received += 1;
+        if verified {
+            outcome.received += 1;
+        } else {
+            let _ = blobs.discard_partial(hash);
+            outcome.corrupt.push(hash.to_owned());
+        }
     }
-    Ok(received)
+    Ok(outcome)
+}
+
+/// Photos `peer` recently lacked or sent corrupt, which are not asked from it now (M5, M13).
+fn photo_skips(db: &Connection, id: &str, peer: &str, now_millis: i64) -> Result<std::collections::BTreeSet<String>> {
+    db.execute_batch(PHOTO_SKIPS_SCHEMA).map_err(storage_error)?;
+    db.execute("DELETE FROM sync_photo_skips WHERE until_millis <= ?1", [now_millis]).map_err(storage_error)?;
+    let mut query = db.prepare("SELECT hash FROM sync_photo_skips WHERE vault_id = ?1 AND peer_device_id = ?2").map_err(storage_error)?;
+    let hashes = query.query_map(params![id, peer], |row| row.get(0)).map_err(storage_error)?
+        .collect::<std::result::Result<_, _>>().map_err(storage_error)?;
+    Ok(hashes)
+}
+
+/// Saves what [request_photos] found, and names the device when its photo bytes were bad.
+fn record_photo_skips(db: &Connection, id: &str, peer: &str, outcome: &PhotoOutcome, now_millis: i64) -> Result<()> {
+    db.execute_batch(PHOTO_SKIPS_SCHEMA).map_err(storage_error)?;
+    for (hashes, wait) in [(&outcome.lacking, PHOTO_LACKING_WAIT), (&outcome.corrupt, PHOTO_CORRUPT_WAIT)] {
+        let until = now_millis.saturating_add(i64::try_from(wait.as_millis()).unwrap_or(i64::MAX));
+        for hash in hashes {
+            db.execute("INSERT INTO sync_photo_skips (vault_id, peer_device_id, hash, until_millis) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(vault_id, peer_device_id, hash) DO UPDATE SET until_millis = excluded.until_millis",
+                params![id, peer, hash, until]).map_err(storage_error)?;
+        }
+    }
+    if !outcome.corrupt.is_empty() {
+        let count = outcome.corrupt.len();
+        crate::activity::global().record_coalesced(
+            crate::activity::Level::Warning,
+            crate::activity::Category::Sync,
+            format!("{count} {} from {} failed {} integrity check and {} saved. {} asked for again later",
+                if count == 1 { "photo" } else { "photos" }, device_name(db, peer),
+                if count == 1 { "its" } else { "their" }, if count == 1 { "wasn't" } else { "weren't" },
+                if count == 1 { "It's" } else { "They're" }),
+            Duration::from_secs(6 * 60 * 60),
+        );
+    }
+    Ok(())
 }
 
 /// Android `servePhotos` counterpart: answers with each blob's size (`-1` unknown, `-2` the
@@ -3000,6 +3074,50 @@ mod tests {
         std::fs::remove_dir_all(synthetic.directory).unwrap();
     }
 
+    /// M5, M13: a photo whose bytes fail the check is acknowledged, dropped and skipped instead of
+    /// ending the session; a photo the peer lacks is skipped too. Neither is asked from that peer
+    /// again for a while, so the next missing photos get their turn.
+    #[test]
+    fn a_corrupt_or_lacking_photo_is_skipped_and_the_session_goes_on() {
+        let synthetic = synthetic_vault(0);
+        let blobs = synthetic.state.lock().unwrap().unlocked.as_ref().unwrap().photo_blobs();
+        let (bad, missing) = ("a".repeat(64), "b".repeat(64));
+        let wanted = vec![(bad.clone(), 70_000), (missing.clone(), 1_000)];
+        let tracker = SyncTracker::default();
+        let (listener, address) = loopback_pair();
+        let phone = std::thread::spawn(move || {
+            let mut channel = phone_channel(&listener);
+            let requests: serde_json::Value = serde_json::from_slice(&channel.receive().unwrap()).unwrap();
+            assert_eq!(requests.as_array().unwrap().len(), 2);
+            let garbage = vec![7u8; 70_000];
+            channel.send(garbage.len().to_string().as_bytes()).unwrap();
+            for chunk in garbage.chunks(photo_blobs::CHUNK_BYTES) {
+                channel.send(chunk).unwrap();
+            }
+            let acknowledged = channel.receive().unwrap();
+            channel.send(b"-1").unwrap();
+            acknowledged
+        });
+        let outcome = request_photos(&mut windows_channel(address), &blobs, &wanted, &tracker).unwrap();
+        assert_eq!(phone.join().unwrap(), bad.as_bytes(), "the sender gets the acknowledgement it waits for");
+        assert_eq!(outcome, PhotoOutcome { received: 0, lacking: vec![missing.clone()], corrupt: vec![bad.clone()] });
+        assert!(!blobs.has(&bad, 70_000) && blobs.partial_size(&bad).unwrap() == 0, "bad bytes are not kept");
+
+        let mut app = synthetic.state.lock().unwrap();
+        let db = app.unlocked.as_mut().unwrap().connection();
+        let now = 1_000_000_000;
+        record_photo_skips(db, "vault-a", "phone", &outcome, now).unwrap();
+        let skipped = photo_skips(db, "vault-a", "phone", now).unwrap();
+        assert_eq!(skipped, std::collections::BTreeSet::from([bad.clone(), missing.clone()]));
+        assert!(photo_skips(db, "vault-a", "pc-2", now).unwrap().is_empty(), "another device is still asked");
+        let hour = PHOTO_LACKING_WAIT.as_millis() as i64;
+        assert_eq!(photo_skips(db, "vault-a", "phone", now + hour).unwrap(), std::collections::BTreeSet::from([bad]),
+            "a lacking photo is asked again after an hour, a corrupt one after a day");
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
     /// M4: a kind of change this version doesn't know waits (never set aside), counts as received,
     /// and the sync status names the device and the count. The changes after it still apply.
     #[test]
@@ -3265,7 +3383,7 @@ mod tests {
             }
             channel.receive().unwrap()
         });
-        assert_eq!(request_photos(&mut windows_channel(address), &blobs, &wanted, &tracker).unwrap(), 1);
+        assert_eq!(request_photos(&mut windows_channel(address), &blobs, &wanted, &tracker).unwrap().received, 1);
         assert_eq!(phone.join().unwrap(), hash.as_bytes());
         let (moved, total) = tracker.photo_bytes();
         assert!(moved >= size && total >= moved);
