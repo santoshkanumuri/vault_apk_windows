@@ -56,6 +56,10 @@ pub struct EncryptedSyncChannel<R, W> {
     receive_key: [u8; 32],
     send_sequence: u64,
     receive_sequence: u64,
+    /// M12 (`refusal.rs`): on once both devices proved who they are and the peer announced
+    /// `sync-refusal-v1`. A refusal frame then ends the session as [WireError::PeerRefused].
+    refusals: bool,
+    peer_refused: bool,
 }
 
 impl<R: Read, W: Write> EncryptedSyncChannel<R, W> {
@@ -83,7 +87,22 @@ impl<R: Read, W: Write> EncryptedSyncChannel<R, W> {
             receive_key: derive(session_key, receive_label),
             send_sequence: 0,
             receive_sequence: 0,
+            refusals: false,
+            peer_refused: false,
         })
+    }
+
+    /// M12: turns refusal frames on (see `refusal.rs`), only after both identity proofs.
+    pub fn set_refusals(&mut self, on: bool) {
+        self.refusals = on;
+    }
+
+    /// Sends a refusal frame when refusals are on, never in answer to the peer's own refusal. Best
+    /// effort: the session ends either way, so a failed send is ignored.
+    pub fn refuse(&mut self, code: &str) {
+        if self.refusals && !self.peer_refused {
+            let _ = self.send(&crate::refusal::encode(code));
+        }
     }
 
     pub fn send(&mut self, plaintext: &[u8]) -> Result<(), WireError> {
@@ -126,6 +145,12 @@ impl<R: Read, W: Write> EncryptedSyncChannel<R, W> {
                 },
             )
             .map_err(|_| WireError::AuthenticationFailed)?;
+        if self.refusals {
+            if let Some(code) = crate::refusal::decode(&plaintext) {
+                self.peer_refused = true;
+                return Err(WireError::PeerRefused(code));
+            }
+        }
         Ok(plaintext)
     }
 }
@@ -166,6 +191,9 @@ pub enum WireError {
     AuthenticationFailed,
     #[error("sync frame sequence exhausted")]
     SequenceExhausted,
+    /// M12: the peer refused what this device sent, with this code (`refusal.rs`).
+    #[error("the paired device refused this device's {0}")]
+    PeerRefused(&'static str),
 }
 
 #[cfg(test)]
@@ -229,6 +257,34 @@ mod tests {
             wrong_direction.receive(),
             Err(WireError::AuthenticationFailed)
         ));
+    }
+
+    /// M12 (`refusal.rs`): a refusal frame ends the session only once refusals are on, an older
+    /// peer reads it as data, and a refusal is never answered with one.
+    #[test]
+    fn a_refusal_frame_counts_only_once_refusals_are_on() {
+        let key = [3; 32];
+        let mut frames = Vec::new();
+        {
+            let mut refuser =
+                EncryptedSyncChannel::new(SyncFrames::new(Cursor::new(Vec::new()), &mut frames), &key, true).unwrap();
+            refuser.refuse(crate::refusal::CHANGE);
+            refuser.set_refusals(true);
+            refuser.refuse(crate::refusal::CHANGE);
+        }
+        let mut older =
+            EncryptedSyncChannel::new(SyncFrames::new(Cursor::new(frames.clone()), Vec::new()), &key, false).unwrap();
+        assert_eq!(older.receive().unwrap(), crate::refusal::encode(crate::refusal::CHANGE));
+        assert!(older.receive().is_err(), "only one frame went out: refusals were off for the first");
+        let mut answers = Vec::new();
+        {
+            let mut told =
+                EncryptedSyncChannel::new(SyncFrames::new(Cursor::new(frames), &mut answers), &key, false).unwrap();
+            told.set_refusals(true);
+            assert!(matches!(told.receive(), Err(WireError::PeerRefused("change"))));
+            told.refuse(crate::refusal::PROTOCOL);
+        }
+        assert!(answers.is_empty());
     }
 
     #[test]

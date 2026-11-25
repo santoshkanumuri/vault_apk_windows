@@ -38,8 +38,11 @@ pub const HISTORY_COMPACTION_FEATURE: &str = crate::compaction::drive::FEATURE;
 /// other ports when one refuses (`lan_sync::sync_port`, L5). While any other active member hasn't
 /// announced it, a build also listens on the port older versions use.
 pub const SYNC_PORTS_FEATURE: &str = "sync-ports-v2";
-pub const SYNC_FEATURES: [&str; 9] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE, SITE_ICONS_FEATURE, CHECKPOINT_ENROLL_FEATURE,
-    SIGN_IN_METHODS_FEATURE, MERGE_JOIN_FEATURE, EPOCH_KEYS_FEATURE, HISTORY_COMPACTION_FEATURE, SYNC_PORTS_FEATURE];
+/// M12 and M11 (`refusal.rs`): this build tells a peer when it refuses what the peer sent, and
+/// confirms received photo bytes as they arrive. Each is used only with a peer that announced it.
+pub const SYNC_FEATURES: [&str; 11] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE, SITE_ICONS_FEATURE, CHECKPOINT_ENROLL_FEATURE,
+    SIGN_IN_METHODS_FEATURE, MERGE_JOIN_FEATURE, EPOCH_KEYS_FEATURE, HISTORY_COMPACTION_FEATURE, SYNC_PORTS_FEATURE,
+    crate::refusal::FEATURE, crate::refusal::PHOTO_RECEIPTS_FEATURE];
 
 /// `cutoff1:<sequence>:<hash>` in a REMOVE event's subject key field (Android `RemovalCutoff`).
 /// `Ok(None)` for an empty field; `Err` for anything else that is not a valid cutoff.

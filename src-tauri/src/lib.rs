@@ -43,6 +43,7 @@ pub mod portable_backup;
 pub mod progress;
 pub mod protocol;
 pub mod quick_search;
+pub mod refusal;
 pub mod site_icon_sync;
 pub mod sign_in_sync;
 pub mod sign_ins;
@@ -1141,7 +1142,7 @@ impl WayClock {
     fn finish(&mut self, result: &Result<(), String>, now: Instant) -> Option<Duration> {
         match result {
             Ok(()) => { self.failures = 0; self.retry_at = None; None }
-            Err(error) if error == lan_sync::DEVICE_REFUSED
+            Err(error) if error == lan_sync::DEVICE_REFUSED || error == lan_sync::REFUSED_BY_DEVICE
                 || lan_sync::failure_class(error) == lan_sync::FailureClass::NeedsYou => { self.failures = 0; self.retry_at = None; None }
             Err(error) => {
                 self.failures = self.failures.saturating_add(1);
@@ -1164,6 +1165,8 @@ fn a_refusal_waits_for_the_usual_interval_and_a_dropped_link_retries_soon() {
     assert!(clock.retry_at.is_some());
     assert_eq!(clock.finish(&Err(lan_sync::DEVICE_REFUSED.into()), start), None);
     assert_eq!((clock.retry_at, clock.failures), (None, 0));
+    // M12: the device refused what this PC sent; retrying at once changes nothing either.
+    assert_eq!(clock.finish(&Err(lan_sync::REFUSED_BY_DEVICE.into()), start), None);
     let every = Some(Duration::from_secs(60));
     assert!(!clock.due(&(String::new(), 1), every, start + Duration::from_secs(30)));
     assert!(clock.due(&(String::new(), 1), every, start + Duration::from_secs(60)));
