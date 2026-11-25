@@ -175,3 +175,18 @@ test("M12: a device's refusal shows on its row; a dropped link is a Wi-Fi note",
   // An older backend without the list changes nothing.
   assert.equal(syncFacts({ ...sync, deviceFailures: undefined }, null, membership, 0, now).peers[0].failure, undefined);
 });
+
+test("M14: a Drive sign-in is the headline, never a quiet note, even while Wi-Fi keeps up", () => {
+  const { overview, text } = both(facts([peer("Pixel 8")], { drive: "failed", driveSignIn: true }));
+  assert.equal(overview.state, "attention");
+  assert.equal(overview.cause, "driveSignIn");
+  assert.equal(text.kind, "error");
+  assert.equal(text.detail, "Google Drive needs you to sign in again. Until then, changes don't go through Drive.");
+  assert.equal(text.note, undefined, "the headline already says it");
+  // Read from the backend: only a connected drive that needs a sign-in counts.
+  const sync = { lastSync: new Date(now - minute).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "", automatic: true,
+    running: false, message: "", consecutiveFailures: 0 };
+  const cloud = { available: true, connected: true, account: "a", lastSync: "", lastError: "", connecting: false, needsSignIn: true, checkSeconds: 900 };
+  assert.equal(syncFacts(sync, cloud, null, 0, now).driveSignIn, true);
+  assert.equal(syncFacts(sync, { ...cloud, connected: false }, null, 0, now).driveSignIn, false);
+});

@@ -317,9 +317,25 @@ struct CloudController {
     last_error: Mutex<String>,
     /// When the whole app folder was last listed; other passes list only what changed since.
     listed_all: Mutex<Option<Instant>>,
+    /// M14: passes in a row that needed a Google sign-in, and when the user was last told.
+    sign_in_failures: std::sync::atomic::AtomicU32,
+    sign_in_told_at: Mutex<Option<Instant>>,
+    /// Shows or clears the sign-in reminder outside the app window (the tray icon's tooltip).
+    sign_in_alert: std::sync::OnceLock<Box<dyn Fn(bool) + Send + Sync>>,
 }
 
 const CLOUD_FULL_LISTING: Duration = Duration::from_secs(6 * 60 * 60);
+/// M14, as on Android: after this many passes in a row needed a sign-in, the user is told once,
+/// at most once a day; a pass that works again clears it.
+const SIGN_IN_FAILURES_BEFORE_NOTICE: u32 = 3;
+const SIGN_IN_NOTICE_GAP: Duration = Duration::from_secs(24 * 60 * 60);
+const SIGN_IN_NOTICE: &str = "Google Drive sync needs you to sign in. Open Nuvori and sign in again so your devices keep in step.";
+
+/// True when the failures in a row and the last notice call for telling the user now.
+fn sign_in_notice_due(failures: u32, told_at: Option<Instant>, now: Instant) -> bool {
+    failures >= SIGN_IN_FAILURES_BEFORE_NOTICE
+        && told_at.is_none_or(|at| now.saturating_duration_since(at) >= SIGN_IN_NOTICE_GAP)
+}
 
 impl CloudController {
     /// One cloud pass. `None` when this PC is not connected to a drive or not in a sync group.
@@ -336,6 +352,19 @@ impl CloudController {
         let store = drive.get_or_insert_with(|| google_drive::GoogleDrive::new(account.refresh_token.clone()));
         let full = manual || self.listed_all.lock().ok()?.is_none_or(|at| at.elapsed() > CLOUD_FULL_LISTING);
         let result = lan_sync::cloud::run(state, store, tracker, full);
+        let sign_in = match &result {
+            Ok(_) => Some(false),
+            Err(error) if error == lan_sync::cloud::AUTH_NEEDED => Some(true),
+            Err(_) => None,
+        };
+        match self.note_sign_in(sign_in, Instant::now()) {
+            Some(true) => {
+                activity::log(Level::Warning, Category::Sync, SIGN_IN_NOTICE);
+                if let Some(alert) = self.sign_in_alert.get() { alert(true); }
+            }
+            Some(false) => if let Some(alert) = self.sign_in_alert.get() { alert(false); },
+            None => {}
+        }
         match &result {
             Ok(_) => {
                 if full && let Ok(mut listed) = self.listed_all.lock() { *listed = Some(Instant::now()); }
@@ -353,6 +382,26 @@ impl CloudController {
         Some(result)
     }
 
+    /// M14: counts passes that needed a sign-in (`Some(true)`); a pass that worked (`Some(false)`)
+    /// ends the run. Other failures change nothing. Returns `Some(true)` when the user is to be told
+    /// now and `Some(false)` when a reminder they were given no longer holds.
+    fn note_sign_in(&self, needed: Option<bool>, now: Instant) -> Option<bool> {
+        use std::sync::atomic::Ordering;
+        let mut told = self.sign_in_told_at.lock().ok()?;
+        match needed? {
+            true => {
+                let failures = self.sign_in_failures.fetch_add(1, Ordering::SeqCst).saturating_add(1);
+                if !sign_in_notice_due(failures, *told, now) { return None; }
+                *told = Some(now);
+                Some(true)
+            }
+            false => {
+                self.sign_in_failures.store(0, Ordering::SeqCst);
+                told.take().map(|_| false)
+            }
+        }
+    }
+
     /// True when this build has a Google client and this PC saved a Google Drive sign-in.
     fn connected(state: &ManagedState) -> bool {
         google_drive::client().is_some() && state.lock().ok().is_some_and(|mut app| {
@@ -366,6 +415,8 @@ impl CloudController {
         if let Ok(mut listed) = self.listed_all.lock() { *listed = None; }
         if let Ok(mut error) = self.last_error.lock() { error.clear(); }
         self.needs_sign_in.store(false, Ordering::SeqCst);
+        if self.note_sign_in(Some(false), Instant::now()) == Some(false)
+            && let Some(alert) = self.sign_in_alert.get() { alert(false); }
     }
 }
 
@@ -3067,6 +3118,10 @@ pub fn run() {
             if let Err(error) = desktop::create_tray(app.handle(), lock_from_tray) {
                 activity::diagnostic(Category::Vault, "Could not add the tray icon", error);
             }
+            // M14: the tray icon says so while Google Drive needs a sign-in the user was told about.
+            let handle = app.handle().clone();
+            let _ = app.state::<Arc<SyncController>>().cloud.sign_in_alert
+                .set(Box::new(move |needed| desktop::show_sign_in_needed(&handle, needed)));
             passkey_plugin::start(app.state::<ManagedState>().inner().clone(), app.handle().clone());
             if desktop::plugin_launch() {
                 // Windows started Nuvori for a passkey request. The request opens the unlock window if needed.
@@ -3188,6 +3243,29 @@ pub fn run() {
             api.prevent_exit();
         }
     });
+}
+
+#[cfg(test)]
+mod sign_in_notice_tests {
+    use super::*;
+
+    #[test]
+    fn the_user_is_told_after_three_sign_in_failures_in_a_row_at_most_once_a_day() {
+        let cloud = CloudController::default();
+        let start = Instant::now();
+        assert_eq!(cloud.note_sign_in(Some(true), start), None);
+        assert_eq!(cloud.note_sign_in(None, start), None, "a dropped link neither counts nor ends the run");
+        assert_eq!(cloud.note_sign_in(Some(true), start), None);
+        assert_eq!(cloud.note_sign_in(Some(true), start), Some(true), "the third in a row tells the user");
+        assert_eq!(cloud.note_sign_in(Some(true), start + Duration::from_secs(60 * 60)), None, "not again the same day");
+        assert_eq!(cloud.note_sign_in(Some(true), start + SIGN_IN_NOTICE_GAP), Some(true), "again a day later");
+        assert_eq!(cloud.note_sign_in(Some(false), start + SIGN_IN_NOTICE_GAP), Some(false), "a good pass clears it");
+        assert_eq!(cloud.note_sign_in(Some(false), start + SIGN_IN_NOTICE_GAP), None);
+        let later = start + SIGN_IN_NOTICE_GAP;
+        assert_eq!(cloud.note_sign_in(Some(true), later), None, "the count starts over");
+        assert_eq!(cloud.note_sign_in(Some(true), later), None);
+        assert_eq!(cloud.note_sign_in(Some(true), later), Some(true));
+    }
 }
 
 #[cfg(test)]

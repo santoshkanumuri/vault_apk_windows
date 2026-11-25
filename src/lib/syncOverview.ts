@@ -11,7 +11,7 @@ import { syncStatusText as words } from "../strings.ts";
 export type TransportHealth = "off" | "ok" | "failed";
 export type PeerAck = "upToDate" | "waiting" | "silent" | "notChecked" | "failed";
 export type OverallSync = "syncing" | "attention" | "keys" | "conflicts" | "waiting" | "waitingHere" | "stale" | "notYet" | "upToDate";
-export type AttentionCause = "bothFailed" | "wifiOnlyFailed" | "driveOnlyFailed" | "localProblem" | "rejected" | "deviceSilent";
+export type AttentionCause = "bothFailed" | "wifiOnlyFailed" | "driveOnlyFailed" | "driveSignIn" | "localProblem" | "rejected" | "deviceSilent";
 export type TransportNote = "wifiFailedDriveKeptUp" | "wifiFailedDriveCarries" | "wifiFailed" | "driveFailedWifiKeptUp" | "driveFailedWifiCarries" | "driveFailed" | "paused";
 
 /** One active paired device. `unconfirmed`: this PC's changes it has not applied yet. */
@@ -38,6 +38,8 @@ export type SyncFacts = {
   rejected?: number;
   waitingForKeys?: boolean;
   waitingHere?: boolean;
+  /** M14: Google Drive is connected and needs the user to sign in again. */
+  driveSignIn?: boolean;
 };
 
 export type SyncOverview = {
@@ -94,6 +96,8 @@ export function syncOverview(facts: SyncFacts): SyncOverview {
   // No transport is left to carry waiting changes: one failed and the other is off or failed too.
   const noTransport = (wifiFailed || driveFailed) && facts.wifi !== "ok" && facts.drive !== "ok";
   if (facts.busy) return result("syncing");
+  // M14: only the user can fix a sign-in, so it is never hidden behind "Up to date" or a quiet note.
+  if (facts.driveSignIn) return result("attention", "driveSignIn");
   if (wifiFailed && driveFailed) return result("attention", "bothFailed");
   if (facts.localProblem) return result("attention", "localProblem");
   if ((facts.rejected ?? 0) > 0) return result("attention", "rejected");
@@ -157,6 +161,7 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
     rejected: sync?.setAside ?? 0,
     waitingForKeys: Boolean(sync?.waitingForKeys),
     waitingHere: waiting > 0,
+    driveSignIn: Boolean(cloud?.connected && cloud.needsSignIn),
   };
 }
 
@@ -168,7 +173,7 @@ function inSentence(when: string): string {
 export type OverviewText = { kind: StatusKind; title: string; detail: string; note?: string; lastSynced?: string };
 export type PeerAckText = { kind: StatusKind; label: string; detail: string };
 
-const TRANSPORT_CAUSES = new Set<AttentionCause>(["bothFailed", "wifiOnlyFailed", "driveOnlyFailed"]);
+const TRANSPORT_CAUSES = new Set<AttentionCause>(["bothFailed", "wifiOnlyFailed", "driveOnlyFailed", "driveSignIn"]);
 
 /** The status card's headline, its detail, the quiet transport line and "Last synced". */
 export function overviewText(facts: SyncFacts, overview: SyncOverview): OverviewText {
@@ -183,6 +188,7 @@ export function overviewText(facts: SyncFacts, overview: SyncOverview): Overview
       const detail = overview.cause === "bothFailed" ? words.detailBothFailed
         : overview.cause === "wifiOnlyFailed" ? words.detailWifiOnlyFailed(names, one)
         : overview.cause === "driveOnlyFailed" ? words.detailDriveOnlyFailed
+        : overview.cause === "driveSignIn" ? words.detailDriveSignIn
         : overview.cause === "localProblem" ? facts.localProblem ?? ""
         : overview.cause === "rejected" ? words.detailRejected(facts.rejected ?? 0)
         : words.detailDeviceSilent(silent?.name ?? "", overview.days);
