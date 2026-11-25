@@ -21,6 +21,7 @@ const state = {
   quickSearch: { enabled: true, preset: "ctrl-shift-space" },
   appearance: { accent: "green", surface: "sage", pendingSync: false } as Appearance,
   enrolled: true,
+  deviceName: "This PC",
   revision: 1,
   entries: [
     entry({ type: "PASSWORD", title: "GitHub", primaryValue: "dev@example.com", secondaryValue: "correct-horse-battery", tertiaryValue: "https://github.com/login", favorite: true, tags: "work, code" }, 30),
@@ -204,6 +205,12 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "lock_vault": state.vault = "locked"; log("info", "vault", "Vault locked"); return snapshot();
     case "stop_sharing": state.enrolled = false; log("info", "pairing", "Stopped sharing"); return snapshot();
     case "reset_vault": state.vault = "notConfigured"; state.enrolled = false; return snapshot();
+    case "change_master_password":
+      requireUnlocked();
+      if (String(args.replacement ?? "").length < 12) throw new Error("Use a new master password with at least 12 characters.");
+      if (args.current === "wrong password") throw new Error("The current password is wrong.");
+      log("success", "security", "Master password changed");
+      return undefined;
     // Like AppState::start_fresh in lib.rs: no password, the typed word, and only while locked.
     case "start_fresh":
       if (args.confirmation !== "RESET") throw "Type RESET to confirm.";
@@ -376,7 +383,7 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
         devices: state.enrolled ? [
           { deviceId: "dev-pixel", name: "Pixel 8", platform: "android", status: "active", isManager: true, isThisDevice: false,
             ...(syncScenario ? { lastSeen: minutes(2), counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } } : {}) },
-          { deviceId: "dev-pc", name: "This PC", platform: "windows", status: "active", isManager: false, isThisDevice: true },
+          { deviceId: "dev-pc", name: state.deviceName, platform: "windows", status: "active", isManager: false, isThisDevice: true },
           { deviceId: "dev-tab", name: "Galaxy Tab", platform: "android", status: "active", isManager: false, isThisDevice: false,
             ...(syncScenario ? { lastSeen: minutes(40), counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } } : {}) },
           { deviceId: "dev-old", name: "Old phone", platform: "android", status: "removed", isManager: false, isThisDevice: false }
@@ -385,6 +392,14 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
         removedNotice: state.removedNotice, pendingLeave: state.pendingLeave, managerLost: state.managerLost
       };
       return status;
+    }
+    case "rename_this_device": {
+      requireUnlocked();
+      const name = String(args.name ?? "").trim();
+      if (!name || name.length > 40) throw new Error("Enter a device name of up to 40 characters.");
+      state.deviceName = name;
+      log("success", "pairing", "Renamed this PC");
+      return mockInvoke("membership_status");
     }
     case "mark_manager_lost": {
       requireUnlocked();

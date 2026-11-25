@@ -501,3 +501,37 @@ export const syncStatusText = {
   factCouldntReach: "Couldn't reach",
   factDidntFinish: "Didn't finish",
 } as const;
+
+/**
+ * Change master password and Rename this PC, with Android's wording (`VaultUi.kt`, strings.xml
+ * `name_this_device` and the rows near it). Kept in its own block to keep merges simple.
+ */
+export const accountText = {
+  changeMasterPassword: "Change master password",
+  changeMasterPasswordRow: "Choose a new password for unlocking Nuvori on this PC.",
+  changePassword: "Change password",
+  currentPassword: "Current password",
+  newPassword: "New password",
+  confirmNewPassword: "Confirm new password",
+  passwordsDontMatch: "Passwords don't match.",
+  cantReset: "Nuvori can't reset this password. If you forget it, your vault can't be recovered.",
+  thisPcOnly: "This changes the password on this PC only. Your phone and other paired devices keep their own master password.",
+  hello: "Windows Hello unlock keeps working.",
+  changing: "Changing the password. This takes a few seconds.",
+  changed: "Master password changed",
+  enterCurrent: "Enter your current password.",
+  tooShort: "Use a new master password with at least 12 characters.",
+  sameAsCurrent: "Choose a password different from your current one.",
+  failed: "Couldn't change the master password.",
+  rename: "Rename",
+  nameThisDevice: "Name this device",
+  nameAppearsOnPairedDevices: "This name appears on paired devices. Your verified device ID stays the same.",
+  deviceName: "Device name",
+  saveName: "Save name",
+  renamed: "Device renamed",
+  renameFailed: "Couldn't rename this PC.",
+  nameRequired: "Enter a name.",
+  nameTooLong: "Use 40 characters or fewer.",
+  nameHasControls: "Remove line breaks and tabs from the name.",
+  renameThisPc: (name: string) => `Rename ${name}`,
+} as const;

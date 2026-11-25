@@ -19,9 +19,10 @@ import { SignInsSettingRow } from "./signins/SignInsPage";
 import { useVault } from "../app/vault";
 import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type AutoTypeStatus, type QuickSearchStatus } from "../lib/api";
 import { humanError } from "../lib/errors";
-import { relativeTime } from "../lib/format";
+import { cx, relativeTime } from "../lib/format";
 import { browserIndicator, syncIndicator } from "../lib/syncState";
-import { strings } from "../strings";
+import { accountText, strings } from "../strings";
+import { passwordStrength } from "../lib/strength";
 
 
 export function SettingsPage({ section }: { section?: string }) {
@@ -57,6 +58,7 @@ export function SettingsPage({ section }: { section?: string }) {
       <SettingsGroup title={strings.security} id="settings-security">
         <SettingsRow icon={LockKeyhole} title={strings.lockNow} description={strings.shortcutCtrlL} control={<Button size="sm" icon={LockKeyhole} onClick={() => void lock()}>{strings.lock}</Button>} />
         <HelloRow />
+        <ChangePasswordRow />
         <QuickSearchRow />
         <AutoTypeRow />
         {build && <PasskeyProviderRow state={build.passkeyProvider} />}
@@ -175,6 +177,79 @@ function HelloRow() {
         <form id="hello-form" className="form-stack" onSubmit={(event) => void enable(event)}>
           {error && <StatusBanner kind="error">{error}</StatusBanner>}
           <PasswordField label={strings.masterPassword} value={password} onValue={setPassword} autoComplete="current-password" capsLockWarning disabled={busy} data-autofocus />
+        </form>
+      </Dialog>
+    </>
+  );
+}
+
+/**
+ * Change master password (Android Settings > Change master password). The vault stays unlocked:
+ * only the key file changes (`change_master_password`). New passwords follow the create-vault rules.
+ */
+function ChangePasswordRow() {
+  const { snapshot } = useVault();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState("");
+  const [replacement, setReplacement] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const strength = passwordStrength(replacement);
+  const strengthTone = ["error", "warning", "info", "success", "success"][strength.score];
+  const mismatch = confirmation !== "" && confirmation !== replacement && confirmation.length >= replacement.length;
+
+  const close = () => { if (busy) return; setOpen(false); setCurrent(""); setReplacement(""); setConfirmation(""); setError(""); };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!current) { setError(accountText.enterCurrent); return; }
+    if (replacement.length < 12) { setError(accountText.tooShort); return; }
+    if (replacement !== confirmation) { setError(accountText.passwordsDontMatch); return; }
+    if (replacement === current) { setError(accountText.sameAsCurrent); return; }
+    setBusy(true); setError("");
+    try {
+      await api.changeMasterPassword(current, replacement);
+      setOpen(false); setCurrent(""); setReplacement(""); setConfirmation("");
+      toast.success(accountText.changed);
+    } catch (failure) {
+      setCurrent("");
+      setError(humanError(failure, accountText.failed));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <SettingsRow icon={KeyRound} title={accountText.changeMasterPassword} description={accountText.changeMasterPasswordRow}
+        control={<Button size="sm" onClick={() => setOpen(true)}>{accountText.changePassword}</Button>} />
+      <Dialog open={open} onClose={close} title={accountText.changeMasterPassword} locked={busy}
+        footer={<>
+          <Button variant="ghost" onClick={close} disabled={busy}>{strings.cancel}</Button>
+          <Button variant="primary" type="submit" form="change-password-form" busy={busy}
+            disabled={!current || replacement.length < 12 || replacement !== confirmation}>{accountText.changePassword}</Button>
+        </>}>
+        <form id="change-password-form" className="form-stack" onSubmit={(event) => void submit(event)}>
+          {error && <StatusBanner kind="error">{error}</StatusBanner>}
+          {busy && <StatusBanner kind="info">{accountText.changing}</StatusBanner>}
+          <PasswordField label={accountText.currentPassword} value={current} onValue={(value) => { setCurrent(value); setError(""); }}
+            autoComplete="current-password" capsLockWarning disabled={busy} data-autofocus />
+          <PasswordField label={accountText.newPassword} value={replacement} onValue={(value) => { setReplacement(value); setError(""); }}
+            autoComplete="new-password" capsLockWarning disabled={busy} />
+          {replacement && (
+            <div className="strength" aria-live="polite">
+              <div className={cx("strength-bar", `tone-${strengthTone}`)} data-score={strength.score}>
+                {[0, 1, 2, 3].map((index) => <span key={index} className={cx(index < Math.max(1, strength.score) && "is-on")} />)}
+              </div>
+              <span className="strength-label">{strength.label}{strength.hint ? ` · ${strength.hint}` : ""}</span>
+            </div>
+          )}
+          <PasswordField label={accountText.confirmNewPassword} value={confirmation} onValue={(value) => { setConfirmation(value); setError(""); }}
+            autoComplete="new-password" disabled={busy} error={mismatch ? accountText.passwordsDontMatch : undefined} />
+          <StatusBanner kind="warning">{accountText.cantReset}</StatusBanner>
+          <p className="muted">{snapshot.enrolled ? `${accountText.thisPcOnly} ` : ""}{snapshot.helloEnabled ? accountText.hello : ""}</p>
         </form>
       </Dialog>
     </>

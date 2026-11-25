@@ -1,18 +1,19 @@
-import { useCallback, useRef, useState } from "react";
-import { CircleHelp, Crown, LogOut, Monitor, ShieldAlert, Smartphone, type LucideIcon } from "lucide-react";
+import { useCallback, useRef, useState, type FormEvent } from "react";
+import { CircleHelp, Crown, LogOut, Monitor, Pencil, ShieldAlert, Smartphone, type LucideIcon } from "lucide-react";
 import { Button } from "../../components/Button";
 import { Dialog } from "../../components/Dialog";
 import { SettingsGroup, SettingsRow } from "../../components/Display";
+import { TextField } from "../../components/Field";
 import { StatusBanner, StatusChip } from "../../components/Status";
 import { useConfirm } from "../../app/confirm";
 import { useMembership } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
 import { api, type MemberDevice, type MembershipStatus } from "../../lib/api";
-import { isUnavailable } from "../../lib/errors";
+import { humanError, isUnavailable } from "../../lib/errors";
 import { cx, formatDateTime, plural, relativeTime } from "../../lib/format";
-import { isStale, removeHelp, splitDevices, staleHint } from "../../lib/deviceList";
-import { strings } from "../../strings";
+import { deviceNameProblem, isStale, removeHelp, splitDevices, staleHint } from "../../lib/deviceList";
+import { accountText, strings } from "../../strings";
 import { peerAckText } from "../../lib/syncOverview";
 import type { SyncOverviewState } from "../../app/useSyncOverview";
 
@@ -217,12 +218,62 @@ export function useMarkLost(membership: MembershipStatus, reload?: () => Promise
   return { busy, run };
 }
 
+/**
+ * Rename this PC (Android: Devices & sync > This device > Rename). Sends a signed `device_name` change,
+ * so the new name shows on every paired device after the next sync. Render `dialog`.
+ */
+export function useRenameThisPc(current: string, reload?: () => Promise<void>) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const trimmed = name.trim();
+  const problem = deviceNameProblem(name);
+
+  const start = () => { setName(current); setError(""); setOpen(true); };
+  const close = () => { if (!busy) setOpen(false); };
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (problem || trimmed === current) return;
+    setBusy(true); setError("");
+    try {
+      await api.renameThisDevice(trimmed);
+      await reload?.();
+      setOpen(false);
+      toast.success(accountText.renamed);
+    } catch (failure) {
+      setError(humanError(failure, accountText.renameFailed));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dialog = (
+    <Dialog open={open} onClose={close} title={accountText.nameThisDevice} locked={busy} size="sm"
+      footer={<>
+        <Button variant="ghost" onClick={close} disabled={busy}>{strings.cancel}</Button>
+        <Button variant="primary" type="submit" form="rename-device-form" busy={busy} disabled={!!problem || trimmed === current}>{accountText.saveName}</Button>
+      </>}>
+      <form id="rename-device-form" className="form-stack" onSubmit={(event) => void save(event)}>
+        {error && <StatusBanner kind="error">{error}</StatusBanner>}
+        <TextField label={accountText.deviceName} value={name} onValue={(value) => { setName(value); setError(""); }}
+          maxLength={40} autoComplete="off" spellCheck={false} disabled={busy} data-autofocus
+          error={name && problem ? problem : undefined} hint={accountText.nameAppearsOnPairedDevices} />
+      </form>
+    </Dialog>
+  );
+  return { start, dialog };
+}
+
 /** Devices in the group as reported by the signed membership chain. Read-only: Windows can't manage devices. */
 export function DevicesGroup({ membership, reload, overview }: { membership: MembershipStatus; reload?: () => Promise<void>; overview?: SyncOverviewState | null }) {
   const leave = useLeaveGroup(membership.managerName);
   const lost = useMarkLost(membership, reload);
   const phone = membership.managerName || "the managing phone";
   const self = membership.devices.find((device) => device.isThisDevice);
+  const selfName = self?.name && !/^this pc$/i.test(self.name) ? self.name : "";
+  const rename = useRenameThisPc(selfName, reload);
   const target = membership.devices.find((device) => device.deviceId === membership.pendingTransferTo);
   const { active, removed } = splitDevices(membership.devices);
   const row = (device: MemberDevice) => {
@@ -231,7 +282,9 @@ export function DevicesGroup({ membership, reload, overview }: { membership: Mem
       <SettingsRow key={device.deviceId} icon={Icon}
         title={<span className="device-name">{device.isThisDevice ? (!device.name || /^this pc$/i.test(device.name) ? "This PC" : `${device.name} (this PC)`) : device.name || "Unnamed device"}{device.isManager && <span className="badge"><Crown aria-hidden="true" />Managing device</span>}</span>}
         description={deviceDetail(device, membership.managerName, overview)}
-        control={deviceChip(device, membership, overview)} />
+        control={device.isThisDevice && device.status === "active"
+          ? <>{deviceChip(device, membership, overview)}<Button size="sm" variant="ghost" icon={Pencil} aria-label={accountText.renameThisPc(device.name || "this PC")} onClick={rename.start}>{accountText.rename}</Button></>
+          : deviceChip(device, membership, overview)} />
     );
   };
 
@@ -270,6 +323,7 @@ export function DevicesGroup({ membership, reload, overview }: { membership: Mem
         </SettingsGroup>
       )}
       {leave.dialog}
+      {rename.dialog}
     </>
   );
 }

@@ -1,6 +1,7 @@
 // How the Devices list on the Sync page groups and explains devices. Windows can't add or remove
 // devices: only the managing phone signs those changes, so this PC tells the user where to do it.
 import type { MemberDevice } from "./api";
+import { accountText } from "../strings.ts";
 
 /** An active device not seen for this long is shown as possibly unused. */
 export const STALE_AFTER_DAYS = 30;
@@ -40,4 +41,16 @@ export function staleHint(device: MemberDevice, managerName?: string, now = Date
   const days = daysSinceSeen(device, now);
   if (device.isManager) return `Not seen for ${days} days. Only this phone can add or remove devices, so keep it, or move the managing role to another phone.`;
   return `Not seen for ${days} days. If you no longer use it, remove it on ${managerLabel(managerName)} so it stops counting toward your device limit.`;
+}
+
+/**
+ * Why a new name for this PC can't be saved, or "" when it can. Same rule as Android's
+ * LocalDeviceNameChangeWriter and incoming_apply.rs: not blank, at most 40 UTF-16 units, no control characters.
+ */
+export function deviceNameProblem(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return accountText.nameRequired;
+  if (trimmed.length > 40) return accountText.nameTooLong;
+  if (/\p{Cc}/u.test(trimmed)) return accountText.nameHasControls;
+  return "";
 }

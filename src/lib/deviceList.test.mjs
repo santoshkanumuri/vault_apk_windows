@@ -1,7 +1,7 @@
 // Run with `npm test`. Node strips the TypeScript types of deviceList.ts on load.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isStale, removeHelp, splitDevices, staleHint } from "./deviceList.ts";
+import { deviceNameProblem, isStale, removeHelp, splitDevices, staleHint } from "./deviceList.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 const now = 1_800_000_000_000;
@@ -29,4 +29,16 @@ test("the PC says that devices are removed on the managing phone", () => {
   assert.match(removeHelp(""), /your managing phone/);
   assert.match(staleHint(device("Tablet", { lastSeen: now - 40 * DAY }), "Pixel 8", now), /^Not seen for 40 days\. If you no longer use it, remove it on Pixel 8/);
   assert.match(staleHint(device("Pixel 8", { isManager: true, lastSeen: now - 40 * DAY }), "Pixel 8", now), /managing role/);
+});
+
+test("a new name for this PC follows Android's device-name rule", () => {
+  assert.equal(deviceNameProblem("Work laptop"), "");
+  assert.equal(deviceNameProblem("  Work laptop  "), "", "spaces around the name are trimmed before saving");
+  assert.equal(deviceNameProblem("x".repeat(40)), "");
+  assert.match(deviceNameProblem(""), /Enter a name/);
+  assert.match(deviceNameProblem("   "), /Enter a name/);
+  assert.match(deviceNameProblem("x".repeat(41)), /40 characters/);
+  assert.match(deviceNameProblem("😀".repeat(21)), /40 characters/, "counted in UTF-16 units, as Kotlin's String.length does");
+  assert.match(deviceNameProblem("Work\nlaptop"), /line breaks/);
+  assert.match(deviceNameProblem("Work\u0007PC"), /line breaks/);
 });

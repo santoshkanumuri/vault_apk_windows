@@ -2304,6 +2304,60 @@ async fn reset_vault(
     Ok(snapshot)
 }
 
+/// Settings > Change master password (Android `VaultViewModel.changePassword`). Wraps the same
+/// vault key under the new password (`VaultStore::change_password`); nothing else changes, so the
+/// vault stays unlocked, Windows Hello keeps working and sync carries on. Only this PC's password
+/// changes: Windows proves the phone's own password when it pairs, so paired devices keep theirs.
+#[tauri::command]
+async fn change_master_password(
+    current: String,
+    replacement: String,
+    state: State<'_, ManagedState>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let current = Zeroizing::new(current);
+        let replacement = Zeroizing::new(replacement);
+        // Held for the whole change (about three Argon2id runs), so a lock and unlock can't
+        // read the key file in between.
+        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
+        let key = Zeroizing::new(*vault.key_for_hello());
+        app.store.change_password(&key, &current, &replacement).map_err(|error| match error {
+            VaultError::WrongPasswordOrCorruptKey => {
+                activity::log(Level::Warning, Category::Security, "Master password change blocked: wrong current password");
+                "The current password is wrong.".to_owned()
+            }
+            VaultError::PasswordTooShort => "Use a new master password with at least 12 characters.".to_owned(),
+            other => {
+                activity::diagnostic(Category::Security, "Master password change failed", &other);
+                "Couldn't change the master password. Your current password still works.".to_owned()
+            }
+        })?;
+        activity::log(Level::Success, Category::Security, "Master password changed");
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Changing the master password stopped unexpectedly".to_owned())?
+}
+
+/// Devices & sync > This PC > Rename (Android `VaultViewModel.nameThisDevice`). The name reaches
+/// paired devices as a signed `device_name` change with the next sync, which the change starts.
+#[tauri::command]
+fn rename_this_device(name: String, state: State<'_, ManagedState>) -> Result<membership_exit::MembershipStatus, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+    let renamed = vault.rename_this_device(&name).map_err(|error| match error {
+        VaultError::InvalidDeviceName => "Enter a device name of up to 40 characters.".to_owned(),
+        VaultError::NotSharing => "Pair this PC first. Its name is shown on paired devices.".to_owned(),
+        other => public_vault_error(other),
+    })?;
+    if renamed {
+        activity::log(Level::Success, Category::Pairing, "Renamed this PC");
+    }
+    vault.membership_status().map_err(public_vault_error)
+}
+
 /// "Start fresh on this PC" on the unlock screen, for a forgotten password or an earlier
 /// install's vault. No password: `confirmation` must be the typed word RESET. Works only while the
 /// vault is locked (`AppState::start_fresh`). The Settings reset keeps its password check.
@@ -3090,6 +3144,7 @@ pub fn run() {
             lock_vault,
             stop_sharing,
             reset_vault,
+            change_master_password,
             start_fresh,
             list_notes,
             save_note,
@@ -3123,6 +3178,7 @@ pub fn run() {
             resolve_conflict,
             photo_sync_status,
             membership_status,
+            rename_this_device,
             mark_manager_lost,
             leave_group,
             dismiss_removed_notice,
