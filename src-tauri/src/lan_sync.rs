@@ -1070,13 +1070,15 @@ fn exchange_rounds_role<R: Read, W: Write>(
     relay_removed: bool,
 ) -> Result<(SyncReport, bool)> {
     let mut report = SyncReport::default();
+    // What the peer acknowledged in this session, by author: never sent again in this session.
+    let mut acknowledged = BTreeMap::new();
     for _ in 0..MAX_ROUNDS {
         let (sent, received) = if server {
-            let sent = send_batch(channel, state, membership, local, peer, tracker, relay_removed)?;
+            let sent = send_batch(channel, state, membership, local, peer, tracker, relay_removed, &mut acknowledged)?;
             (sent, receive_batch(channel, state, membership, key, local, peer, tracker)?)
         } else {
             let received = receive_batch(channel, state, membership, key, local, peer, tracker)?;
-            (send_batch(channel, state, membership, local, peer, tracker, relay_removed)?, received)
+            (send_batch(channel, state, membership, local, peer, tracker, relay_removed, &mut acknowledged)?, received)
         };
         report.received += received;
         report.sent += sent;
@@ -1900,6 +1902,24 @@ fn gap_free_end(db: &Connection, id: &str, device: &str, after: i64) -> Result<i
     .map_err(storage_error)
 }
 
+/// The frontier one round sends after: the peer's reported head for each author, raised to what it
+/// acknowledged earlier in this session. A peer on an older build that set a change aside reports
+/// a lower head than it acknowledged (H2), so without this the same changes would go every round
+/// until the round limit. Across sessions they still go again once, as Android does.
+fn session_frontier(
+    reported: &BTreeMap<String, (u64, String)>,
+    acknowledged: &BTreeMap<String, (u64, String)>,
+) -> BTreeMap<String, (u64, String)> {
+    let mut frontier = reported.clone();
+    for (author, head) in acknowledged {
+        if frontier.get(author).is_none_or(|reported| reported.0 < head.0) {
+            frontier.insert(author.clone(), head.clone());
+        }
+    }
+    frontier
+}
+
+#[allow(clippy::too_many_arguments)]
 fn send_batch<R: Read, W: Write>(
     channel: &mut EncryptedSyncChannel<R, W>,
     state: &ManagedState,
@@ -1908,6 +1928,7 @@ fn send_batch<R: Read, W: Write>(
     peer: &str,
     tracker: &SyncTracker,
     relay_removed: bool,
+    acknowledged: &mut BTreeMap<String, (u64, String)>,
 ) -> Result<usize> {
     let progress =
         SyncProgress::parse(&channel.receive().map_err(network_error)?).map_err(storage_error)?;
@@ -1923,7 +1944,7 @@ fn send_batch<R: Read, W: Write>(
         pending_operations(
             db,
             &membership.vault_id,
-            &progress.received,
+            &session_frontier(&progress.received, acknowledged),
             MAX_BATCH_OPERATIONS,
             BATCH_BYTE_BUDGET,
             &|author| match membership.members.get(author) {
@@ -1944,6 +1965,9 @@ fn send_batch<R: Read, W: Write>(
         channel.send(wire).map_err(network_error)?;
         if channel.receive().map_err(network_error)? != operation.hash.as_bytes() {
             return Err("Peer did not acknowledge the saved change".into());
+        }
+        if acknowledged.get(&operation.device_id).is_none_or(|head| head.0 < operation.sequence) {
+            acknowledged.insert(operation.device_id.clone(), (operation.sequence, operation.hash.clone()));
         }
         tracker.sent_one();
     }
@@ -3200,6 +3224,60 @@ mod tests {
         validate_peer_progress(db, "vault-a", &local, "pc-2", &report(3, &h3), false).unwrap();
         assert_eq!(validate_peer_progress(db, "vault-a", &local, "pc-2", &report(1, &h1), false).unwrap_err(), "Peer progress moved backward");
         drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// H2 with a peer on an older build: it acknowledges this PC's changes, sets one aside and
+    /// keeps reporting a lower head. Each change goes once in a session, which then ends as
+    /// finished instead of resending every round up to the round limit.
+    #[test]
+    fn a_peer_that_reports_a_lower_head_after_acknowledging_gets_each_change_once_per_session() {
+        let synthetic = synthetic_vault(3);
+        let local = synthetic.local.device_id.clone();
+        let tracker = SyncTracker::default();
+        // The one change the phone keeps; it still has it in the next session.
+        let mut kept: Option<ChangeRecord> = None;
+        for session in 0..2 {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let author = local.clone();
+            let mut first = kept.take();
+            let phone = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+                let frames = SyncFrames::new(stream.try_clone().unwrap(), stream);
+                let mut channel = EncryptedSyncChannel::new(frames, &[8; 32], true).unwrap();
+                let mut sizes = Vec::new();
+                for _ in 0..MAX_ROUNDS {
+                    let _ = channel.receive().unwrap();
+                    channel.send(b"0").unwrap();
+                    // Only the first change is kept; the rest are acknowledged and set aside.
+                    let heads: BTreeMap<String, (u64, String)> = first.iter()
+                        .map(|op| (author.clone(), (op.sequence, op.hash.clone()))).collect();
+                    channel.send(&SyncProgress { received: heads.clone(), applied: heads }.encode().unwrap()).unwrap();
+                    let count: usize = std::str::from_utf8(&channel.receive().unwrap()).unwrap().parse().unwrap();
+                    sizes.push(count);
+                    for _ in 0..count {
+                        let op = operation_from_wire(&channel.receive().unwrap()).unwrap();
+                        channel.send(op.hash.as_bytes()).unwrap();
+                        if op.sequence == 1 { first = Some(op); }
+                    }
+                    if count == 0 { break; }
+                }
+                (sizes, first)
+            });
+            tracker.begin();
+            let (report, complete) = windows_rounds(&synthetic, address, &tracker).unwrap();
+            let (sizes, first) = phone.join().unwrap();
+            kept = first;
+            assert!(complete, "session {session} ends as finished, not at the round limit");
+            if session == 0 {
+                assert_eq!((report.sent, sizes), (3, vec![3, 0]));
+            } else {
+                assert_eq!((report.sent, sizes), (2, vec![2, 0]), "the next session sends what was set aside once more");
+            }
+        }
         drop(synthetic.state);
         std::fs::remove_dir_all(synthetic.directory).unwrap();
     }
