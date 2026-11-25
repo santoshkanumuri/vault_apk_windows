@@ -447,10 +447,6 @@ export const strings = {
 } as const;
 
 /**
- * Sync status over Wi-Fi and Google Drive together (lib/syncOverview.ts). The same words as Android
- * strings.xml `sync_*`, with "this PC" for "this device". Kept in its own block to keep merges simple.
- */
-/**
  * Import passwords from a browser or password manager export, with Android's wording
  * (`VaultUi.kt` "Import passwords", "Match password columns" and the import review).
  */
@@ -504,6 +500,10 @@ export const passwordImportText = {
     `Added ${added} and updated ${updated}. Skipped ${duplicates} and ${changes}. Delete the readable export file after checking your logins.`,
 } as const;
 
+/**
+ * Sync status over Wi-Fi and Google Drive together (lib/syncOverview.ts). The same words as Android
+ * strings.xml `sync_*`, with "this PC" for "this device". Kept in its own block to keep merges simple.
+ */
 export const syncStatusText = {
   syncing: "Syncing changes",
   attention: "Sync needs attention",
