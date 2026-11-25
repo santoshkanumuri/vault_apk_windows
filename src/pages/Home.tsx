@@ -17,6 +17,7 @@ import { api, type VaultEntry } from "../lib/api";
 import { categories, categoryOrder, entrySubtitle, type Category } from "../lib/entries";
 import { cx, greeting, groupCode, plural, relativeTime } from "../lib/format";
 import { browserIndicator, isSyncing, syncIndicator } from "../lib/syncState";
+import { overviewText, syncFacts, syncNowOutcome, syncOverview } from "../lib/syncOverview";
 import { totpAt } from "../lib/totp";
 import { useTotpCodes } from "./codes/useTotp";
 import { EntryQuickActions } from "./items/actions";
@@ -95,7 +96,7 @@ function AttentionStrip() {
   const conflictCount = !snapshot.enrolled ? 0 : conflicts.data ? conflicts.data.length : sync.data?.conflicts ?? 0;
   // One status over Wi-Fi and Google Drive: a Wi-Fi miss while Drive delivers is not a problem here.
   const overview = useSyncOverview(snapshot.enrolled ? sync.data : null, membership.error ? null : membership.data, conflictCount);
-  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error));
+  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error), lastSync);
   const extension = browserIndicator(snapshot, browser.data, Boolean(browser.error));
 
   const items: Attention[] = [];
@@ -113,10 +114,13 @@ function AttentionStrip() {
 
   if (!visible.length) {
     const syncing = isSyncing(sync.data);
+    const inStep = !state || state.state === "upToDate" || state.state === "syncing";
     return (
       <p className="calm-line" role="status">
-        {syncing ? <StatusIcon kind="progress" size={16} /> : state?.state === "waiting" ? <StatusIcon kind="info" size={16} /> : <CircleCheck aria-hidden="true" />}
-        {!snapshot.enrolled ? "Your vault is ready" : syncing ? "Syncing with your devices…" : state?.state === "waiting" && overview ? overview.text.title
+        {syncing ? <StatusIcon kind="progress" size={16} /> : inStep ? <CircleCheck aria-hidden="true" /> : <StatusIcon kind="info" size={16} />}
+        {!snapshot.enrolled ? "Your vault is ready" : syncing ? "Syncing with your devices…"
+          // "In sync" only when the overview says so (H1): changes missing here are named instead.
+          : !inStep && overview ? (state?.state === "waitingHere" ? overview.text.detail : overview.text.title)
           : lastSync ? `Everything's in sync · ${relativeTime(state?.lastSynced || lastSync).toLowerCase()}` : "Everything's up to date"}
       </p>
     );
@@ -293,13 +297,15 @@ export function useSyncNow(address: string, after?: () => Promise<void> | void) 
     try {
       const report = await api.syncNow(target);
       if (override) await api.configureSync(target, override.automatic);
-      const parts = [report.sent ? `sent ${report.sent}` : "", report.received ? `received ${report.received}` : ""].filter(Boolean);
-      const route = report.cloud && !report.peersChecked ? "Synced through Google Drive" : "Synced";
-      const summary = parts.length ? `${route} · ${parts.join(", ")}` : report.cloud && !report.peersChecked ? "Google Drive is up to date" : "Sync check complete";
-      if (report.conflicts) progress.warning(`${summary}. ${plural(report.conflicts, "change")} need review.`);
-      else if (report.waitingToApply) progress.info(`${summary}. ${report.waitingToApply} still waiting to apply.`);
-      else if (report.peersWaiting && !report.cloud) progress.info(`${summary}. ${plural(report.peersWaiting, "device")} will catch up when connected.`);
-      else progress.success(summary);
+      // H1: read the status after the attempt, so "up to date" means every device and this PC hold it all.
+      const [status, cloud, membership] = await Promise.all([
+        api.syncStatus().catch(() => null), api.cloudStatus().catch(() => null), api.membershipStatus().catch(() => null)]);
+      const facts = status ? syncFacts(status, cloud, membership, report.conflicts) : null;
+      const overview = facts ? syncOverview(facts) : null;
+      const outcome = syncNowOutcome(report, facts && overview ? { overview, text: overviewText(facts, overview) } : undefined);
+      if (outcome.kind === "warning") progress.warning(outcome.text);
+      else if (outcome.kind === "info") progress.info(outcome.text);
+      else progress.success(outcome.text);
       return true;
     } catch (failure) {
       progress.error(failure, "Sync didn't finish. Try again.");

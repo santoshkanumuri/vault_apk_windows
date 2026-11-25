@@ -54,8 +54,12 @@ export function phaseLabel(status: SyncStatus): string {
   }
 }
 
-/** Phone sync indicator. Uses the newer status fields when present, else falls back to running/message. */
-export function syncIndicator(snapshot: AppSnapshot, status: SyncStatus | null, unavailable = false): Indicator {
+/**
+ * Phone sync indicator. Uses the newer status fields when present, else falls back to running/message.
+ * `lastSync`: the newer of the Wi-Fi and Google Drive last syncs (`useLastSync`), so a PC that syncs
+ * only through Google Drive is not shown as still looking for its devices (H1).
+ */
+export function syncIndicator(snapshot: AppSnapshot, status: SyncStatus | null, unavailable = false, lastSync?: string): Indicator {
   if (!snapshot.enrolled) return { kind: "neutral", label: SYNC_WORDS.off, detail: "Pair a device to start syncing." };
   if (unavailable || !status) return { kind: "neutral", label: SYNC_WORDS.searching };
   if (isSyncing(status)) {
@@ -73,7 +77,7 @@ export function syncIndicator(snapshot: AppSnapshot, status: SyncStatus | null, 
   if (status.conflicts > 0) return { kind: "warning", label: "Needs review", detail: `${status.conflicts} edited on both devices` };
   const waiting = status.waitingToApply - (status.setAside ?? 0);
   if (waiting > 0) return { kind: "info", label: SYNC_WORDS.received, detail: "Received changes apply on a later sync." };
-  if (status.lastSync) return { kind: "success", label: SYNC_WORDS.checked };
+  if (lastSync || status.lastSync) return { kind: "success", label: SYNC_WORDS.checked };
   return { kind: "info", label: SYNC_WORDS.searching };
 }
 

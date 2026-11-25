@@ -34,7 +34,7 @@ export function SettingsPage({ section }: { section?: string }) {
   const [keepass, setKeepass] = useState(false);
   const sync = useSyncStatus(10000);
   const lastSync = useLastSync(sync.data);
-  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error));
+  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error), lastSync);
   const build = useBuildStatus(4000).data;
 
   useEffect(() => {

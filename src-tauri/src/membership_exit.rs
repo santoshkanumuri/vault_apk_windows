@@ -336,6 +336,21 @@ pub struct PeerCounts {
     /// This PC's changes the device has not applied yet, by its verified progress over Wi-Fi or a
     /// signed Google Drive report; all of them before its first report (Android `SyncOverviewRules.unconfirmed`).
     pub unconfirmed: u64,
+    /// H1: the device's own changes that an active device (any of them, the device itself
+    /// included) reports applied but that have not arrived here. Set by [missing_here].
+    pub missing_here: u64,
+}
+
+/// H1, Android `SyncOverviewRules.missingHere`: changes by `author` that an active device reports
+/// applied but this PC has not received. `reports` are the verified progress reports of the active
+/// devices other than this PC, the author's own included.
+pub fn missing_here<'a>(
+    author: &str,
+    local: &crate::progress::SyncProgress,
+    reports: impl IntoIterator<Item = &'a crate::progress::SyncProgress>,
+) -> u64 {
+    let best = reports.into_iter().filter_map(|report| report.applied.get(author).map(|head| head.0)).max().unwrap_or(0);
+    best.saturating_sub(local.received.get(author).map_or(0, |head| head.0))
 }
 
 /// Android `peerSyncCounts`, over `(sequence, hash)` heads.
@@ -360,6 +375,7 @@ pub fn peer_counts(
         received_there: remote_received.saturating_sub(remote_applied),
         to_receive_here: peer_written.saturating_sub(local_received),
         unconfirmed: local_written.saturating_sub(remote_applied),
+        missing_here: 0,
     }
 }
 
@@ -555,6 +571,22 @@ mod tests {
         assert_eq!((counts.checked, counts.unconfirmed, counts.to_send, counts.received_there), (true, 3, 0, 3));
         let applied = crate::progress::SyncProgress { received: heads(&[("pc", 7)]), applied: heads(&[("pc", 7)]) };
         assert_eq!(peer_counts("pc", "phone", &local, Some(&applied)).unconfirmed, 0);
+    }
+
+    /// H1: a session that ended early leaves the phone's changes 2 to 5 on the tablet only.
+    #[test]
+    fn missing_here_counts_changes_another_device_applied_that_are_not_here() {
+        let heads = |pairs: &[(&str, u64)]| pairs.iter().map(|(id, seq)| ((*id).to_owned(), (*seq, "a".repeat(64)))).collect();
+        let local = crate::progress::SyncProgress { received: heads(&[("pc", 7), ("phone", 1)]), applied: heads(&[("pc", 7), ("phone", 1)]) };
+        let phone = crate::progress::SyncProgress { received: heads(&[("pc", 7)]), applied: heads(&[("pc", 7), ("phone", 4)]) };
+        let tablet = crate::progress::SyncProgress { received: heads(&[("phone", 5)]), applied: heads(&[("phone", 5)]) };
+        assert_eq!(missing_here("phone", &local, [&phone, &tablet]), 4, "the best report wins, the tablet's");
+        assert_eq!(missing_here("phone", &local, [&phone]), 3, "the phone's own report");
+        assert_eq!(missing_here("tablet", &local, [&phone, &tablet]), 0, "nothing reported");
+        assert_eq!(missing_here("phone", &local, std::iter::empty()), 0);
+        // Received here but still waiting to apply is not missing.
+        let waiting = crate::progress::SyncProgress { received: heads(&[("phone", 5)]), applied: heads(&[("phone", 1)]) };
+        assert_eq!(missing_here("phone", &waiting, [&tablet]), 0);
     }
 
     fn event(signer: &SigningKey, previous: Option<&MembershipEvent>, action: MembershipAction, subject: &str, key: &str, epoch: u64) -> MembershipEvent {

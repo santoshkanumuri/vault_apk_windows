@@ -465,6 +465,8 @@ export const syncStatusText = {
   detailWaitingOne: (count: number, name: string) => `${name} hasn't confirmed ${count} ${count === 1 ? "change" : "changes"} yet.`,
   detailWaitingMany: (count: number) => count === 1 ? "1 change isn't on every device yet." : `${count} changes aren't on every device yet.`,
   detailWaitingHere: "Changes arrived and are waiting to apply on this PC.",
+  detailMissingFrom: (count: number, name: string) => `${count} ${count === 1 ? "change" : "changes"} from ${name} ${count === 1 ? "hasn't" : "haven't"} arrived here yet.`,
+  detailMissingMany: (count: number) => `${count} ${count === 1 ? "change" : "changes"} from your other devices ${count === 1 ? "hasn't" : "haven't"} arrived here yet.`,
   detailStaleDrive: "Open Nuvori on your other device so it syncs with Google Drive.",
   detailStaleWifi: "Open Nuvori on your other device on the same Wi-Fi.",
   detailNotYet: "Waiting for the first sync with your devices.",

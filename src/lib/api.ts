@@ -183,7 +183,9 @@ export type MemberDevice = {
 /** Changes still moving between this PC and one device (same counts as the phone). */
 export type PeerCounts = { checked: boolean; toSend: number; toApplyHere: number; receivedThere: number; toReceiveHere: number;
   /** This PC's changes the device has not applied, by its verified progress over Wi-Fi or Google Drive. Absent on older builds. */
-  unconfirmed?: number };
+  unconfirmed?: number;
+  /** The device's own changes that an active device reports applied but that have not arrived here. Absent on older builds. */
+  missingHere?: number };
 export type MembershipStatus = {
   managerDeviceId: string;
   managerName: string;

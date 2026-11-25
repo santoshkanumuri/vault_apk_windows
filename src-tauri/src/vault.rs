@@ -957,6 +957,10 @@ impl UnlockedVault {
             .into_iter()
             .filter_map(|(peer, json)| Some((peer, crate::progress::SyncProgress::parse(json.as_bytes()).ok()?)))
             .collect();
+        // H1: only active devices' reports count (a removed device may report anything).
+        let active_reports: Vec<&crate::progress::SyncProgress> = verified.members.values()
+            .filter(|member| member.active && member.device_id != local_device_id)
+            .filter_map(|member| reported.get(&member.device_id)).collect();
         for member in verified.members.values() {
             let is_this_device = member.device_id == local_device_id;
             let is_manager = member.device_id == verified.manager_device_id;
@@ -979,7 +983,10 @@ impl UnlockedVault {
                 is_this_device,
                 last_seen: if is_this_device { 0 } else { exit::peer_seen(&self.connection, &member.device_id)? },
                 counts: match (&local_progress, is_this_device || !member.active) {
-                    (Some(local), false) => exit::peer_counts(&local_device_id, &member.device_id, local, reported.get(&member.device_id)),
+                    (Some(local), false) => exit::PeerCounts {
+                        missing_here: exit::missing_here(&member.device_id, local, active_reports.iter().copied()),
+                        ..exit::peer_counts(&local_device_id, &member.device_id, local, reported.get(&member.device_id))
+                    },
                     _ => exit::PeerCounts::default(),
                 },
             });
