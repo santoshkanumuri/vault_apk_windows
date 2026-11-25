@@ -2129,6 +2129,19 @@ impl UnlockedVault {
                 return Err(VaultError::InvalidEntry);
             }
         }
+        // "Linked code", as on Android (`VaultDatabase.saveEntry`): only a login carries one, and it
+        // has to name an authenticator this vault still holds, so a saved link is never dangling.
+        let linked = entry["linkedAuthenticatorId"].as_str().unwrap_or_default();
+        if !linked.is_empty()
+            && !(entry_type == "PASSWORD"
+                && self.connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM local_entries WHERE id = ?1 AND type = 'AUTHENTICATOR')",
+                    [linked],
+                    |row| row.get::<_, bool>(0),
+                )?)
+        {
+            return Err(VaultError::LinkedCodeNotFound);
+        }
         let json = serde_json::to_string(&entry)?;
         let payload = serde_json::json!({"entry": entry, "groupIds": group_ids});
         let history_entry = entry.clone();
@@ -2287,6 +2300,11 @@ impl UnlockedVault {
         for photo_id in published {
             self.delete_entry_photo(&photo_id)?;
         }
+        // A login that pointed at this code loses its link, as on Android
+        // (`deleteEntryAndLinks`). The login itself is unchanged otherwise, and like Android this
+        // is not a change of its own: a paired device clears its own links when it applies the
+        // delete.
+        let unlinked = self.logins_unlinked_from(id)?;
         self.write_change(
             "entry",
             id,
@@ -2294,6 +2312,9 @@ impl UnlockedVault {
             serde_json::json!({"deleted": true}),
             |transaction| {
                 crate::local_recovery::keep_deleted(transaction, id, now_millis().unwrap_or_default(), false)?;
+                for (login_id, json) in &unlinked {
+                    transaction.execute("UPDATE local_entries SET data_json = ?2 WHERE id = ?1", params![login_id, json])?;
+                }
                 transaction.execute("DELETE FROM local_entries WHERE id = ?1", [id])?;
                 transaction.execute("DELETE FROM local_entry_photos WHERE entry_id = ?1", [id])?;
                 transaction.execute("DELETE FROM sync_attachment_manifests WHERE owner_entity_id = ?1", [id])?;
@@ -2302,6 +2323,28 @@ impl UnlockedVault {
             },
         )?;
         Ok(())
+    }
+
+    /// Every login whose linked code is `code_id`, with its stored JSON carrying no link any more:
+    /// the id and the JSON to write back. Nothing else in the login changes, not even its
+    /// `updatedAt`, so clearing the link is not an edit of the login.
+    fn logins_unlinked_from(&self, code_id: &str) -> Result<Vec<(String, String)>, VaultError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT id, data_json FROM local_entries WHERE type = 'PASSWORD' ORDER BY id")?;
+        let stored: Vec<(String, String)> = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        let mut unlinked = Vec::new();
+        for (id, json) in stored {
+            let mut entry: serde_json::Value = serde_json::from_str(&json)?;
+            if entry["linkedAuthenticatorId"].as_str() != Some(code_id) {
+                continue;
+            }
+            entry["linkedAuthenticatorId"] = serde_json::Value::String(String::new());
+            unlinked.push((id, serde_json::to_string(&entry)?));
+        }
+        Ok(unlinked)
     }
 
     fn backfill_independent_history(&mut self) -> Result<(), VaultError> {
@@ -3049,6 +3092,8 @@ pub enum VaultError {
     NoteNotFound,
     #[error("entry fields are invalid")]
     InvalidEntry,
+    #[error("linked code is not an authenticator in this vault")]
+    LinkedCodeNotFound,
     #[error("photo is invalid or exceeds the size limit")]
     InvalidPhoto,
     #[error("photo was not found")]
@@ -3361,6 +3406,50 @@ mod tests {
         // The same file again adds nothing new.
         let again = vault.import_keepass(&plan).unwrap();
         assert_eq!((again.logins, again.duplicates), (0, 4));
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_login_links_only_to_a_code_in_this_vault_and_loses_it_with_the_code() {
+        let directory = std::env::temp_dir().join(format!("nuvori-linked-code-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let code = vault.save_entry(serde_json::json!({"type": "AUTHENTICATOR", "title": "GitHub", "primaryValue": "octo",
+            "secondaryValue": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"})).unwrap();
+        let code_id = code["id"].as_str().unwrap().to_owned();
+        let login_id = login(&mut vault, "synthetic-password", &[]);
+        let linked = vault.save_entry(serde_json::json!({"id": login_id, "linkedAuthenticatorId": code_id})).unwrap();
+        assert_eq!(linked["linkedAuthenticatorId"], code_id);
+
+        // Only a login carries a link, and only to an authenticator this vault still holds.
+        let missing = vault.save_entry(serde_json::json!({"id": login_id, "linkedAuthenticatorId": "no-such-code"}));
+        assert!(matches!(missing, Err(VaultError::LinkedCodeNotFound)));
+        let to_a_login = vault.save_entry(serde_json::json!({"id": login_id, "linkedAuthenticatorId": login_id}));
+        assert!(matches!(to_a_login, Err(VaultError::LinkedCodeNotFound)));
+        let card = vault.save_entry(serde_json::json!({"type": "CARD", "title": "Travel", "primaryValue": "4111111111111111",
+            "linkedAuthenticatorId": code_id}));
+        assert!(matches!(card, Err(VaultError::LinkedCodeNotFound)));
+        // A refused save leaves the login as it was.
+        let stored = |vault: &UnlockedVault| vault.list_entries().unwrap().into_iter()
+            .find(|entry| entry["id"].as_str() == Some(&login_id)).unwrap();
+        assert_eq!(stored(&vault)["linkedAuthenticatorId"], code_id);
+        let unchanged = stored(&vault);
+
+        // Deleting the code clears the link, without touching anything else in the login and
+        // without writing a change for it, as on Android.
+        let before = ChangeStore::record(&vault.connection, "entry", &login_id).unwrap();
+        vault.delete_entry(&code_id).unwrap();
+        let after = stored(&vault);
+        assert_eq!(after["linkedAuthenticatorId"], "");
+        assert_eq!(after["secondaryValue"], unchanged["secondaryValue"]);
+        assert_eq!(after["updatedAt"], unchanged["updatedAt"]);
+        assert_eq!(
+            ChangeStore::record(&vault.connection, "entry", &login_id).unwrap().map(|record| record.revision),
+            before.map(|record| record.revision),
+        );
+        // The login saves again now that it holds no link.
+        vault.save_entry(serde_json::json!({"id": login_id, "title": "Mail again"})).unwrap();
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }

@@ -13,6 +13,7 @@ import { useVault } from "../../app/vault";
 import { api, type EntryPhoto, type PreviousPassword, type VaultEntry } from "../../lib/api";
 import { deleteMessage, restoreDeleted } from "../../lib/trash";
 import { categoryForType, profileFields, profileFrom, typeLabel } from "../../lib/entries";
+import { codeLabel, linkedCode } from "../../lib/linkedCode";
 import { iconHints } from "../../lib/siteIcons";
 import { formatDateTime, groupCardNumber, groupCode, hostFromUrl, maskCard, relativeTime } from "../../lib/format";
 import { totpAt } from "../../lib/totp";
@@ -103,7 +104,7 @@ export function ItemDetailPage({ id }: { id: string }) {
       </section>
 
       <div className="card fields">
-        <EntryFields entry={entry} />
+        <EntryFields entry={entry} entries={entries} />
       </div>
 
       {(entry.notes || entry.tags || folderNames.length > 0) && (
@@ -184,12 +185,14 @@ function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt:
   );
 }
 
-function EntryFields({ entry }: { entry: VaultEntry }) {
+function EntryFields({ entry, entries }: { entry: VaultEntry; entries: VaultEntry[] }) {
+  const code = linkedCode(entry, entries);
   switch (entry.type) {
     case "PASSWORD": return <>
       <DetailField label={strings.username} value={entry.primaryValue} />
       <DetailField label={strings.password} value={entry.secondaryValue} secret mono />
       <DetailField label={strings.website} value={entry.tertiaryValue} />
+      {code && <LiveCodeField entry={code} label={strings.linkedCode} note={codeLabel(code)} />}
     </>;
     case "CARD": return <>
       <DetailField label={strings.cardNumber} value={entry.primaryValue} secret mono masked={maskCard(entry.primaryValue) || "••••"} display={groupCardNumber(entry.primaryValue)} copyValue={entry.primaryValue.replace(/\D/g, "")} />
@@ -216,13 +219,14 @@ function EntryFields({ entry }: { entry: VaultEntry }) {
   }
 }
 
-function LiveCodeField({ entry }: { entry: VaultEntry }) {
+/** The live one-time code of an authenticator item: its own "Code" row, or a login's linked code. */
+function LiveCodeField({ entry, label, note }: { entry: VaultEntry; label?: string; note?: string }) {
   const now = useNow(1000);
   const code = useTotpCodes([entry], now).get(entry.id);
   return (
     <div className="detail-field detail-code">
       <div className="detail-field-text">
-        <span className="detail-label">{strings.code}</span>
+        <span className="detail-label">{label ?? strings.code}{note ? ` · ${note}` : ""}</span>
         <span className="code-value">{code?.value ? groupCode(code.value) : "••• •••"}</span>
         {code?.next && code.seconds <= 5 && <span className="code-next">Next {groupCode(code.next)}</span>}
       </div>

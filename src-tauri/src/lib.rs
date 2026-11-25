@@ -2768,6 +2768,9 @@ fn public_vault_error(error: VaultError) -> String {
         }
         VaultError::NoteNotFound => "That note no longer exists.".to_owned(),
         VaultError::InvalidEntry => "Check the item fields and try again.".to_owned(),
+        VaultError::LinkedCodeNotFound => {
+            "Choose a code that is still in this vault, or no code at all.".to_owned()
+        }
         VaultError::EntryNotFound => "That item no longer exists.".to_owned(),
         VaultError::InvalidPhoto => {
             "Choose an image under 10 MB. Each item can hold up to 20 photos.".to_owned()

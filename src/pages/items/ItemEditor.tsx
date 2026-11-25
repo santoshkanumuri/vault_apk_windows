@@ -9,9 +9,10 @@ import { useConfirm } from "../../app/confirm";
 import { useRouter } from "../../app/router";
 import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
-import { api, type EntryDraft } from "../../lib/api";
+import { api, type EntryDraft, type VaultEntry } from "../../lib/api";
 import { DEFAULT_CARD_COLOR, defaultCardColor, usedColors } from "../../lib/cardColors";
 import { categories, emptyEntry, foldersFor, profileFields, profileFrom, type Category, type Profile } from "../../lib/entries";
+import { codeLabel, codesToLink } from "../../lib/linkedCode";
 import { cx } from "../../lib/format";
 import { passwordStrength } from "../../lib/strength";
 import { isValidSecret } from "../../lib/totp";
@@ -110,7 +111,7 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
         {formError && <StatusBanner kind="error">{formError}</StatusBanner>}
         {type === "AUTOFILL" ? <ProfileFields draft={draft} set={set} error={errors.primaryValue} /> : <>
           <TextField label={type === "CARD" ? "Card name" : type === "PASSWORD" || type === "AUTHENTICATOR" ? "Service" : "Title"} value={draft.title} onValue={(v) => set("title", v)} error={errors.title} placeholder={type === "CARD" ? "e.g. Travel card" : type === "PASSWORD" ? "e.g. GitHub" : undefined} autoFocus={!existing} required maxLength={300} />
-          {type === "PASSWORD" && <LoginFields draft={draft} set={set} errors={errors} />}
+          {type === "PASSWORD" && <LoginFields draft={draft} set={set} errors={errors} codes={codesToLink(entries)} />}
           {type === "CARD" && <>
             <TextField label={strings.cardNumber} value={draft.primaryValue} onValue={(v) => set("primaryValue", v.replace(/\D/g, "").slice(0, 19))} error={errors.primaryValue} inputMode="numeric" autoComplete="off" className="mono" required />
             <div className="field-row">
@@ -165,7 +166,7 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
   );
 }
 
-function LoginFields({ draft, set, errors }: { draft: EntryDraft; set: <K extends keyof EntryDraft>(key: K, value: EntryDraft[K]) => void; errors: Record<string, string> }) {
+function LoginFields({ draft, set, errors, codes }: { draft: EntryDraft; set: <K extends keyof EntryDraft>(key: K, value: EntryDraft[K]) => void; errors: Record<string, string>; codes: VaultEntry[] }) {
   const strength = passwordStrength(draft.secondaryValue);
   const tone = ["error", "warning", "info", "success", "success"][strength.score];
   const [generator, setGenerator] = useState(false);
@@ -188,6 +189,12 @@ function LoginFields({ draft, set, errors }: { draft: EntryDraft; set: <K extend
       </div>
     )}
     <TextField label={strings.website} value={draft.tertiaryValue} onValue={(v) => set("tertiaryValue", v)} placeholder={strings.httpsExampleCom} type="url" spellCheck={false} />
+    {/* "Linked code", as on the phone: this login shows that code's one-time code too. */}
+    {(codes.length > 0 || draft.linkedAuthenticatorId) && (
+      <SelectField label={strings.linkedCode} value={draft.linkedAuthenticatorId} onValue={(v) => set("linkedAuthenticatorId", v)}
+        hint={strings.theCodeNuvoriShowsWithThis}
+        options={[{ value: "", label: strings.noCode }, ...codes.map((code) => ({ value: code.id, label: codeLabel(code) }))]} />
+    )}
   </>;
 }
 
