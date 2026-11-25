@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Activity, ArchiveRestore, Clipboard, DatabaseBackup, CornerDownLeft, Globe, FileKey, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
+import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
 import { KeepassImportDialog } from "./KeepassImport";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
+import { DatabaseBackup } from "lucide-react";
 import { PasswordField, Segmented, TextField, Toggle } from "../components/Field";
 import { StatusBanner, StatusChip, type StatusKind } from "../components/Status";
 import { useConfirm } from "../app/confirm";
@@ -100,9 +101,9 @@ export function SettingsPage({ section }: { section?: string }) {
       </SettingsGroup>
 
       <SettingsGroup title={strings.yourData} id="settings-data">
-        <BackupRow />
         <SettingsRow icon={FileKey} title={strings.importFromKeepass} description={strings.loginsCodesAndNotesFromA} onClick={() => setKeepass(true)} />
         <SettingsRow icon={ArchiveRestore} title={strings.recentlyDeleted} description={strings.restoreItemsDeletedInTheLast2} onClick={() => void router.navigate({ page: "trash" })} />
+        <BackupRow />
       </SettingsGroup>
       <KeepassImportDialog open={keepass} onClose={() => setKeepass(false)} />
 

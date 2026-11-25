@@ -188,15 +188,6 @@ impl VaultStore {
         Ok(())
     }
 
-    /// The Argon2id settings of the vault key file, timed on this PC. An encrypted backup made here
-    /// uses them too, as Android's export uses its vault's (`vaultKdf`), so a guess at the backup
-    /// costs as much as a guess at the vault.
-    pub fn backup_kdf(&self) -> Result<crate::pvault::Kdf, VaultError> {
-        let bootstrap: VaultBootstrap = serde_json::from_slice(&fs::read(self.directory.join(BOOTSTRAP_FILE))?)?;
-        let kdf = bootstrap.kdf_params()?;
-        Ok(crate::pvault::Kdf { memory_kib: kdf.memory_kib, iterations: kdf.iterations, parallelism: kdf.parallelism })
-    }
-
     /// When the vault was last changed, in Unix milliseconds: the newest write time of its
     /// database and key files. Reads file times only, never the files.
     pub fn last_used_millis(&self) -> Option<i64> {
@@ -205,6 +196,15 @@ impl VaultStore {
             .filter_map(|name| fs::metadata(self.directory.join(name)).and_then(|metadata| metadata.modified()).ok())
             .map(crate::install_marker::millis)
             .max()
+    }
+
+    /// The Argon2id settings of the vault key file, timed on this PC. An encrypted backup made here
+    /// uses them too, as Android's export uses its vault's (`vaultKdf`), so a guess at the backup
+    /// costs as much as a guess at the vault.
+    pub fn backup_kdf(&self) -> Result<crate::pvault::Kdf, VaultError> {
+        let bootstrap: VaultBootstrap = serde_json::from_slice(&fs::read(self.directory.join(BOOTSTRAP_FILE))?)?;
+        let kdf = bootstrap.kdf_params()?;
+        Ok(crate::pvault::Kdf { memory_kib: kdf.memory_kib, iterations: kdf.iterations, parallelism: kdf.parallelism })
     }
 
     /// "Start fresh on this PC": deletes the same files as the password-checked reset, without the

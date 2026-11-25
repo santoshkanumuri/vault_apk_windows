@@ -2,11 +2,11 @@ pub mod activity;
 mod auto_lock;
 mod auto_type;
 pub mod appearance;
-mod backup_export;
 pub mod browser;
 pub mod browser_ipc;
 mod browser_setup;
 mod browsers;
+mod backup_export;
 mod clipboard;
 pub mod change_store;
 pub mod checkpoint;
@@ -2473,76 +2473,6 @@ async fn keepass_import(data: String, password: String, key_file: Option<String>
     .map_err(|_| "The import stopped unexpectedly.".to_owned())?
 }
 
-// Encrypted backup (backup_export.rs, pvault.rs): a .pvault file that Nuvori for Android restores.
-
-/// Checks the master password, asks where to save the file, then writes the backup, encrypted with
-/// that password. `None` when the Save dialog is cancelled. `today` is the local date for the
-/// suggested name (YYYY-MM-DD); the UTC date stands in when it is not one.
-#[tauri::command]
-async fn export_backup(
-    password: String,
-    today: String,
-    window: tauri::WebviewWindow,
-    state: State<'_, ManagedState>,
-) -> Result<Option<backup_export::Saved>, String> {
-    let owner = window.hwnd().map_err(|_| "The backup needs an app window")?.0 as isize;
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let password = Zeroizing::new(password);
-        let kdf = {
-            let app = state.lock().map_err(|_| "Vault state is unavailable")?;
-            if app.unlocked.is_none() {
-                return Err("Unlock the vault first".to_owned());
-            }
-            app.store.verify_password(&password).map_err(|error| {
-                activity::log(Level::Warning, Category::Security, "Encrypted backup blocked: wrong password");
-                public_vault_error(error)
-            })?;
-            app.store.backup_kdf().map_err(public_vault_error)?
-        };
-        let date = backup_export::parse_date(&today).unwrap_or_else(|| time::OffsetDateTime::now_utc().date());
-        // No vault lock while the dialog is open or the key is derived (Argon2id).
-        let Some(path) = backup_export::choose_path(owner, &backup_export::default_file_name(date), "Save encrypted backup")? else {
-            return Ok(None);
-        };
-        let key = pvault::BackupKey::new(&password, kdf).map_err(|error| backup_error(error.into()))?;
-        drop(password);
-        let appearance = appearance::installed().map(|store| {
-            let stored = store.load();
-            (stored.accent, stored.surface)
-        });
-        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
-        let vault = app
-            .unlocked
-            .as_ref()
-            .ok_or("The vault locked before the backup was saved. Unlock it and try again.")?;
-        let saved = backup_export::save(vault, &path, &key, appearance).map_err(backup_error)?;
-        activity::log(
-            Level::Success,
-            Category::Vault,
-            format!("Encrypted backup saved with {} items and {} photos", saved.items, saved.photos),
-        );
-        Ok(Some(saved))
-    })
-    .await
-    .map_err(|_| "The backup stopped unexpectedly.".to_owned())?
-}
-
-fn backup_error(error: VaultError) -> String {
-    match error {
-        VaultError::Backup(pvault::BackupError::TooLarge) => "The vault is too large for one backup file.".to_owned(),
-        VaultError::Io(_) | VaultError::Backup(_) => {
-            activity::diagnostic(Category::Vault, "Encrypted backup failed", &error);
-            activity::log(Level::Warning, Category::Vault, "Encrypted backup failed");
-            "Couldn't save the backup there. Check the folder and free space, then try again.".to_owned()
-        }
-        other => {
-            activity::log(Level::Warning, Category::Vault, "Encrypted backup failed");
-            public_vault_error(other)
-        }
-    }
-}
-
 // Website icons: captured by the extension, kept on this PC only (site_icons.rs). The page
 // shows an icon from this list, or a built-in one, or the letter avatar.
 
@@ -2698,6 +2628,76 @@ fn empty_trash(state: State<'_, ManagedState>) -> Result<(), String> {
         .empty_trash().map_err(public_vault_error)?;
     activity::log(Level::Info, Category::Items, "Emptied Recently deleted");
     Ok(())
+}
+
+// Encrypted backup (backup_export.rs, pvault.rs): a .pvault file that Nuvori for Android restores.
+
+/// Checks the master password, asks where to save the file, then writes the backup, encrypted with
+/// that password. `None` when the Save dialog is cancelled. `today` is the local date for the
+/// suggested name (YYYY-MM-DD); the UTC date stands in when it is not one.
+#[tauri::command]
+async fn export_backup(
+    password: String,
+    today: String,
+    window: tauri::WebviewWindow,
+    state: State<'_, ManagedState>,
+) -> Result<Option<backup_export::Saved>, String> {
+    let owner = window.hwnd().map_err(|_| "The backup needs an app window")?.0 as isize;
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let password = Zeroizing::new(password);
+        let kdf = {
+            let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+            if app.unlocked.is_none() {
+                return Err("Unlock the vault first".to_owned());
+            }
+            app.store.verify_password(&password).map_err(|error| {
+                activity::log(Level::Warning, Category::Security, "Encrypted backup blocked: wrong password");
+                public_vault_error(error)
+            })?;
+            app.store.backup_kdf().map_err(public_vault_error)?
+        };
+        let date = backup_export::parse_date(&today).unwrap_or_else(|| time::OffsetDateTime::now_utc().date());
+        // No vault lock while the dialog is open or the key is derived (Argon2id).
+        let Some(path) = backup_export::choose_path(owner, &backup_export::default_file_name(date), "Save encrypted backup")? else {
+            return Ok(None);
+        };
+        let key = pvault::BackupKey::new(&password, kdf).map_err(|error| backup_error(error.into()))?;
+        drop(password);
+        let appearance = appearance::installed().map(|store| {
+            let stored = store.load();
+            (stored.accent, stored.surface)
+        });
+        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app
+            .unlocked
+            .as_ref()
+            .ok_or("The vault locked before the backup was saved. Unlock it and try again.")?;
+        let saved = backup_export::save(vault, &path, &key, appearance).map_err(backup_error)?;
+        activity::log(
+            Level::Success,
+            Category::Vault,
+            format!("Encrypted backup saved with {} items and {} photos", saved.items, saved.photos),
+        );
+        Ok(Some(saved))
+    })
+    .await
+    .map_err(|_| "The backup stopped unexpectedly.".to_owned())?
+}
+
+fn backup_error(error: VaultError) -> String {
+    match error {
+        VaultError::Backup(pvault::BackupError::TooLarge) => "The vault is too large for one backup file.".to_owned(),
+        VaultError::Io(_) | VaultError::Backup(_) => {
+            activity::diagnostic(Category::Vault, "Encrypted backup failed", &error);
+            activity::log(Level::Warning, Category::Vault, "Encrypted backup failed");
+            "Couldn't save the backup there. Check the folder and free space, then try again.".to_owned()
+        }
+        other => {
+            activity::log(Level::Warning, Category::Vault, "Encrypted backup failed");
+            public_vault_error(other)
+        }
+    }
 }
 
 #[tauri::command]
@@ -3137,13 +3137,13 @@ pub fn run() {
             auto_type_login,
             keepass_preview,
             keepass_import,
-            export_backup,
             previous_passwords,
             clear_previous_passwords,
             list_trash,
             restore_trashed,
             forget_trashed,
             empty_trash,
+            export_backup,
             sync_now,
             sync_status,
             configure_sync,
