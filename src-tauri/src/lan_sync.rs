@@ -578,15 +578,17 @@ pub(crate) fn remember_peer_endpoint(vault: &mut UnlockedVault, vault_id: &str, 
 #[cfg(test)]
 pub(crate) fn serve(state: &ManagedState, helper: &Path, stream: TcpStream,
     tracker: &SyncTracker) -> Result<SyncReport> {
-    serve_proved(state, helper, stream, tracker).0
+    serve_proved(state, helper, stream, tracker, None).0
 }
 
 /// [serve], and whether the connecting device proved membership (or only asked to leave), for
-/// [crate::preauth::PreAuthLimiter].
+/// [crate::preauth::PreAuthLimiter]. M7: `gate` (the sync lock) is taken only after the device
+/// proved membership, so a device outside the group never holds it; a lock that stays taken
+/// gets a busy reply after the proof, as Android 2.3.5 answers.
 pub(crate) fn serve_proved(state: &ManagedState, helper: &Path, stream: TcpStream,
-    tracker: &SyncTracker) -> (Result<SyncReport>, bool) {
+    tracker: &SyncTracker, gate: Option<&Mutex<()>>) -> (Result<SyncReport>, bool) {
     let before = tracker.state.lock().map_or(0, |state| state.generation);
-    let result = exchange_role(state, helper, tracker, true, |_| Ok(stream));
+    let result = exchange_gated(state, helper, tracker, true, |_| Ok(stream), gate);
     match result {
         Ok((report, true)) => { tracker.succeed(); (Ok(report), true) }
         Ok((_, false)) => { tracker.fail(MORE_REMAIN); (Err(MORE_REMAIN.into()), true) }
@@ -594,7 +596,8 @@ pub(crate) fn serve_proved(state: &ManagedState, helper: &Path, stream: TcpStrea
             // A nearby device outside this group must not replace the paired-device status.
             let authenticated = tracker.state.lock().is_ok_and(|state| state.generation != before);
             if authenticated { tracker.fail(&error); }
-            let proved = authenticated || error == LEAVE_ANSWERED;
+            // A server answers busy only after the proof (M7).
+            let proved = authenticated || error == LEAVE_ANSWERED || error == BUSY;
             (Err(error), proved)
         }
     }
@@ -687,6 +690,30 @@ fn exchange_role(
     server: bool,
     connect: impl FnOnce(&str) -> Result<TcpStream>,
 ) -> Result<(SyncReport, bool)> {
+    exchange_gated(state, helper, tracker, server, connect, None)
+}
+
+/// How long a device that proved membership waits for the sync lock before a busy reply (M7).
+const GATE_WAIT: Duration = Duration::from_secs(2);
+
+/// The sync lock, waiting up to [GATE_WAIT] for a pass that is finishing.
+fn wait_for_gate(gate: &Mutex<()>) -> Option<std::sync::MutexGuard<'_, ()>> {
+    let deadline = Instant::now() + GATE_WAIT;
+    loop {
+        if let Ok(guard) = gate.try_lock() { return Some(guard); }
+        if Instant::now() >= deadline { return None; }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn exchange_gated(
+    state: &ManagedState,
+    helper: &Path,
+    tracker: &SyncTracker,
+    server: bool,
+    connect: impl FnOnce(&str) -> Result<TcpStream>,
+    gate: Option<&Mutex<()>>,
+) -> Result<(SyncReport, bool)> {
     if !helper.is_file() {
         return Err("The pairing helper is missing. Rebuild or reinstall Nuvori.".into());
     }
@@ -749,6 +776,8 @@ fn exchange_role(
     let mut frames = SyncFrames::new(reader, PacedWriter { stream });
     let mut epoch_secret = crate::membership_exit::transport_epoch_secret(&secret, &vault_id, membership.key_epoch, &random)
         .ok_or("Invalid sync keys")?;
+    // Held for the rest of the session once the device proved membership (M7).
+    let mut _held = None;
     let challenge;
     if server {
         challenge = { let mut bytes = vec![0; 32]; getrandom::fill(&mut bytes).map_err(storage_error)?; bytes };
@@ -809,6 +838,13 @@ fn exchange_role(
                 }
             }
             return Err(REJECTED.into());
+        }
+        if let Some(gate) = gate {
+            let Some(guard) = wait_for_gate(gate) else {
+                frames.send(BUSY_REPLY, 4096).map_err(network_error)?;
+                return Err(BUSY.into());
+            };
+            _held = Some(guard);
         }
         frames.send(b"ok", 4096).map_err(network_error)?;
     } else {
@@ -3900,6 +3936,55 @@ mod tests {
         }
         drop(synthetic.state);
         std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M7: a connecting device proves membership before it may take the sync lock. A stranger
+    /// never holds it, and a member that proved while a pass runs gets busy after the proof.
+    #[test]
+    fn the_sync_lock_is_taken_only_after_the_membership_proof() {
+        let helper = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../pairing-helper/publish/Nuvori.PairingHelper.exe");
+        let a = synthetic_vault(1);
+        let b = synthetic_vault(0);
+        let phone = DeviceIdentity { device_id: "phone".into(),
+            public_key: SigningKey::from_bytes(&[17; 32]).verifying_key().to_bytes() };
+        let mut history = vec![signed_member(None, &phone)];
+        for device in [&a.local, &b.local] { history.push(signed_member(history.last(), device)); }
+        for device in [&a, &b] {
+            let mut app = device.state.lock().unwrap();
+            let db = app.unlocked.as_mut().unwrap().connection();
+            db.execute("DELETE FROM sync_membership_events", []).unwrap();
+            persist_membership(db, "vault-a", &[], &history, &membership::verify(&history).unwrap()).unwrap();
+        }
+        let gate = std::sync::Arc::new(Mutex::new(()));
+        // A stranger: while it stalls before the proof, the lock stays free; a wrong proof is refused.
+        let (listener, address) = loopback_pair();
+        let (server_state, server_helper, server_gate) = (b.state.clone(), helper.clone(), gate.clone());
+        let server = std::thread::spawn(move || serve_proved(&server_state, &server_helper,
+            listener.accept().unwrap().0, &SyncTracker::default(), Some(&server_gate)));
+        let stranger = TcpStream::connect(address).unwrap();
+        let mut frames = SyncFrames::new(stranger.try_clone().unwrap(), stranger);
+        assert_eq!(frames.receive(4096).unwrap().len(), 32);
+        assert!(gate.try_lock().is_ok(), "no lock before the proof");
+        frames.send(URL_SAFE_NO_PAD.encode([9u8; 32]).as_bytes(), 4096).unwrap();
+        let (result, proved) = server.join().unwrap();
+        assert_eq!((result.unwrap_err(), proved), (REJECTED.to_owned(), false));
+        // A member while this PC's own pass holds the lock: busy after the proof, counted as proved.
+        let held = gate.lock().unwrap();
+        let (listener, address) = loopback_pair();
+        let (server_state, server_helper, server_gate) = (b.state.clone(), helper.clone(), gate.clone());
+        let server = std::thread::spawn(move || serve_proved(&server_state, &server_helper,
+            listener.accept().unwrap().0, &SyncTracker::default(), Some(&server_gate)));
+        let error = exchange(&a.state, &helper, &SyncTracker::default(),
+            |_| TcpStream::connect(address).map_err(network_error)).unwrap_err();
+        assert_eq!(error, BUSY);
+        let (result, proved) = server.join().unwrap();
+        assert_eq!((result.unwrap_err(), proved), (BUSY.to_owned(), true));
+        drop(held);
+        for device in [a, b] {
+            drop(device.state);
+            std::fs::remove_dir_all(device.directory).unwrap();
+        }
     }
 
     #[test]

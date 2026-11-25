@@ -1148,14 +1148,23 @@ fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync
         };
         let Some(stream) = stream else { continue; };
         let Ok(source) = stream.peer_addr().map(|address| address.ip()) else { continue; };
-        if !limiter.lock().is_ok_and(|mut limiter| limiter.allow(source, Instant::now())) { drop(stream); continue; }
-        if pairing.is_active().unwrap_or(true) || sync.gate.try_lock().is_err() { lan_sync::reply_busy(stream); continue; }
-        // The session runs on its own thread so this loop keeps accepting: a second device that
-        // connects meanwhile gets a busy reply at once instead of waiting for its timeout.
+        let admit = limiter.lock().map_or(preauth::Admit::Blocked, |mut limiter| limiter.try_start(source, Instant::now()));
+        match admit {
+            preauth::Admit::Start => {}
+            preauth::Admit::Full => { lan_sync::reply_busy(stream); continue; }
+            preauth::Admit::Blocked => { drop(stream); continue; }
+        }
+        if pairing.is_active().unwrap_or(true) {
+            if let Ok(mut limiter) = limiter.lock() { limiter.release(source); }
+            lan_sync::reply_busy(stream);
+            continue;
+        }
+        // The session runs on its own thread so this loop keeps accepting. M7: the device proves
+        // membership first and only then takes the sync lock (`serve_proved`), so a device outside
+        // the group can't hold sync, Google Drive or this PC's own passes.
         let (state, pairing, sync, limiter) = (state.clone(), pairing.clone(), sync.clone(), limiter.clone());
         thread::spawn(move || {
-            let Ok(_guard) = sync.gate.try_lock() else { lan_sync::reply_busy(stream); return; };
-            let (result, proved) = lan_sync::serve_proved(&state, &pairing.helper_path, stream, &sync.tracker);
+            let (result, proved) = lan_sync::serve_proved(&state, &pairing.helper_path, stream, &sync.tracker, Some(&sync.gate));
             if let Ok(mut limiter) = limiter.lock() { limiter.finish(source, proved, Instant::now()); }
             if let Ok(report) = result {
                 if let Ok(mut message) = sync.message.lock() {
