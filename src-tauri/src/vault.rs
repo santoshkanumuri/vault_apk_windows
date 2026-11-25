@@ -188,6 +188,15 @@ impl VaultStore {
         Ok(())
     }
 
+    /// The Argon2id settings of the vault key file, timed on this PC. An encrypted backup made here
+    /// uses them too, as Android's export uses its vault's (`vaultKdf`), so a guess at the backup
+    /// costs as much as a guess at the vault.
+    pub fn backup_kdf(&self) -> Result<crate::pvault::Kdf, VaultError> {
+        let bootstrap: VaultBootstrap = serde_json::from_slice(&fs::read(self.directory.join(BOOTSTRAP_FILE))?)?;
+        let kdf = bootstrap.kdf_params()?;
+        Ok(crate::pvault::Kdf { memory_kib: kdf.memory_kib, iterations: kdf.iterations, parallelism: kdf.parallelism })
+    }
+
     /// When the vault was last changed, in Unix milliseconds: the newest write time of its
     /// database and key files. Reads file times only, never the files.
     pub fn last_used_millis(&self) -> Option<i64> {
@@ -1589,6 +1598,100 @@ impl UnlockedVault {
             })
         })
         .collect()
+    }
+
+    /// What an encrypted backup holds (pvault.rs): items and notes as Android's entry JSON, folders
+    /// and their links, photo details and passkeys. A note is its stored sync entry with the text,
+    /// formatting and times it has on this PC, as `write_note_change` writes it.
+    pub(crate) fn backup_contents(&self, appearance: Option<(String, String)>) -> Result<crate::pvault::Contents, VaultError> {
+        let vault_id: String = self
+            .connection
+            .query_row("SELECT vault_id FROM local_sync_settings WHERE id = 1", [], |row| row.get(0))?;
+        let mut entries = Vec::new();
+        {
+            let mut statement = self.connection.prepare("SELECT data_json FROM local_entries ORDER BY id")?;
+            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                let json = Zeroizing::new(row?);
+                entries.push(serde_json::from_str::<serde_json::Value>(&json)?);
+            }
+        }
+        {
+            let mut statement = self.connection.prepare(
+                "SELECT n.id, n.title, n.body, n.created_at, n.updated_at, d.data_json
+                 FROM local_notes n LEFT JOIN local_note_details d ON d.id = n.id ORDER BY n.id",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    LocalNote {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        body: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                        group_ids: Vec::new(),
+                        rich: String::new(),
+                    },
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })?;
+            for row in rows {
+                let (mut note, details) = row?;
+                note.rich = rich_from_details(details.as_deref());
+                let mut entry = match details {
+                    Some(json) => serde_json::from_str::<serde_json::Value>(&Zeroizing::new(json))?,
+                    None => note_sync_json(&note),
+                };
+                if !entry.is_object() {
+                    return Err(VaultError::InvalidNote);
+                }
+                entry["id"] = note.id.clone().into();
+                entry["type"] = "NOTE".into();
+                entry["title"] = note.title.clone().into();
+                entry["notes"] = note.body.clone().into();
+                entry["fourthValue"] = note.rich.clone().into();
+                entry["createdAt"] = note.created_at.into();
+                entry["updatedAt"] = note.updated_at.into();
+                entries.push(entry);
+            }
+        }
+        let groups = self
+            .connection
+            .prepare("SELECT id, name, notes, folder_type FROM local_groups ORDER BY id")?
+            .query_map([], |row| {
+                Ok(crate::pvault::Group { id: row.get(0)?, name: row.get(1)?, notes: row.get(2)?, folder_type: row.get(3)? })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let links = self
+            .connection
+            .prepare("SELECT entry_id, group_id FROM entry_groups ORDER BY entry_id, group_id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let photos = self
+            .connection
+            .prepare("SELECT id, entry_id, is_cover, added_at FROM local_entry_photos ORDER BY entry_id, is_cover DESC, added_at, id")?
+            .query_map([], |row| {
+                Ok(crate::pvault::Photo { id: row.get(0)?, entry_id: row.get(1)?, is_cover: row.get(2)?, added_at: row.get(3)? })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut passkeys = Vec::new();
+        {
+            let mut statement = self.connection.prepare("SELECT data_json FROM local_passkeys ORDER BY rp_id, id")?;
+            for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                let json = Zeroizing::new(row?);
+                passkeys.push(serde_json::from_str::<serde_json::Value>(&json)?);
+            }
+        }
+        Ok(crate::pvault::Contents { vault_id, entries, groups, links, photos, passkeys, appearance })
+    }
+
+    /// One photo's image bytes, for an encrypted backup.
+    pub(crate) fn backup_photo(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+        let bytes: Vec<u8> = self
+            .connection
+            .query_row("SELECT data FROM local_entry_photos WHERE id = ?1", [id], |row| row.get(0))
+            .optional()?
+            .ok_or(VaultError::PhotoNotFound)?;
+        Ok(Zeroizing::new(bytes))
     }
 
     /// Every passkey with its key material, for the Windows passkey provider. Never sent to the UI.
@@ -3025,6 +3128,8 @@ pub enum VaultError {
     Json(#[from] serde_json::Error),
     #[error("vault metadata encoding failed: {0}")]
     Base64(#[from] base64::DecodeError),
+    #[error("encrypted backup failed: {0}")]
+    Backup(#[from] crate::pvault::BackupError),
     #[error("password must have at least 12 characters")]
     PasswordTooShort,
     #[error("vault already exists")]

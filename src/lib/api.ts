@@ -60,6 +60,9 @@ export type KeepassSummary = {
   codesSkipped: number;
 };
 
+/** An encrypted backup saved by export_backup: the file's name and what it holds. */
+export type BackupSaved = { fileName: string; items: number; photos: number };
+
 /** A login's earlier password, kept on this PC only (newest first, up to 10). */
 export type PreviousPassword = { password: string; replacedAt: number };
 
@@ -361,6 +364,8 @@ export const api = {
   /** Opens a KeePass file (base64) in memory and lists what an import would add. */
   keepassPreview: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_preview", { data, password, keyFile }),
   keepassImport: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_import", { data, password, keyFile }),
+  /** Checks the master password, asks where to save, then writes a .pvault backup encrypted with it. `null` when the Save dialog is cancelled. `today` is the local date, YYYY-MM-DD, for the file name. */
+  exportBackup: (password: string, today: string) => call<BackupSaved | null>("export_backup", { password, today }),
   previousPasswords: (entryId: string) => call<PreviousPassword[]>("previous_passwords", { entryId }),
   clearPreviousPasswords: (entryId: string) => call<void>("clear_previous_passwords", { entryId }),
   siteIcons: () => call<SiteIconsState>("site_icons"),

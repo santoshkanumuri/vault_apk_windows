@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
+import { Activity, ArchiveRestore, Clipboard, DatabaseBackup, CornerDownLeft, Globe, FileKey, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
 import { KeepassImportDialog } from "./KeepassImport";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
@@ -100,6 +100,7 @@ export function SettingsPage({ section }: { section?: string }) {
       </SettingsGroup>
 
       <SettingsGroup title={strings.yourData} id="settings-data">
+        <BackupRow />
         <SettingsRow icon={FileKey} title={strings.importFromKeepass} description={strings.loginsCodesAndNotesFromA} onClick={() => setKeepass(true)} />
         <SettingsRow icon={ArchiveRestore} title={strings.recentlyDeleted} description={strings.restoreItemsDeletedInTheLast2} onClick={() => void router.navigate({ page: "trash" })} />
       </SettingsGroup>
@@ -116,6 +117,59 @@ export function SettingsPage({ section }: { section?: string }) {
 
       <DangerZone />
     </div>
+  );
+}
+
+/** The local date, "2026-11-05", for the backup's suggested file name. */
+function localDate(now = new Date()) {
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+}
+
+/** Export encrypted backup (backup_export.rs): a .pvault file that Nuvori for Android restores. */
+function BackupRow() {
+  const toast = useToast();
+  const [dialog, setDialog] = useState(false);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const close = () => { setDialog(false); setPassword(""); setError(""); };
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!password) { setError("Enter your master password."); return; }
+    setBusy(true); setError("");
+    try {
+      const saved = await api.exportBackup(password, localDate());
+      setPassword("");
+      if (!saved) return;
+      setDialog(false);
+      toast.success(`Backup saved as ${saved.fileName}`);
+    } catch (failure) {
+      setPassword("");
+      setError(humanError(failure, "Couldn't create the backup."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <SettingsRow icon={DatabaseBackup} title={strings.exportEncryptedBackup} description={strings.saveYourVaultToAPvault} onClick={() => { setError(""); setDialog(true); }} />
+      <Dialog open={dialog} onClose={close} title={strings.protectBackup} locked={busy}
+        description={strings.thisBackupWillAlwaysRequireThe}
+        footer={<>
+          <Button variant="ghost" onClick={close} disabled={busy}>{strings.cancel}</Button>
+          <Button variant="primary" type="submit" form="backup-form" icon={DatabaseBackup} busy={busy}>{strings.saveBackup}</Button>
+        </>}>
+        <form id="backup-form" className="form-stack" onSubmit={(event) => void save(event)}>
+          {error && <StatusBanner kind="error">{error}</StatusBanner>}
+          <PasswordField label={strings.currentMasterPassword} value={password} onValue={setPassword} autoComplete="current-password" capsLockWarning disabled={busy} data-autofocus />
+          <p className="field-hint">{strings.aCloudFolderMayUploadThe}</p>
+        </form>
+      </Dialog>
+    </>
   );
 }
 
