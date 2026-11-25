@@ -1533,12 +1533,44 @@ fn receive_batch<R: Read, W: Write>(
     Ok(count)
 }
 
+/// The name a paired device gave itself, for messages; "a paired device" when it has none yet.
+pub(crate) fn device_name(db: &Connection, device_id: &str) -> String {
+    db.query_row("SELECT member_json FROM sync_memberships WHERE device_id = ?1", [device_id], |row| row.get::<_, String>(0))
+        .optional()
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str::<SnapshotMember>(&json).ok())
+        .map(|member| member.display_name)
+        .filter(|name| !name.trim().is_empty() && name != "Paired device")
+        .unwrap_or_else(|| "a paired device".to_owned())
+}
+
+/// `text` with its first letter in upper case, for a device name that starts a sentence.
+fn sentence_start(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
+}
+
+/// "this PC" for the local device, otherwise its name.
+fn author_label(db: &Connection, author: &str, local_id: &str) -> String {
+    if author == local_id { "this PC".to_owned() } else { device_name(db, author) }
+}
+
+/// Checks a peer's progress report and saves it. `live`: the report came in a Wi-Fi session now.
+///
+/// H2 (shared rule with Android): a live report whose received head for an author is lower than
+/// the one saved, with a hash that matches where this PC still holds that change, means the peer
+/// lost ground (it set a change aside, or restored older data). It is accepted, logged and saved,
+/// and the changes it lacks are sent again from the lower head. A different hash at the same
+/// sequence is still refused. A Google Drive `p.` file can be older than a report this PC already
+/// got over Wi-Fi, so a lower head from Drive is still refused there (the file is skipped).
 fn validate_peer_progress(
     db: &mut Connection,
     id: &str,
     local_id: &str,
     peer: &str,
     progress: &SyncProgress,
+    live: bool,
 ) -> Result<()> {
     progress.validate().map_err(storage_error)?;
     let tx = db.transaction().map_err(storage_error)?;
@@ -1560,8 +1592,17 @@ fn validate_peer_progress(
     for (author, (seq, _)) in &progress.received {
         let old: Option<i64> = tx.query_row("SELECT sequence FROM sync_peer_acknowledgements WHERE vault_id = ?1 AND peer_device_id = ?2 AND source_device_id = ?3", params![id, peer, author], |r| r.get(0)).optional().map_err(storage_error)?;
         let sequence = integer(*seq)?;
-        if old.is_some_and(|old| old > sequence) {
-            return Err("Peer progress moved backward".into());
+        if let Some(old) = old.filter(|old| *old > sequence) {
+            if !live {
+                return Err("Peer progress moved backward".into());
+            }
+            crate::activity::global().record_coalesced(
+                crate::activity::Level::Warning,
+                crate::activity::Category::Sync,
+                format!("{} now has {} fewer changes from {} than it reported before. They are sent again",
+                    sentence_start(&device_name(&tx, peer)), old - sequence, author_label(&tx, author, local_id)),
+                Duration::from_secs(15 * 60),
+            );
         }
         tx.execute("INSERT INTO sync_peer_acknowledgements (vault_id, peer_device_id, source_device_id, sequence, acknowledged_at_utc) VALUES (?1, ?2, ?3, ?4, '') ON CONFLICT(vault_id, peer_device_id, source_device_id) DO UPDATE SET sequence = excluded.sequence", params![id, peer, author, sequence]).map_err(storage_error)?;
     }
@@ -1682,7 +1723,7 @@ fn send_batch<R: Read, W: Write>(
     tracker.set_phase(Phase::Sending);
     let (pending, remaining) = with_vault(state, &membership.vault_id, &membership.head, |vault| {
         let db = vault.connection();
-        validate_peer_progress(db, &membership.vault_id, local, peer, &progress)?;
+        validate_peer_progress(db, &membership.vault_id, local, peer, &progress, true)?;
         // Waiting for new keys (H1): nothing leaves this PC until they arrive.
         let events = read_membership(db, &membership.vault_id)?;
         if crate::epoch_keys::stranded(db, &events, membership, local).map_err(storage_error)? {
@@ -2218,7 +2259,7 @@ mod tests {
             received: heads.received.clone(),
             applied: BTreeMap::from([("phone".into(), (1, "a".repeat(64)))]),
         };
-        assert!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged).is_err());
+        assert!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged, true).is_err());
     }
 
     #[test]
@@ -2716,8 +2757,46 @@ mod tests {
             received: BTreeMap::from([(author.clone(), (sequence, hash.to_owned()))]),
             applied: BTreeMap::from([(author.clone(), (sequence, hash.to_owned()))]),
         };
-        validate_peer_progress(db, "vault-a", &author, "phone", &report(3, &all[2].hash)).unwrap();
-        assert!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64))).is_err());
+        validate_peer_progress(db, "vault-a", &author, "phone", &report(3, &all[2].hash), true).unwrap();
+        assert!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64)), true).is_err());
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// H2 (audit R10): a peer that set a change aside reports a lower received head for this PC.
+    /// Over Wi-Fi that is lost ground: accepted, saved, and the changes go again. A different hash at
+    /// the same place is still refused, and an older Google Drive report is still skipped.
+    #[test]
+    fn a_live_peer_that_lost_ground_is_accepted_and_resent_but_a_fork_is_not() {
+        let synthetic = synthetic_vault(3);
+        let local = synthetic.local.device_id.clone();
+        let mut app = synthetic.state.lock().unwrap();
+        let db = app.unlocked.as_mut().unwrap().connection();
+        let hash = |sequence: u64| -> String {
+            db.query_row("SELECT hash FROM sync_operations WHERE device_id = ?1 AND sequence = ?2",
+                params![local, sequence as i64], |r| r.get(0)).unwrap()
+        };
+        let (h1, h3) = (hash(1), hash(3));
+        let report = |sequence: u64, hash: &str| SyncProgress {
+            received: BTreeMap::from([(local.clone(), (sequence, hash.to_owned()))]),
+            applied: BTreeMap::from([(local.clone(), (sequence, hash.to_owned()))]),
+        };
+        validate_peer_progress(db, "vault-a", &local, "phone", &report(3, &h3), true).expect("first report");
+        for _ in 0..3 {
+            validate_peer_progress(db, "vault-a", &local, "phone", &report(1, &h1), true).expect("lost ground is accepted every time");
+        }
+        let saved: i64 = db.query_row("SELECT sequence FROM sync_peer_acknowledgements WHERE peer_device_id = 'phone' AND source_device_id = ?1",
+            [&local], |r| r.get(0)).unwrap();
+        assert_eq!(saved, 1, "the lower head replaces the saved one");
+        let (resend, remaining) = pending_operations(db, "vault-a", &report(1, &h1).received, 100, usize::MAX, &|_| Some(u64::MAX)).unwrap();
+        assert_eq!((resend.iter().map(|(op, _)| op.sequence).collect::<Vec<_>>(), remaining), (vec![2, 3], 2), "the lost changes go again");
+        // The same place with another hash is a fork: refused, and nothing is saved.
+        assert_eq!(validate_peer_progress(db, "vault-a", &local, "phone", &report(1, &"e".repeat(64)), true).unwrap_err(),
+            "Peer reported a conflicting change head");
+        // A Drive report older than the saved one is skipped, as Android skips a stale `p.` file.
+        validate_peer_progress(db, "vault-a", &local, "pc-2", &report(3, &h3), false).unwrap();
+        assert_eq!(validate_peer_progress(db, "vault-a", &local, "pc-2", &report(1, &h1), false).unwrap_err(), "Peer progress moved backward");
         drop(app);
         drop(synthetic.state);
         std::fs::remove_dir_all(synthetic.directory).unwrap();

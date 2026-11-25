@@ -1105,7 +1105,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             if let Some(features) = features {
                 crate::appearance::record_peer_features(db, &context.vault_id, peer, features).map_err(storage_error)?;
             }
-            validate_peer_progress(db, &context.vault_id, &context.local.device_id, peer, peer_progress)
+            validate_peer_progress(db, &context.vault_id, &context.local.device_id, peer, peer_progress, false)
         });
     }
 
