@@ -2428,9 +2428,19 @@ async fn switch_master_password(password: String, app_handle: AppHandle, state: 
             let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
             vault.master_password_switch().cloned().ok_or(NO_MASTER_PASSWORD_SWITCH)?
         };
+        let wait = master_password::SWITCH_THROTTLE.lock().map_err(|_| "Vault state is unavailable")?.wait(Instant::now());
+        if !wait.is_zero() {
+            return Err(format!("Too many wrong passwords. Try again in {}.", master_password::describe_wait(wait)));
+        }
         if !pending.matches(&password) {
+            if let Ok(mut throttle) = master_password::SWITCH_THROTTLE.lock() {
+                throttle.failed(Instant::now());
+            }
             activity::log(Level::Warning, Category::Security, "Master password switch: the password didn't match the phone's");
             return Err(SWITCH_PASSWORD_WRONG.to_owned());
+        }
+        if let Ok(mut throttle) = master_password::SWITCH_THROTTLE.lock() {
+            throttle.succeeded();
         }
         // Held for the rewrap (two Argon2id runs), so a lock and unlock can't read the key file in between.
         let mut guard = state.lock().map_err(|_| "Vault state is unavailable")?;

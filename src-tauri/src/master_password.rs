@@ -254,6 +254,58 @@ pub fn added_at(steps: &[(Step, &str)], device_id: &str) -> Option<u64> {
         .max()
 }
 
+/// Wrong passwords at the switch wait as Android's unlock and switch do: the first
+/// `SWITCH_FREE_ATTEMPTS` are free, then each failure waits twice as long as the one before, from 30
+/// seconds up to 15 minutes. So the check can't be guessed quickly from an open PC. Kept in memory: a
+/// restart locks the vault, and opening it again needs this PC's password or Windows Hello.
+#[derive(Debug, Default)]
+pub struct SwitchThrottle {
+    failures: u32,
+    last_failure: Option<std::time::Instant>,
+}
+
+pub const SWITCH_FREE_ATTEMPTS: u32 = 5;
+const SWITCH_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+impl SwitchThrottle {
+    pub const fn new() -> Self {
+        Self { failures: 0, last_failure: None }
+    }
+
+    /// How long to wait before the next try.
+    pub fn wait(&self, now: std::time::Instant) -> std::time::Duration {
+        if self.failures < SWITCH_FREE_ATTEMPTS {
+            return std::time::Duration::ZERO;
+        }
+        let step = (self.failures - SWITCH_FREE_ATTEMPTS).min(10);
+        let delay = (std::time::Duration::from_secs(30) * (1_u32 << step)).min(SWITCH_MAX_WAIT);
+        let elapsed = self.last_failure.map_or(std::time::Duration::ZERO, |at| now.saturating_duration_since(at));
+        delay.saturating_sub(elapsed)
+    }
+
+    pub fn failed(&mut self, now: std::time::Instant) {
+        self.failures = self.failures.saturating_add(1).min(1000);
+        self.last_failure = Some(now);
+    }
+
+    pub fn succeeded(&mut self) {
+        *self = Self::new();
+    }
+}
+
+/// "45 seconds", "1 minute", "15 minutes": a wait rounded up.
+pub fn describe_wait(wait: std::time::Duration) -> String {
+    let seconds = wait.as_millis().div_ceil(1000).max(1);
+    if seconds < 60 {
+        return if seconds == 1 { "1 second".to_owned() } else { format!("{seconds} seconds") };
+    }
+    let minutes = seconds.div_ceil(60);
+    if minutes == 1 { "1 minute".to_owned() } else { format!("{minutes} minutes") }
+}
+
+/// This PC's switch tries, for `switch_master_password`.
+pub static SWITCH_THROTTLE: std::sync::Mutex<SwitchThrottle> = std::sync::Mutex::new(SwitchThrottle::new());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +459,31 @@ mod tests {
         };
         assert!(pending.matches(text(&case["password"])));
         assert!(!pending.matches("not the password"));
+    }
+
+    #[test]
+    fn wrong_switch_passwords_wait_longer_after_five() {
+        let start = std::time::Instant::now();
+        let mut throttle = SwitchThrottle::new();
+        for _ in 0..SWITCH_FREE_ATTEMPTS - 1 {
+            throttle.failed(start);
+            assert_eq!(throttle.wait(start), std::time::Duration::ZERO);
+        }
+        throttle.failed(start);
+        assert_eq!(throttle.wait(start), std::time::Duration::from_secs(30));
+        assert_eq!(throttle.wait(start + std::time::Duration::from_secs(20)), std::time::Duration::from_secs(10));
+        assert_eq!(throttle.wait(start + std::time::Duration::from_secs(31)), std::time::Duration::ZERO);
+        throttle.failed(start);
+        assert_eq!(throttle.wait(start), std::time::Duration::from_secs(60));
+        for _ in 0..20 {
+            throttle.failed(start);
+        }
+        assert_eq!(throttle.wait(start), SWITCH_MAX_WAIT);
+        throttle.succeeded();
+        assert_eq!(throttle.wait(start), std::time::Duration::ZERO);
+        assert_eq!(describe_wait(std::time::Duration::from_millis(1)), "1 second");
+        assert_eq!(describe_wait(std::time::Duration::from_secs(30)), "30 seconds");
+        assert_eq!(describe_wait(std::time::Duration::from_secs(61)), "2 minutes");
+        assert_eq!(describe_wait(SWITCH_MAX_WAIT), "15 minutes");
     }
 }
