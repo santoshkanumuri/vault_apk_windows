@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, FileUp, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
 import { KeepassImportDialog } from "./KeepassImport";
 import { PasswordImportDialog } from "./PasswordImport";
+import { passwordImportText } from "../strings";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
@@ -22,7 +23,7 @@ import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildSt
 import { humanError } from "../lib/errors";
 import { relativeTime } from "../lib/format";
 import { browserIndicator, syncIndicator } from "../lib/syncState";
-import { passwordImportText, strings } from "../strings";
+import { strings } from "../strings";
 
 
 export function SettingsPage({ section }: { section?: string }) {
