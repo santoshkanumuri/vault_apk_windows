@@ -850,11 +850,6 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             }
         }
     }
-    if report.received > 0 {
-        tracker.set_phase(Phase::Applying);
-        with_vault(state, &context.vault_id, &membership.head, |vault| apply_waiting(vault, &context.vault_id, &context.content_key))?;
-    }
-
     // Floor markers (`compaction.rs` `drive`), counted only at or below this PC's own floor(A).
     let own_floors = with_vault(state, &context.vault_id, &membership.head, |vault| {
         crate::compaction::own_floors(vault.connection(), &context.vault_id, &context.local.device_id, &membership).map_err(storage_error)
@@ -940,6 +935,13 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                 tracker.sent_one();
             }
         }
+    }
+
+    // Received changes apply after the uploads (M3), so nothing about one received change can keep
+    // this PC's own changes off the drive.
+    if report.received > 0 {
+        tracker.set_phase(Phase::Applying);
+        with_vault(state, &context.vault_id, &membership.head, |vault| apply_waiting(vault, &context.vault_id, &context.content_key))?;
     }
 
     // 5. Photo blobs. A blob is already ciphertext and its name is its hash, so it needs no envelope.

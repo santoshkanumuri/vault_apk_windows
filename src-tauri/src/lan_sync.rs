@@ -125,6 +125,18 @@ pub struct SyncStatus {
     pub drive_check_seconds: u64,
     /// One pass over Wi-Fi and Google Drive each time Nuvori opens, also with automatic sync off.
     pub sync_on_open: bool,
+    /// Part of `waiting_to_apply`: changes of a kind this version doesn't know, per device that made
+    /// them. They apply after Nuvori is updated on this PC (M4).
+    pub needs_update: Vec<NeedsUpdate>,
+}
+
+/// Changes from one device that wait for a newer Nuvori on this PC.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NeedsUpdate {
+    pub device_id: String,
+    pub name: String,
+    pub count: usize,
 }
 
 /// Wi-Fi check intervals offered on the Sync page; the same choices as the phone.
@@ -465,6 +477,9 @@ pub(crate) fn status(vault: &mut UnlockedVault) -> Result<SyncStatus> {
         wifi_check_seconds: schedule(db).wifi_seconds,
         drive_check_seconds: schedule(db).drive_seconds,
         sync_on_open: sync_on_open(db),
+        needs_update: needs_update(db, &id).into_iter()
+            .map(|(device_id, count)| NeedsUpdate { name: device_name(db, &device_id), device_id, count })
+            .collect(),
     })
 }
 
@@ -1362,17 +1377,57 @@ fn set_aside_count(db: &Connection, id: &str) -> usize {
     .map_or(0, |count| count as usize)
 }
 
+/// Received changes of a kind this version of Nuvori does not know (a newer device made them). They
+/// wait, counted as received, until an update can apply them: the rule shared with Android (M4).
+const NEEDS_UPDATE_SCHEMA: &str =
+    "CREATE TABLE IF NOT EXISTS sync_needs_update_operations (mutation_id TEXT NOT NULL PRIMARY KEY)";
+
+/// Entity types this version applies. Anything else waits for an update ([NEEDS_UPDATE_SCHEMA]).
+fn known_entity_type(entity_type: &str) -> bool {
+    matches!(entity_type, "entry" | "group" | "passkey" | "photo" | "photo_cover" | "device_name")
+        || entity_type == crate::appearance::ENTITY_TYPE
+        || entity_type == crate::site_icon_sync::ENTITY_TYPE
+        || entity_type == crate::sign_in_sync::ENTITY_TYPE
+}
+
+/// Waiting changes that need a newer Nuvori on this PC, per author: `(author, count)`.
+pub(crate) fn needs_update(db: &Connection, id: &str) -> Vec<(String, usize)> {
+    let Ok(mut query) = db.prepare(
+        "SELECT o.device_id, count(*) FROM sync_needs_update_operations u CROSS JOIN sync_operations o ON o.mutation_id = u.mutation_id
+         WHERE o.vault_id = ?1 AND NOT EXISTS (SELECT 1 FROM sync_applied_operations a WHERE a.mutation_id = u.mutation_id)
+         GROUP BY o.device_id ORDER BY o.device_id",
+    ) else {
+        return Vec::new();
+    };
+    query
+        .query_map([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)? as usize)))
+        .and_then(|rows| rows.collect())
+        .unwrap_or_default()
+}
+
+/// Applies every received change that can apply now. A change that waits for something (its
+/// group, its photo, a key, an update of this PC) stays waiting. A change that fails for any
+/// other reason is set aside and retried on each pass, and the rest still apply (M3): one bad
+/// change never stops the others, or the pass. Only a storage failure returns an error.
 fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> {
     let blobs = vault.photo_blobs();
     let db = vault.connection();
     db.execute_batch(SET_ASIDE_SCHEMA).map_err(storage_error)?;
+    db.execute_batch(NEEDS_UPDATE_SCHEMA).map_err(storage_error)?;
     loop {
         let mut advanced = false;
         for operation in waiting(db, id)? {
             match IncomingApply::apply_with_blobs(db, &operation, key, Some(&blobs)) {
                 Ok(_) => {
                     advanced = true;
-                    db.execute("DELETE FROM sync_set_aside_operations WHERE mutation_id = ?1", [&operation.mutation_id])
+                    for table in ["sync_set_aside_operations", "sync_needs_update_operations"] {
+                        db.execute(&format!("DELETE FROM {table} WHERE mutation_id = ?1"), [&operation.mutation_id])
+                            .map_err(storage_error)?;
+                    }
+                }
+                // A kind of change this version does not know: it waits for an update (M4).
+                Err(ApplyError::UnsupportedEntity) if !known_entity_type(&operation.entity_type) => {
+                    db.execute("INSERT OR IGNORE INTO sync_needs_update_operations (mutation_id) VALUES (?1)", [&operation.mutation_id])
                         .map_err(storage_error)?;
                 }
                 Err(
@@ -1406,13 +1461,39 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
                     Duration::from_secs(15 * 60),
                     );
                 }
-                Err(_) => return Err("Received changes are saved, but one could not be applied. Existing items are kept.".into()),
+                // Anything else (a database rule, a record in an unexpected state) is set aside too
+                // and tried again on each pass. It used to stop every other change from applying,
+                // end the Wi-Fi session and stop the Google Drive pass before its uploads (M3).
+                Err(error) => {
+                    let new = db.execute("INSERT OR IGNORE INTO sync_set_aside_operations (mutation_id) VALUES (?1)", [&operation.mutation_id])
+                        .map_err(storage_error)?;
+                    if new > 0 {
+                        crate::activity::diagnostic(crate::activity::Category::Sync, "A received change could not be applied", &error);
+                        crate::activity::global().record_coalesced(
+                            crate::activity::Level::Warning,
+                            crate::activity::Category::Sync,
+                            format!("A change from {} could not be applied and was set aside. Other changes still sync, and it is tried again on each sync",
+                                device_name(db, &operation.device_id)),
+                            Duration::from_secs(15 * 60),
+                        );
+                    }
+                }
             }
         }
         if !advanced {
-            return Ok(());
+            break;
         }
     }
+    for (author, count) in needs_update(db, id) {
+        crate::activity::global().record_coalesced(
+            crate::activity::Level::Warning,
+            crate::activity::Category::Sync,
+            format!("{} {} from {} need a newer version of Nuvori on this PC. Update Nuvori to apply them",
+                count, if count == 1 { "change" } else { "changes" }, device_name(db, &author)),
+            Duration::from_secs(6 * 60 * 60),
+        );
+    }
+    Ok(())
 }
 
 /// Verifies one received change against its author's signed chain and commits it. Wi-Fi sync
@@ -2764,6 +2845,74 @@ mod tests {
         std::fs::remove_dir_all(synthetic.directory).unwrap();
     }
 
+    /// M3: one change that fails in an unexpected way (here a database rule) is set aside and the
+    /// others still apply. It used to stop every change after it and end the session. It applies
+    /// once the cause is gone.
+    #[test]
+    fn an_unexpected_apply_error_sets_one_change_aside_and_the_rest_apply() {
+        let synthetic = synthetic_vault(0);
+        let version = RecordVersion::from_entries([("phone", 1)]);
+        let mut previous = GENESIS_HASH.to_owned();
+        let mut chain = Vec::new();
+        for id in ["login-a", "login-b", "login-c"] {
+            let change = phone_op(chain.len() as u64 + 1, &previous, "entry", id, version.clone(), 0,
+                serde_json::json!({"entry": login_entry(id, id), "groupIds": []}));
+            previous = change.hash.clone();
+            chain.push(change);
+        }
+        stage(&synthetic, &chain);
+        let mut app = synthetic.state.lock().unwrap();
+        let vault = app.unlocked.as_mut().unwrap();
+        vault.connection().execute_batch(&format!(
+            "CREATE TEMP TRIGGER refuse_b BEFORE INSERT ON main.sync_applied_operations WHEN NEW.mutation_id = '{}'
+             BEGIN SELECT RAISE(ABORT, 'refused for the test'); END;", chain[1].mutation_id)).unwrap();
+        apply_waiting(vault, "vault-a", &[4; 32]).expect("one bad change no longer fails the whole apply");
+        let mut titles: Vec<String> = vault.list_entries().unwrap().into_iter().map(|entry| entry["title"].as_str().unwrap().to_owned()).collect();
+        titles.sort();
+        assert_eq!(titles, ["login-a", "login-c"]);
+        let db = vault.connection();
+        assert_eq!((waiting(db, "vault-a").unwrap().len(), set_aside_count(db, "vault-a")), (1, 1));
+        assert_eq!(progress(db, "vault-a").unwrap().applied["phone"].0, 1, "the applied head stops before the change set aside");
+        assert_eq!(progress(db, "vault-a").unwrap().received["phone"].0, 3, "it still counts as received");
+        db.execute_batch("DROP TRIGGER refuse_b").unwrap();
+        apply_waiting(vault, "vault-a", &[4; 32]).unwrap();
+        let db = vault.connection();
+        assert_eq!((waiting(db, "vault-a").unwrap().len(), set_aside_count(db, "vault-a")), (0, 0), "it applies on the next try");
+        assert_eq!(vault.list_entries().unwrap().len(), 3);
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M4: a kind of change this version doesn't know waits (never set aside), counts as received,
+    /// and the sync status names the device and the count. The changes after it still apply.
+    #[test]
+    fn an_unknown_change_type_waits_for_an_update_and_is_shown_by_device() {
+        let synthetic = synthetic_vault(0);
+        let version = RecordVersion::from_entries([("phone", 1)]);
+        let future = phone_op(1, GENESIS_HASH, "calendar_event", "event-1", version.clone(), 0, serde_json::json!({"event": {"id": "event-1"}}));
+        let login = phone_op(2, &future.hash, "entry", "login-a", version, 0,
+            serde_json::json!({"entry": login_entry("login-a", "After the unknown change"), "groupIds": []}));
+        stage(&synthetic, &[future, login]);
+        let mut app = synthetic.state.lock().unwrap();
+        let vault = app.unlocked.as_mut().unwrap();
+        apply_waiting(vault, "vault-a", &[4; 32]).unwrap();
+        assert_eq!(vault.list_entries().unwrap().len(), 1, "later changes still apply");
+        let db = vault.connection();
+        assert_eq!(set_aside_count(db, "vault-a"), 0, "an unknown type is never set aside");
+        assert_eq!(needs_update(db, "vault-a"), vec![("phone".to_owned(), 1)]);
+        let heads = progress(db, "vault-a").unwrap();
+        assert_eq!((heads.received["phone"].0, heads.applied["phone"].0), (2, 0), "counted as received, not as applied");
+        drop(app);
+        let mut app = synthetic.state.lock().unwrap();
+        let status = status(app.unlocked.as_mut().unwrap()).unwrap();
+        assert_eq!(status.needs_update, vec![NeedsUpdate { device_id: "phone".into(), name: "a paired device".into(), count: 1 }]);
+        assert_eq!(status.waiting_to_apply, 1);
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
     /// H2 (audit R10): a peer that set a change aside reports a lower received head for this PC.
     /// Over Wi-Fi that is lost ground: accepted, saved, and the changes go again. A different hash at
     /// the same place is still refused, and an older Google Drive report is still skipped.
@@ -2869,7 +3018,7 @@ mod tests {
             message: String::new(), phase: "idle", progress_done: 0, progress_total: 0,
             last_error: String::new(), last_attempt: String::new(),
             consecutive_failures: 0, next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15,
-            sync_on_open: true,
+            sync_on_open: true, needs_update: Vec::new(),
         };
         tracker.fill(&mut status);
         assert_eq!(status.phase, "error");
