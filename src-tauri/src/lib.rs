@@ -1211,12 +1211,19 @@ fn each_way_keeps_its_own_interval_and_retry_delay() {
 fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync: Arc<SyncController>) {
     // Security review L-20: an address whose connections keep failing the proof is turned away.
     let limiter = Arc::new(std::sync::Mutex::new(preauth::PreAuthLimiter::default()));
+    // L5: whether a paired device may still use the older port, checked every 10 s.
+    let mut legacy: Option<(Instant, bool)> = None;
     thread::spawn(move || loop {
         thread::sleep(Duration::from_millis(500));
+        let recheck = legacy.is_none_or(|(at, _)| at.elapsed() >= Duration::from_secs(10));
         let vault_id = (|| {
             let mut app = state.lock().ok()?;
+            let local = if recheck { app.store.identity_store().get_or_create().ok().map(|identity| identity.device_id) } else { None };
             let vault = app.unlocked.as_mut()?;
             if !vault.is_enrolled().ok()? || !lan_sync::configuration(vault).ok()?.1 { return None; }
+            if recheck {
+                legacy = Some((Instant::now(), local.is_none_or(|local| lan_sync::legacy_port_needed(vault, &local))));
+            }
             vault.connection().query_row("SELECT vault_id FROM sync_group_state", [], |row| row.get::<_, String>(0)).ok()
         })();
         let stream = {
@@ -1224,6 +1231,7 @@ fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync
             if network.is_none() { *network = discovery::LanDiscovery::new().ok(); }
             let Some(network) = network.as_mut() else { continue; };
             if network.advertise(vault_id.as_deref()).is_err() { continue; }
+            network.set_legacy_port(legacy.is_some_and(|(_, needed)| needed));
             network.endpoints();
             network.accept()
         };

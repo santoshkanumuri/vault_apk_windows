@@ -720,6 +720,17 @@ fn is_busy_reply(frame: &[u8]) -> bool {
     frame == BUSY_REPLY || frame == b"busy"
 }
 
+/// The address to save for a device that connected to this PC from `ip`: its saved address when
+/// that is the same IP (keeping the port this PC reached it on), or `ip` at this group's port.
+fn served_peer_endpoint(db: &Connection, vault_id: &str, peer: &str, ip: IpAddr) -> SocketAddr {
+    db.query_row("SELECT address FROM sync_peer_endpoints WHERE vault_id = ?1 AND peer_device_id = ?2",
+        params![vault_id, peer], |row| row.get::<_, String>(0))
+        .ok()
+        .and_then(|saved| saved.parse::<SocketAddr>().ok())
+        .filter(|saved| saved.ip() == ip)
+        .unwrap_or_else(|| SocketAddr::new(ip, sync_port(vault_id)))
+}
+
 /// Only called after signed enrollment or an authenticated exchange has committed.
 pub(crate) fn remember_peer_endpoint(vault: &mut UnlockedVault, vault_id: &str, peer: &str,
     address: SocketAddr) -> rusqlite::Result<()> {
@@ -783,10 +794,7 @@ fn run_to(
     let mut caught_up = false;
     let result = run_sessions(|| loop {
         tracker.set_phase(Phase::Connecting);
-        let session = exchange(state, helper, tracker, |vault_id| {
-            TcpStream::connect_timeout(&endpoint(address, vault_id)?, CONNECT_TIMEOUT)
-                .map_err(|_| UNREACHABLE.into())
-        });
+        let session = exchange(state, helper, tracker, |vault_id| connect_sync(address, vault_id));
         // After catching up to a later key epoch, reconnect once with that epoch's secret.
         if matches!(&session, Err(error) if error == MEMBERSHIP_UPDATED) && !caught_up {
             caught_up = true;
@@ -1178,7 +1186,9 @@ fn exchange_gated(
         vault.record_peer_seen(&peer_id).map_err(storage_error)?;
         report.peer_device_id = peer_id.clone();
         if let Some(address) = peer_address.filter(|address| crate::discovery::private_address(address.ip())) {
-            let address = if server { SocketAddr::new(address.ip(), sync_port(&vault_id)) } else { address };
+            // L5: a device that connected here came from a passing port; its own listening port is
+            // the one this PC last reached it on, at the same address, or else this group's port.
+            let address = if server { served_peer_endpoint(vault.connection(), &vault_id, &peer_id, address.ip()) } else { address };
             remember_peer_endpoint(vault, &vault_id, &peer_id, address).map_err(storage_error)?;
         }
         let db = vault.connection();
@@ -1268,19 +1278,79 @@ fn endpoint(address: &str, vault_id: &str) -> Result<SocketAddr> {
     Ok(endpoint)
 }
 
+/// Java's `String.hashCode` of the group ID, the same number Android derives its ports from.
+fn group_hash(vault_id: &str) -> i32 {
+    vault_id.encode_utf16().fold(0i32, |hash, c| hash.wrapping_mul(31).wrapping_add(i32::from(c)))
+}
+
+/// L5: the first of the ports this group listens on, and how many there are: 20000 to 32767, below
+/// the ports Windows (49152 and up) and Android (32768 and up) hand out for outgoing connections.
+/// Shared with Android (`LocalSyncNetwork.kt`), vectors in `fixtures/sync-ports-v2.json`.
+const SYNC_PORT_FIRST: i32 = 20_000;
+const SYNC_PORT_COUNT: i32 = 12_768;
+/// How many ports older versions spread groups over (20000 to 49999).
+const LEGACY_SYNC_PORT_COUNT: i32 = 30_000;
+
+/// The port this group listens on and connects to first.
 pub(crate) fn sync_port(vault_id: &str) -> u16 {
-    let hash = vault_id.encode_utf16().fold(0i32, |hash, c| {
-        hash.wrapping_mul(31).wrapping_add(i32::from(c))
-    });
-    (20_000 + hash.rem_euclid(30_000)) as u16
+    (SYNC_PORT_FIRST + group_hash(vault_id).rem_euclid(SYNC_PORT_COUNT)) as u16
 }
 
 /// L5: the port the listener takes when another program holds [`sync_port`]: half the range away,
 /// so it is the same on every start. Devices find it through the local advertisement, as before,
 /// and remember the address they reached; nothing on the wire changes.
 pub(crate) fn fallback_sync_port(vault_id: &str) -> u16 {
-    let port = sync_port(vault_id);
-    20_000 + (port - 20_000 + 15_000) % 30_000
+    let port = i32::from(sync_port(vault_id));
+    (SYNC_PORT_FIRST + (port - SYNC_PORT_FIRST + SYNC_PORT_COUNT / 2).rem_euclid(SYNC_PORT_COUNT)) as u16
+}
+
+/// L5: the port versions before `sync-ports-v2` listen on and connect to. This PC also listens
+/// there while a paired device may still use it ([`legacy_port_needed`]).
+pub(crate) fn legacy_sync_port(vault_id: &str) -> u16 {
+    (SYNC_PORT_FIRST + group_hash(vault_id).rem_euclid(LEGACY_SYNC_PORT_COUNT)) as u16
+}
+
+/// L5: the ports to try at a saved or typed address, in order: the one given, then this group's
+/// port, its second port and the port older versions use. [`connect_sync`] moves on only when the
+/// device refused the connection, so an address that doesn't answer costs one timeout, as before.
+fn sync_targets(first: SocketAddr, vault_id: &str) -> Vec<SocketAddr> {
+    let mut targets = vec![first];
+    for port in [sync_port(vault_id), fallback_sync_port(vault_id), legacy_sync_port(vault_id)] {
+        let target = SocketAddr::new(first.ip(), port);
+        if !targets.contains(&target) { targets.push(target); }
+    }
+    targets
+}
+
+/// Connects to a paired device at `address` (see [`sync_targets`]). Every port is on the same
+/// private address, and the session still proves membership before anything is exchanged.
+fn connect_sync(address: &str, vault_id: &str) -> Result<TcpStream> {
+    connect_first(&sync_targets(endpoint(address, vault_id)?, vault_id))
+}
+
+/// The first of `targets` that accepts, trying the next only after a refusal.
+fn connect_first(targets: &[SocketAddr]) -> Result<TcpStream> {
+    for target in targets {
+        match TcpStream::connect_timeout(target, CONNECT_TIMEOUT) {
+            Ok(stream) => return Ok(stream),
+            Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => continue,
+            Err(_) => break,
+        }
+    }
+    Err(UNREACHABLE.into())
+}
+
+/// L5: whether to also listen on [`legacy_sync_port`]: some other active member hasn't announced
+/// `sync-ports-v2` (or announced nothing yet, like a device that just joined). Once every device
+/// announced it, the older port closes, so this PC listens on one port only.
+pub(crate) fn legacy_port_needed(vault: &mut UnlockedVault, local_device: &str) -> bool {
+    let Ok(events) = vault.stored_membership() else { return true };
+    let Ok(membership) = membership::verify(&events) else { return true };
+    let db = vault.connection();
+    membership.members.values().filter(|member| member.active && member.device_id != local_device).any(|member| {
+        !crate::appearance::peer_features(db, &membership.vault_id, &member.device_id)
+            .is_some_and(|features| features.iter().any(|feature| feature == crate::protocol::SYNC_PORTS_FEATURE))
+    })
 }
 
 fn integer(value: u64) -> Result<i64> {
@@ -2421,10 +2491,7 @@ pub(crate) fn deliver_leave(
     state: &ManagedState,
     min_gap_millis: i64,
 ) -> Result<Option<crate::membership_exit::LeaveReply>> {
-    deliver_leave_with(state, min_gap_millis, |address, vault_id| {
-        TcpStream::connect_timeout(&endpoint(address, vault_id)?, CONNECT_TIMEOUT)
-            .map_err(|_| UNREACHABLE.into())
-    })
+    deliver_leave_with(state, min_gap_millis, connect_sync)
 }
 
 fn deliver_leave_with(
@@ -4257,11 +4324,85 @@ mod tests {
         std::fs::remove_dir_all(synthetic.directory).unwrap();
     }
 
+    /// L5: the same ports as Android for every group (`fixtures/sync-ports-v2.json`).
+    #[test]
+    fn ports_match_the_shared_vectors() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!("../fixtures/sync-ports-v2.json")).unwrap();
+        assert_eq!(vectors["rule"], "sync-ports-v2");
+        for case in vectors["cases"].as_array().unwrap() {
+            let group = case["group"].as_str().unwrap();
+            assert_eq!(i64::from(group_hash(group)), case["hash"].as_i64().unwrap(), "{group}");
+            assert_eq!(u64::from(sync_port(group)), case["port"].as_u64().unwrap(), "{group}");
+            assert_eq!(u64::from(fallback_sync_port(group)), case["second"].as_u64().unwrap(), "{group}");
+            assert_eq!(u64::from(legacy_sync_port(group)), case["legacy"].as_u64().unwrap(), "{group}");
+            assert!((20_000..=32_767).contains(&sync_port(group)) && (20_000..=32_767).contains(&fallback_sync_port(group)));
+        }
+    }
+
+    /// L5: a saved address is tried on its own port first, then this group's ports, then the port
+    /// older versions use, each once.
+    #[test]
+    fn a_saved_address_tries_this_groups_ports_then_the_older_one() {
+        let saved: SocketAddr = "192.168.1.4:41000".parse().unwrap();
+        let ip = saved.ip();
+        assert_eq!(sync_targets(saved, "android-vault"), vec![saved, SocketAddr::new(ip, 25364),
+            SocketAddr::new(ip, 31748), SocketAddr::new(ip, 23492)]);
+        let current = SocketAddr::new(ip, 25364);
+        assert_eq!(sync_targets(current, "android-vault"), vec![current, SocketAddr::new(ip, 31748), SocketAddr::new(ip, 23492)]);
+        // An empty group ID has the same new and old port: it is tried once.
+        let empty = SocketAddr::new(ip, 20_000);
+        assert_eq!(sync_targets(empty, ""), vec![empty, SocketAddr::new(ip, 26384)]);
+    }
+
+    /// L5: a refused port moves on to the next; the first that accepts is used.
+    #[test]
+    fn a_refused_port_moves_on_to_the_next() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let open = listener.local_addr().unwrap();
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let stream = connect_first(&[closed, open]).unwrap();
+        assert_eq!(stream.peer_addr().unwrap(), open);
+        assert!(connect_first(&[closed]).is_err());
+    }
+
+    /// L5: the older port stays open until every other active member announced `sync-ports-v2`.
+    #[test]
+    fn the_older_port_closes_once_every_device_announced_the_new_ports() {
+        let synthetic = synthetic_vault(0);
+        {
+            let mut app = synthetic.state.lock().unwrap();
+            let vault = app.unlocked.as_mut().unwrap();
+            assert!(legacy_port_needed(vault, &synthetic.local.device_id), "nothing announced yet");
+            crate::appearance::record_peer_features(vault.connection(), "vault-a", "phone", &["removal-cutoff-v1".into()]).unwrap();
+            assert!(legacy_port_needed(vault, &synthetic.local.device_id), "an older phone");
+            crate::appearance::record_peer_features(vault.connection(), "vault-a", "phone",
+                &crate::protocol::SYNC_FEATURES.map(str::to_owned)).unwrap();
+            assert!(!legacy_port_needed(vault, &synthetic.local.device_id), "every device is new");
+        }
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// L5: a device that connected here keeps the port this PC reached it on at the same address.
+    #[test]
+    fn a_device_that_connected_here_keeps_its_saved_port() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE sync_peer_endpoints (vault_id TEXT NOT NULL, peer_device_id TEXT NOT NULL,
+            address TEXT NOT NULL, PRIMARY KEY (vault_id, peer_device_id))").unwrap();
+        let ip: IpAddr = "192.168.1.4".parse().unwrap();
+        assert_eq!(served_peer_endpoint(&db, "android-vault", "phone", ip), SocketAddr::new(ip, 25364));
+        db.execute("INSERT INTO sync_peer_endpoints VALUES ('android-vault', 'phone', '192.168.1.4:23492')", []).unwrap();
+        assert_eq!(served_peer_endpoint(&db, "android-vault", "phone", ip), SocketAddr::new(ip, 23492));
+        let moved: IpAddr = "192.168.1.9".parse().unwrap();
+        assert_eq!(served_peer_endpoint(&db, "android-vault", "phone", moved), SocketAddr::new(moved, 25364));
+    }
+
     #[test]
     fn endpoints_are_private_and_ports_match_java() {
-        assert_eq!(sync_port("android-vault"), 23492);
-        // L5: the second port is half the range away, wrapping inside 20000-49999.
-        assert_eq!(fallback_sync_port("android-vault"), 38492);
+        assert_eq!(sync_port("android-vault"), 25364);
+        // L5: the second port is half the range away, wrapping inside 20000-32767.
+        assert_eq!(fallback_sync_port("android-vault"), 31748);
+        assert_eq!(legacy_sync_port("android-vault"), 23492, "the port older versions use");
         assert_eq!(
             endpoint("192.168.1.4", "android-vault").unwrap().port(),
             sync_port("android-vault")

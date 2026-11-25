@@ -1,0 +1,73 @@
+{
+  "format": "nuvori-sync-port-vectors",
+  "version": 1,
+  "rule": "sync-ports-v2",
+  "first": 20000,
+  "count": 12768,
+  "legacyCount": 30000,
+  "cases": [
+    {
+      "group": "android-vault",
+      "hash": -2106446508,
+      "port": 25364,
+      "second": 31748,
+      "legacy": 23492
+    },
+    {
+      "group": "vault-a",
+      "hash": 239661958,
+      "port": 26598,
+      "second": 20214,
+      "legacy": 41958
+    },
+    {
+      "group": "",
+      "hash": 0,
+      "port": 20000,
+      "second": 26384,
+      "legacy": 20000
+    },
+    {
+      "group": "Z",
+      "hash": 90,
+      "port": 20090,
+      "second": 26474,
+      "legacy": 20090
+    },
+    {
+      "group": "6f1c2a9e-4b7d-4e15-9a3c-0d2b8e7f5a61",
+      "hash": -758992890,
+      "port": 20870,
+      "second": 27254,
+      "legacy": 27110
+    },
+    {
+      "group": "c0ffee00-0000-4000-8000-000000000000",
+      "hash": 328080145,
+      "port": 26385,
+      "second": 20001,
+      "legacy": 20145
+    },
+    {
+      "group": "groupé-ü",
+      "hash": 506492473,
+      "port": 31449,
+      "second": 25065,
+      "legacy": 22473
+    },
+    {
+      "group": "😀-vault",
+      "hash": -1185088184,
+      "port": 32040,
+      "second": 25656,
+      "legacy": 21816
+    },
+    {
+      "group": "ffffffff-ffff-4fff-bfff-ffffffffffff",
+      "hash": -1227834578,
+      "port": 20142,
+      "second": 26526,
+      "legacy": 25422
+    }
+  ]
+}
