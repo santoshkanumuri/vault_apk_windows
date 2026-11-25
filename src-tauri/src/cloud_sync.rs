@@ -625,6 +625,19 @@ pub(crate) fn remove_account(db: &Connection) -> Result<Option<Account>> {
     Ok(saved)
 }
 
+/// Shows that changes from `author` on Google Drive were refused here (M5), with the reason.
+fn report_drive_refusal(db: &Connection, author: &str, error: &str) {
+    let name = device_name(db, author);
+    let message = match error {
+        FORKED_CHANGE => format!("Google Drive holds changes from {name} that don't match this PC's copy, so they weren't used"),
+        LOST_CHANGE => format!("Google Drive holds changes from {name}, which this PC marked as lost, so they weren't used"),
+        _ => format!("Changes from {name} on Google Drive failed their check on this PC, so they weren't used. They're checked again on the next pass"),
+    };
+    crate::activity::diagnostic(crate::activity::Category::Sync, "A change on Google Drive was refused", error);
+    crate::activity::global().record_coalesced(
+        crate::activity::Level::Warning, crate::activity::Category::Sync, message, Duration::from_secs(6 * 60 * 60));
+}
+
 /// The first change of `author` this PC holds above `after`, with its previous hash.
 fn first_held_after(db: &Connection, vault_id: &str, author: &str, after: u64) -> Result<Option<(u64, String)>> {
     db.query_row(
@@ -808,6 +821,8 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         if *author == context.local.device_id {
             continue;
         }
+        // M5: why a change from this author was refused, shown once the author is stuck.
+        let mut refused: Option<String> = None;
         loop {
             let head = with_vault(state, &context.vault_id, &membership.head, |vault| {
                 initialize_received(vault.connection())?;
@@ -849,8 +864,10 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                 }
                 let operation = serde_json::to_vec(value).map_err(storage_error).and_then(|bytes| operation_from_wire(&bytes));
                 let valid = operation.as_ref().is_ok_and(|operation| operation.device_id == *author && operation.sequence == sequence);
-                if !valid || store_received(state, &membership, operation.as_ref().expect("checked")).is_err() {
+                let kept = if valid { store_received(state, &membership, operation.as_ref().expect("checked")) } else { Err(String::new()) };
+                if let Err(error) = kept {
                     // Changes before this one are verified and kept; the rest of the file is not used.
+                    if !error.is_empty() { refused.get_or_insert(error); }
                     unusable.insert(file.id.clone());
                     break;
                 }
@@ -861,6 +878,18 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             if stored == 0 {
                 unusable.insert(file.id.clone());
             }
+        }
+        // M5: a change Google Drive holds but this PC refused is shown, not dropped silently,
+        // when it leaves this author's changes behind what Drive has.
+        if let Some(error) = refused {
+            with_vault(state, &context.vault_id, &membership.head, |vault| {
+                let db = vault.connection();
+                let head = progress(db, &context.vault_id)?.received.get(author).map_or(0, |head| head.0);
+                if files.iter().any(|(_, last, _)| *last > head) {
+                    report_drive_refusal(db, author, &error);
+                }
+                Ok(())
+            })?;
         }
     }
     // Floor markers (`compaction.rs` `drive`), counted only at or below this PC's own floor(A).
@@ -1171,7 +1200,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             if let Some(features) = features {
                 crate::appearance::record_peer_features(db, &context.vault_id, peer, features).map_err(storage_error)?;
             }
-            validate_peer_progress(db, &context.vault_id, &context.local.device_id, peer, peer_progress, false)
+            validate_peer_progress(db, &context.vault_id, &context.local.device_id, peer, peer_progress, false).map(|_| ())
         });
     }
 

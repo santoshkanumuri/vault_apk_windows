@@ -7,7 +7,7 @@
 use crate::{
     ManagedState,
     identity::verify_signature,
-    incoming::IncomingVerifier,
+    incoming::{IncomingError, IncomingVerifier},
     incoming_apply::{ApplyError, IncomingApply},
     incoming_store::IncomingStore,
     membership::{self, MembershipEvent, VerifiedMembership},
@@ -69,6 +69,11 @@ const TOO_LARGE: &str = "A saved change is too large to sync. Existing items are
 /// Android serves and requests at most 32 photos per exchange (`servePhotos` `require(requests.size <= 32)`).
 const MAX_PHOTO_REQUESTS: usize = 32;
 const PHOTO_FAILED: &str = "A photo failed its integrity check. It will download again next time.";
+/// Internal: a received change does not continue this PC's copy of its author's chain (a fork).
+/// [named_refusal] turns it into a message that names the devices.
+const FORKED_CHANGE: &str = "Peer sent a conflicting change";
+/// Internal: a received change comes after the last change allowed from a device this PC marked as lost.
+const LOST_CHANGE: &str = "That device was marked as lost";
 
 #[derive(Serialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1037,9 +1042,9 @@ fn exchange_rounds_role<R: Read, W: Write>(
     for _ in 0..MAX_ROUNDS {
         let (sent, received) = if server {
             let sent = send_batch(channel, state, membership, local, peer, tracker, relay_removed)?;
-            (sent, receive_batch(channel, state, membership, key, tracker)?)
+            (sent, receive_batch(channel, state, membership, key, local, peer, tracker)?)
         } else {
-            let received = receive_batch(channel, state, membership, key, tracker)?;
+            let received = receive_batch(channel, state, membership, key, local, peer, tracker)?;
             (send_batch(channel, state, membership, local, peer, tracker, relay_removed)?, received)
         };
         report.received += received;
@@ -1533,7 +1538,7 @@ fn store_received(state: &ManagedState, membership: &VerifiedMembership, operati
         if crate::merge_join::lost_freeze(db, &membership.vault_id).map_err(storage_error)?
             .is_some_and(|freeze| !freeze.allows(&operation.device_id, operation.sequence, &operation.hash))
         {
-            return Err("That device was marked as lost".into());
+            return Err(LOST_CHANGE.into());
         }
         initialize_received(db)?;
         let head = progress(db, &membership.vault_id)?
@@ -1554,7 +1559,11 @@ fn store_received(state: &ManagedState, membership: &VerifiedMembership, operati
         .map_err(storage_error)?;
         let batch = verifier
             .verify_batch(vec![operation.clone()])
-            .map_err(storage_error)?;
+            .map_err(|error| match error {
+                // The change does not continue this PC's copy of the chain: a fork (M5).
+                IncomingError::BrokenLink => FORKED_CHANGE.to_owned(),
+                error => storage_error(error),
+            })?;
         IncomingStore::persist_batch(db, &batch).map_err(storage_error)?;
         Ok(())
     })
@@ -1581,7 +1590,7 @@ fn old_resend(db: &Connection, id: &str, operation: &ChangeRecord, head: &(u64, 
     };
     match held {
         Some(hash) if hash == operation.hash => Ok(true),
-        Some(_) => Err("Peer sent a conflicting change".into()),
+        Some(_) => Err(FORKED_CHANGE.into()),
         None => {
             crate::activity::global().record_coalesced(
                 crate::activity::Level::Info,
@@ -1594,11 +1603,14 @@ fn old_resend(db: &Connection, id: &str, operation: &ChangeRecord, head: &(u64, 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn receive_batch<R: Read, W: Write>(
     channel: &mut EncryptedSyncChannel<R, W>,
     state: &ManagedState,
     membership: &VerifiedMembership,
     key: &[u8],
+    local: &str,
+    peer: &str,
     tracker: &SyncTracker,
 ) -> Result<usize> {
     tracker.set_phase(Phase::Receiving);
@@ -1620,7 +1632,13 @@ fn receive_batch<R: Read, W: Write>(
     tracker.incoming_announced(count as u64);
     for _ in 0..count {
         let operation = operation_from_wire(&channel.receive().map_err(network_error)?)?;
-        store_received(state, membership, &operation)?;
+        if let Err(error) = store_received(state, membership, &operation) {
+            // The sender waits for this change's acknowledgement, so the session ends here; the
+            // message says which device sent it and whose changes differ (M5).
+            return Err(with_vault(state, &membership.vault_id, &membership.head, |vault| {
+                Ok(named_refusal(vault.connection(), &error, peer, &operation.device_id, local))
+            }).unwrap_or(error));
+        }
         // Acknowledge only after the verified operation is committed.
         channel
             .send(operation.hash.as_bytes())
@@ -1659,6 +1677,19 @@ fn author_label(db: &Connection, author: &str, local_id: &str) -> String {
     if author == local_id { "this PC".to_owned() } else { device_name(db, author) }
 }
 
+/// The message for a change refused from `peer` (M5), naming the devices so the user can tell
+/// which device's data differs. Any other error passes through unchanged.
+fn named_refusal(db: &Connection, error: &str, peer: &str, author: &str, local_id: &str) -> String {
+    let sender = sentence_start(&device_name(db, peer));
+    match error {
+        FORKED_CHANGE => format!("{sender}'s copy of the changes from {} doesn't match this PC's. Wi-Fi sync with it stops at that change.",
+            author_label(db, author, local_id)),
+        LOST_CHANGE => format!("{sender} sent changes from {}, which this PC marked as lost. Wi-Fi sync with it stops at that change.",
+            device_name(db, author)),
+        _ => error.to_owned(),
+    }
+}
+
 /// Checks a peer's progress report and saves it. `live`: the report came in a Wi-Fi session now.
 ///
 /// H2 (shared rule with Android): a live report whose received head for an author is lower than
@@ -1667,6 +1698,12 @@ fn author_label(db: &Connection, author: &str, local_id: &str) -> String {
 /// and the changes it lacks are sent again from the lower head. A different hash at the same
 /// sequence is still refused. A Google Drive `p.` file can be older than a report this PC already
 /// got over Wi-Fi, so a lower head from Drive is still refused there (the file is skipped).
+///
+/// M5: in a live report, a head that does not match this PC's copy of an author's chain (a fork,
+/// for instance after one device's data was copied back from an old backup) no longer ends the
+/// session. That author is returned, the caller sends none of its changes to this peer (the peer
+/// would refuse them), and the author is left out of what is saved for this peer, so history
+/// cleanup keeps waiting for it. Every other author keeps syncing. A Drive report still fails.
 fn validate_peer_progress(
     db: &mut Connection,
     id: &str,
@@ -1674,9 +1711,10 @@ fn validate_peer_progress(
     peer: &str,
     progress: &SyncProgress,
     live: bool,
-) -> Result<()> {
+) -> Result<std::collections::BTreeSet<String>> {
     progress.validate().map_err(storage_error)?;
     let tx = db.transaction().map_err(storage_error)?;
+    let mut forked = std::collections::BTreeSet::new();
     for (author, (seq, hash)) in progress.received.iter().chain(&progress.applied) {
         let known: Option<String> = if *seq == 0 {
             Some(GENESIS_HASH.into())
@@ -1689,10 +1727,24 @@ fn validate_peer_progress(
             && known.is_none()
             && *seq > local_head(&tx, id, local_id)?;
         if known.as_ref().is_some_and(|known| known != hash) || unknown_own {
-            return Err("Peer reported a conflicting change head".into());
+            if !live {
+                return Err("Peer reported a conflicting change head".into());
+            }
+            forked.insert(author.clone());
         }
     }
-    for (author, (seq, _)) in &progress.received {
+    for author in &forked {
+        let message = if author == local_id {
+            format!("{} holds newer changes from this PC than this PC has. This PC's data may have been copied back from an old backup. This PC's changes aren't sent to it",
+                sentence_start(&device_name(&tx, peer)))
+        } else {
+            format!("{}'s copy of the changes from {} doesn't match this PC's. Those changes aren't sent to it, and everything else keeps syncing",
+                sentence_start(&device_name(&tx, peer)), device_name(&tx, author))
+        };
+        crate::activity::global().record_coalesced(
+            crate::activity::Level::Warning, crate::activity::Category::Sync, message, Duration::from_secs(6 * 60 * 60));
+    }
+    for (author, (seq, _)) in progress.received.iter().filter(|(author, _)| !forked.contains(*author)) {
         let old: Option<i64> = tx.query_row("SELECT sequence FROM sync_peer_acknowledgements WHERE vault_id = ?1 AND peer_device_id = ?2 AND source_device_id = ?3", params![id, peer, author], |r| r.get(0)).optional().map_err(storage_error)?;
         let sequence = integer(*seq)?;
         if let Some(old) = old.filter(|old| *old > sequence) {
@@ -1710,12 +1762,17 @@ fn validate_peer_progress(
         tx.execute("INSERT INTO sync_peer_acknowledgements (vault_id, peer_device_id, source_device_id, sequence, acknowledged_at_utc) VALUES (?1, ?2, ?3, ?4, '') ON CONFLICT(vault_id, peer_device_id, source_device_id) DO UPDATE SET sequence = excluded.sequence", params![id, peer, author, sequence]).map_err(storage_error)?;
     }
     // The whole report, for the per-device counts in the devices list (as the phone shows them).
-    let encoded = String::from_utf8(progress.encode().map_err(storage_error)?).map_err(storage_error)?;
+    // Forked authors are left out: a missing author counts as nothing applied (M5).
+    let mut kept = progress.clone();
+    kept.received.retain(|author, _| !forked.contains(author));
+    kept.applied.retain(|author, _| !forked.contains(author));
+    let encoded = String::from_utf8(kept.encode().map_err(storage_error)?).map_err(storage_error)?;
     tx.execute("CREATE TABLE IF NOT EXISTS sync_peer_progress (vault_id TEXT NOT NULL, peer_device_id TEXT NOT NULL, progress_json TEXT NOT NULL, PRIMARY KEY (vault_id, peer_device_id))", [])
         .map_err(storage_error)?;
     tx.execute("INSERT INTO sync_peer_progress (vault_id, peer_device_id, progress_json) VALUES (?1, ?2, ?3) ON CONFLICT(vault_id, peer_device_id) DO UPDATE SET progress_json = excluded.progress_json",
         params![id, peer, encoded]).map_err(storage_error)?;
-    tx.commit().map_err(storage_error)
+    tx.commit().map_err(storage_error)?;
+    Ok(forked)
 }
 
 fn local_head(db: &Connection, id: &str, local_id: &str) -> Result<u64> {
@@ -1826,7 +1883,7 @@ fn send_batch<R: Read, W: Write>(
     tracker.set_phase(Phase::Sending);
     let (pending, remaining) = with_vault(state, &membership.vault_id, &membership.head, |vault| {
         let db = vault.connection();
-        validate_peer_progress(db, &membership.vault_id, local, peer, &progress, true)?;
+        let forked = validate_peer_progress(db, &membership.vault_id, local, peer, &progress, true)?;
         // Waiting for new keys (H1): nothing leaves this PC until they arrive.
         let events = read_membership(db, &membership.vault_id)?;
         if crate::epoch_keys::stranded(db, &events, membership, local).map_err(storage_error)? {
@@ -1839,6 +1896,8 @@ fn send_batch<R: Read, W: Write>(
             MAX_BATCH_OPERATIONS,
             BATCH_BYTE_BUDGET,
             &|author| match membership.members.get(author) {
+                // The peer's copy of this author's chain differs: it would refuse these (M5).
+                _ if forked.contains(author) => None,
                 Some(member) if member.active => Some(u64::MAX),
                 Some(member) if relay_removed => member.removal_cutoff.as_ref().map(|cutoff| cutoff.0),
                 _ => None,
@@ -2362,7 +2421,10 @@ mod tests {
             received: heads.received.clone(),
             applied: BTreeMap::from([("phone".into(), (1, "a".repeat(64)))]),
         };
-        assert!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged, true).is_err());
+        // Live: the forked author is skipped for this peer instead of ending the session (M5).
+        assert_eq!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged, true).unwrap(),
+            std::collections::BTreeSet::from(["phone".to_owned()]));
+        assert!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged, false).is_err(), "a Drive report is still refused");
     }
 
     #[test]
@@ -2861,7 +2923,9 @@ mod tests {
             applied: BTreeMap::from([(author.clone(), (sequence, hash.to_owned()))]),
         };
         validate_peer_progress(db, "vault-a", &author, "phone", &report(3, &all[2].hash), true).unwrap();
-        assert!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64)), true).is_err());
+        assert_eq!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64)), true).unwrap(),
+            std::collections::BTreeSet::from([author.clone()]), "this PC's own chain is not sent to that peer");
+        assert!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64)), false).is_err());
         drop(app);
         drop(synthetic.state);
         std::fs::remove_dir_all(synthetic.directory).unwrap();
@@ -2901,6 +2965,36 @@ mod tests {
         let db = vault.connection();
         assert_eq!((waiting(db, "vault-a").unwrap().len(), set_aside_count(db, "vault-a")), (0, 0), "it applies on the next try");
         assert_eq!(vault.list_entries().unwrap().len(), 3);
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M5: a change that does not continue this PC's copy of an author's chain is a fork. It is
+    /// refused, and the message names the device that sent it and whose changes differ.
+    #[test]
+    fn a_forked_change_is_refused_with_the_devices_named() {
+        let synthetic = synthetic_vault(0);
+        let version = RecordVersion::from_entries([("phone", 1)]);
+        let entry = |sequence: u64, previous: &str, id: &str| phone_op(sequence, previous, "entry", id, version.clone(), 0,
+            serde_json::json!({"entry": login_entry(id, "Login"), "groupIds": []}));
+        let held = entry(1, GENESIS_HASH, "login-a");
+        stage(&synthetic, &[held]);
+        let other = entry(1, GENESIS_HASH, "login-b");
+        let next = entry(2, &other.hash, "login-c");
+        assert_eq!(store_received(&synthetic.state, &synthetic.membership, &other).unwrap_err(), FORKED_CHANGE, "another change at a held place");
+        assert_eq!(store_received(&synthetic.state, &synthetic.membership, &next).unwrap_err(), FORKED_CHANGE, "a change after another chain");
+        let mut app = synthetic.state.lock().unwrap();
+        let db = app.unlocked.as_mut().unwrap().connection();
+        let member = serde_json::json!({"vaultId": "vault-a", "deviceId": "phone", "displayName": "Pixel 9", "identityPublicKey": "",
+            "status": "ACTIVE", "addedByDeviceId": "phone", "membershipSequence": 1, "keyEpoch": 1});
+        db.execute("INSERT OR REPLACE INTO sync_memberships (vault_id, device_id, member_json) VALUES ('vault-a', 'phone', ?1)", [member.to_string()]).unwrap();
+        let local = synthetic.local.device_id.clone();
+        assert_eq!(named_refusal(db, FORKED_CHANGE, "phone", &local, &local),
+            "Pixel 9's copy of the changes from this PC doesn't match this PC's. Wi-Fi sync with it stops at that change.");
+        assert_eq!(named_refusal(db, LOST_CHANGE, "pc-2", "phone", &local),
+            "A paired device sent changes from Pixel 9, which this PC marked as lost. Wi-Fi sync with it stops at that change.");
+        assert_eq!(named_refusal(db, TIMED_OUT, "phone", "phone", &local), TIMED_OUT, "other errors pass through");
         drop(app);
         drop(synthetic.state);
         std::fs::remove_dir_all(synthetic.directory).unwrap();
@@ -2962,8 +3056,16 @@ mod tests {
         assert_eq!(saved, 1, "the lower head replaces the saved one");
         let (resend, remaining) = pending_operations(db, "vault-a", &report(1, &h1).received, 100, usize::MAX, &|_| Some(u64::MAX)).unwrap();
         assert_eq!((resend.iter().map(|(op, _)| op.sequence).collect::<Vec<_>>(), remaining), (vec![2, 3], 2), "the lost changes go again");
-        // The same place with another hash is a fork: refused, and nothing is saved.
-        assert_eq!(validate_peer_progress(db, "vault-a", &local, "phone", &report(1, &"e".repeat(64)), true).unwrap_err(),
+        // The same place with another hash is a fork: that author is not sent to this peer, and
+        // nothing is saved for it (M5). A Drive report with a fork is still refused.
+        assert_eq!(validate_peer_progress(db, "vault-a", &local, "phone", &report(1, &"e".repeat(64)), true).unwrap(),
+            std::collections::BTreeSet::from([local.clone()]));
+        let saved: i64 = db.query_row("SELECT sequence FROM sync_peer_acknowledgements WHERE peer_device_id = 'phone' AND source_device_id = ?1",
+            [&local], |r| r.get(0)).unwrap();
+        assert_eq!(saved, 1, "a forked head is not saved");
+        let kept: String = db.query_row("SELECT progress_json FROM sync_peer_progress WHERE peer_device_id = 'phone'", [], |r| r.get(0)).unwrap();
+        assert!(SyncProgress::parse(kept.as_bytes()).unwrap().applied.is_empty(), "cleanup keeps waiting for a forked author");
+        assert_eq!(validate_peer_progress(db, "vault-a", &local, "pc-2", &report(1, &"e".repeat(64)), false).unwrap_err(),
             "Peer reported a conflicting change head");
         // A Drive report older than the saved one is skipped, as Android skips a stale `p.` file.
         validate_peer_progress(db, "vault-a", &local, "pc-2", &report(3, &h3), false).unwrap();
