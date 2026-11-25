@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Folder, History, ImagePlus, Pencil, Star, Trash2, X } from "lucide-react";
+import { CopyPlus, Folder, History, ImagePlus, Pencil, Star, Trash2, X } from "lucide-react";
 import { Button, IconButton } from "../../components/Button";
 import { Avatar, CountdownRing, EmptyState } from "../../components/Display";
 import { CardFace } from "../../components/CardFace";
@@ -46,6 +46,23 @@ export function ItemDetailPage({ id }: { id: string }) {
       void refresh();
     } catch (failure) {
       toast.error(failure, "Couldn't update favorites.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // As on Android: a new item with the same details and folders, without this item's password, card
+  // number, cardholder, security code or answer. Opens the copy so those can be filled in.
+  const duplicate = async () => {
+    setBusy(true);
+    try {
+      const copy = await api.duplicateEntry(entry.id);
+      upsertEntry(copy);
+      toast.success(strings.copyCreated);
+      void refresh();
+      await router.navigate({ page: "item", id: copy.id });
+    } catch (failure) {
+      toast.error(failure, strings.couldnTCreateACopy);
     } finally {
       setBusy(false);
     }
@@ -98,6 +115,7 @@ export function ItemDetailPage({ id }: { id: string }) {
         <div className="detail-hero-actions">
           <IconButton label={entry.favorite ? "Remove from favorites" : "Add to favorites"} icon={Star} className={entry.favorite ? "is-favorite" : undefined} aria-pressed={entry.favorite} onClick={() => void toggleFavorite()} disabled={busy} />
           <Button icon={Pencil} onClick={() => void router.navigate({ page: "edit", id: entry.id, category })}>{strings.edit}</Button>
+          {entry.type !== "AUTHENTICATOR" && <IconButton label={strings.duplicate} icon={CopyPlus} variant="ghost" onClick={() => void duplicate()} disabled={busy} />}
           <IconButton label={strings.delete} icon={Trash2} variant="ghost" className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
         </div>
       </section>

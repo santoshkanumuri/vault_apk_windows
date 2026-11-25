@@ -386,6 +386,10 @@ export const api = {
   saveNote: (note: { id?: string; title: string; body: string; groupIds: string[]; rich?: string }) =>
     call<LocalNote>("save_note", { id: note.id ?? null, title: note.title, body: note.body, groupIds: note.groupIds, rich: note.rich ?? null }),
   deleteNote: (id: string) => call<void>("delete_note", { id }),
+  /** A new item with the same details and folders, without the item's secrets (`item_copy.rs`). Not for authenticators. */
+  duplicateEntry: (id: string) => call<VaultEntry>("duplicate_entry", { id }),
+  /** A new note "<title> copy" with the same text, formatting and folders. */
+  duplicateNote: (id: string) => call<LocalNote>("duplicate_note", { id }),
 
   listGroups: () => call<VaultGroup[]>("list_groups"),
   saveGroup: (group: { id?: string; name: string; notes: string; folderType: string }) =>

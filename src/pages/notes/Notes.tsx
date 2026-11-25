@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect, type FormEvent } from "react";
-import { FileText, Folder, Pencil, Plus, Save, SearchX, Trash2, X } from "lucide-react";
+import { CopyPlus, FileText, Folder, Pencil, Plus, Save, SearchX, Trash2, X } from "lucide-react";
 import { Button, IconButton } from "../../components/Button";
 import { Avatar, EmptyState } from "../../components/Display";
 import { CopyButton } from "../../components/DetailField";
@@ -103,6 +103,21 @@ export function NoteDetailPage({ id }: { id: string }) {
     }
   };
 
+  const duplicate = async () => {
+    setBusy(true);
+    try {
+      const copy = await api.duplicateNote(note.id);
+      upsertNote(copy);
+      toast.success(strings.copyCreated);
+      void refresh();
+      await router.navigate({ page: "note", id: copy.id });
+    } catch (failure) {
+      toast.error(failure, strings.couldnTCreateACopy);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async () => {
     if (!(await confirm({ title: `Delete "${note.title}"?`, message: deleteMessage, confirmLabel: "Delete", danger: true }))) return;
     setBusy(true);
@@ -143,6 +158,7 @@ export function NoteDetailPage({ id }: { id: string }) {
         <div className="detail-hero-actions">
           <CopyButton value={note.body} label={strings.note} />
           <Button icon={Pencil} onClick={() => void router.navigate({ page: "note-edit", id: note.id })}>{strings.edit}</Button>
+          <IconButton label={strings.duplicate} icon={CopyPlus} onClick={() => void duplicate()} disabled={busy} />
           <IconButton label={strings.delete} icon={Trash2} className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
         </div>
       </section>
