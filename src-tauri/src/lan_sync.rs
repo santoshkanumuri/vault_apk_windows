@@ -109,6 +109,11 @@ pub struct SyncReport {
     /// for a while, so a session that only skipped photos still made progress (M13).
     #[serde(skip)]
     pub photos_skipped: usize,
+    /// L1: every session made progress but the session cap ended the pass (or, serving, the
+    /// connecting device's round limit ended the session) before both sides were caught up. Not a
+    /// failure: the pass that follows continues at once.
+    #[serde(skip)]
+    pub more_remain: bool,
 }
 
 #[derive(Serialize)]
@@ -560,6 +565,7 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
         match run_to(state, helper, &target.to_string(), tracker) {
             Ok(report) => {
                 if report.peer_device_id != local { checked.insert(report.peer_device_id.clone()); }
+                total.more_remain |= report.more_remain;
                 total.sent += report.sent;
                 total.received += report.received;
                 total.photos_sent += report.photos_sent;
@@ -624,7 +630,9 @@ pub(crate) fn serve_proved(state: &ManagedState, helper: &Path, stream: TcpStrea
     let result = exchange_role(state, helper, tracker, true, |_| Ok(stream));
     match result {
         Ok((report, true)) => { tracker.succeed(); (Ok(report), true) }
-        Ok((_, false)) => { tracker.fail(MORE_REMAIN); (Err(MORE_REMAIN.into()), true) }
+        // L1: the connecting device's round limit ended the session after progress. It connects
+        // again at once, so this counts as progress, not as a failure.
+        Ok((report, false)) => { tracker.succeed(); (Ok(SyncReport { more_remain: true, ..report }), true) }
         Err(error) => {
             // A nearby device outside this group must not replace the paired-device status.
             let authenticated = tracker.state.lock().is_ok_and(|state| state.generation != before);
@@ -667,6 +675,8 @@ fn run_to(
 
 /// Repeats bounded sessions until one completes, a session makes no progress, or the cap is hit.
 /// Each session commits what it received, so a later pass resumes from the saved frontier.
+/// L1: reaching the cap while every session made progress is progress (`more_remain`), not a
+/// failure; only a session that moved nothing and still was not caught up fails the pass.
 fn run_sessions(mut session: impl FnMut() -> Result<(SyncReport, bool)>) -> Result<SyncReport> {
     let mut total = SyncReport::default();
     for _ in 0..MAX_SESSIONS {
@@ -683,10 +693,11 @@ fn run_sessions(mut session: impl FnMut() -> Result<(SyncReport, bool)>) -> Resu
             return Ok(total);
         }
         if report.sent == 0 && report.received == 0 && report.photos_received == 0 && report.photos_skipped == 0 {
-            break;
+            return Err(MORE_REMAIN.into());
         }
     }
-    Err(MORE_REMAIN.into())
+    total.more_remain = true;
+    Ok(total)
 }
 
 /// Sets per-write timeouts proportional to the buffer size. Reads use an idle timeout set on
@@ -3211,6 +3222,15 @@ mod tests {
             Ok((SyncReport::default(), false))
         });
         assert_eq!((calls, stalled), (1, Err(MORE_REMAIN.to_owned())));
+        // L1: the session cap with progress every time is progress, and the next pass continues.
+        let mut calls = 0;
+        let capped = run_sessions(|| {
+            calls += 1;
+            Ok((SyncReport { received: 100, ..Default::default() }, false))
+        })
+        .unwrap();
+        assert_eq!((calls, capped.received, capped.more_remain), (MAX_SESSIONS, 100 * MAX_SESSIONS, true));
+        assert!(!report.more_remain, "a pass that caught up has nothing more");
         let failed = run_sessions(|| Err(UNREACHABLE.to_owned()));
         assert_eq!(failed, Err(UNREACHABLE.to_owned()));
     }

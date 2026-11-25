@@ -413,13 +413,16 @@ impl SyncController {
         let mut outcome = self.pass(state, helper, address, &endpoints, manual, ways, opened);
         // Continuous editing: edits saved on this PC while the pass ran get a prompt follow-up
         // pass (after a short debounce) instead of waiting for the next interval.
+        // L1: when the pass ended at its session cap with more to exchange, the next pass starts
+        // at once, without the debounce.
         for _ in 0..MAX_FOLLOW_UP_PASSES {
             let Ok(report) = &outcome.result else { break };
-            if !local_edits_since(state, report.local_revision_at_start) {
+            let edited = local_edits_since(state, report.local_revision_at_start);
+            if !edited && !report.more_remain {
                 break;
             }
             let previous = report.clone();
-            thread::sleep(FOLLOW_UP_DEBOUNCE);
+            if edited && !report.more_remain { thread::sleep(FOLLOW_UP_DEBOUNCE); }
             let endpoints = if ways.wifi { self.endpoints() } else { Vec::new() };
             let follow_up = self.pass(state, helper, address, &endpoints, false, ways, opened);
             outcome = PassOutcome {
@@ -545,6 +548,12 @@ impl PassOutcome {
 const DRIVE_NOT_CONNECTED: &str = "Google Drive is not connected on this PC.";
 
 fn sync_summary(report: &lan_sync::SyncReport) -> String {
+    let summary = sync_counts(report);
+    // L1: honest about a pass that stopped at its cap: the next pass continues.
+    if report.more_remain { format!("{summary} More changes remain, and sync continues.") } else { summary }
+}
+
+fn sync_counts(report: &lan_sync::SyncReport) -> String {
     match (report.cloud, report.peers_checked) {
         (true, 0) => format!("Synced through Google Drive. Sent {} changes and received {}.", report.sent, report.received),
         (true, devices) => format!("Sent {} changes and received {}, over Wi-Fi ({devices} devices) and Google Drive.", report.sent, report.received),
@@ -3272,6 +3281,15 @@ mod start_fresh_tests {
 #[cfg(test)]
 mod activity_tests {
     use super::*;
+
+    /// L1: a pass that stopped at its session cap says that sync continues, not that it failed.
+    #[test]
+    fn a_pass_with_more_remaining_says_sync_continues() {
+        let report = lan_sync::SyncReport { sent: 3, received: 3200, peers_checked: 1, more_remain: true, ..Default::default() };
+        assert_eq!(sync_summary(&report),
+            "Sent 3 changes and received 3200. Checked 1 devices; 0 waiting to connect. More changes remain, and sync continues.");
+        assert!(!sync_summary(&lan_sync::SyncReport { more_remain: false, ..report }).contains("remain"));
+    }
 
     #[test]
     fn only_web_and_mail_links_in_notes_can_be_opened() {
