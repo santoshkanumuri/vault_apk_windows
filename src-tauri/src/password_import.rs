@@ -16,6 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
@@ -648,9 +649,9 @@ pub enum Status {
 /// What the import would do with each login, the saved login a changed password goes to, and a
 /// token of the saved logins it found, which changes when one of them is edited, deleted or synced.
 pub fn plan(logins: &[ImportedLogin], saved: &[SavedLogin]) -> (Vec<(Status, Option<String>)>, String) {
-    let mut digest = Sha256::new();
+    let mut digest = <Hmac<Sha256> as Mac>::new_from_slice(token_key()).expect("HMAC takes a key of any length");
     let mut part = |text: &[u8]| {
-        digest.update((text.len() as u64).to_be_bytes());
+        digest.update(&(text.len() as u64).to_be_bytes());
         digest.update(text);
     };
     let mut planned = Vec::with_capacity(logins.len());
@@ -671,11 +672,28 @@ pub fn plan(logins: &[ImportedLogin], saved: &[SavedLogin]) -> (Vec<(Status, Opt
         for found in matches {
             part(found.id.as_bytes());
             part(&found.updated_at.to_be_bytes());
-            part(&Sha256::digest(found.password.as_bytes()));
+            part(found.password.as_bytes());
         }
         planned.push(step);
     }
-    (planned, hex::encode(digest.finalize()))
+    (planned, hex::encode(digest.finalize().into_bytes()))
+}
+
+/// The key of the review token, random for each run of the app. The token covers passwords, and
+/// the import dialog holds it, so it is an HMAC under a key that never leaves this process rather
+/// than a plain hash that could be used to test guesses of those passwords.
+fn token_key() -> &'static [u8; 32] {
+    static KEY: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        let mut key = [0u8; 32];
+        if getrandom::fill(&mut key).is_err() {
+            // Not expected on Windows. Still a key no other process knows: this process's own
+            // address space layout and the time it started, hashed.
+            let seed = format!("{:p}{:?}{}", &key, std::time::SystemTime::now(), std::process::id());
+            key.copy_from_slice(&Sha256::digest(seed.as_bytes()));
+        }
+        key
+    })
 }
 
 #[derive(Clone, Debug, Serialize)]
