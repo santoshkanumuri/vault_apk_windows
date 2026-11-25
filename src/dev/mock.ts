@@ -28,6 +28,9 @@ const state = {
     entry({ type: "PASSWORD", title: "Café Münster", primaryValue: "guest", secondaryValue: "latte4ever", tertiaryValue: "https://cafe-muenster.de", notes: "Wi-Fi portal login" }, 600),
     entry({ type: "PASSWORD", title: "Netflix", primaryValue: "family@example.com", secondaryValue: "popcorn-night-42", tertiaryValue: "netflix.com" }, 2000),
     entry({ type: "PASSWORD", title: "Bank of Example", primaryValue: "jdoe", secondaryValue: "vault-door-77", tertiaryValue: "https://online.bank.example", favorite: true, tags: "finance" }, 4000),
+    // Two copies an import left behind, so "Check for duplicates" has something to find.
+    entry({ type: "PASSWORD", title: "Netflix", primaryValue: "family@example.com", secondaryValue: "popcorn-night-42", tertiaryValue: "netflix.com" }, 1800),
+    entry({ type: "PASSWORD", title: "Netflix", primaryValue: "family@example.com", secondaryValue: "popcorn-night-42", tertiaryValue: "netflix.com" }, 1700),
     ...Array.from({ length: 24 }, (_, i) => entry({ type: "PASSWORD", title: `Service ${String.fromCharCode(65 + i)}${i % 3 === 0 ? " Cloud" : ""}`, primaryValue: `user${i}@example.com`, secondaryValue: `pw-${i}-xyz`, tertiaryValue: `https://service${i}.example.com` }, 5000 + i * 90)),
     entry({ type: "CARD", title: "Travel card", primaryValue: "4111111111111111", secondaryValue: "J DOE", tertiaryValue: "08/29", fourthValue: "123", network: "Visa", favorite: true, color: 0xff315b8c }, 90),
     entry({ type: "CARD", title: "Groceries debit", primaryValue: "5555555555554444", secondaryValue: "J DOE", tertiaryValue: "11/27", fourthValue: "456", network: "Mastercard", cardKind: "DEBIT", color: 0xfff5ebdd }, 3000),
@@ -317,6 +320,29 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       })).map((entry) => entry.id);
     }
     case "delete_passkey": state.passkeys = state.passkeys.filter((p) => p.id !== args.id); return null;
+    case "duplicate_passwords": {
+      requireUnlocked();
+      const sets = new Map<string, VaultEntry[]>();
+      for (const item of state.entries.filter((candidate) => candidate.type === "PASSWORD")) {
+        // The same comparison as duplicates.rs: the saved fields and the folders, nothing else.
+        const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, groupIds, ...fields } = item;
+        const key = JSON.stringify([fields, [...groupIds].sort()]);
+        sets.set(key, [...(sets.get(key) ?? []), item]);
+      }
+      return [...sets.values()].filter((copies) => copies.length > 1).map((copies) => {
+        const [oldest, ...rest] = [...copies].sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id));
+        return { keep: oldest.id, remove: rest.map((item) => item.id) };
+      });
+    }
+    case "delete_duplicate_passwords": {
+      requireUnlocked();
+      const chosen = new Set(((args.ids as string[] | undefined) ?? []));
+      if (chosen.size === 0) return 0;
+      state.entries = state.entries.filter((item) => !chosen.has(item.id));
+      state.revision++;
+      log("success", "items", `Deleted ${chosen.size} exact duplicate ${chosen.size === 1 ? "login" : "logins"}`);
+      return chosen.size;
+    }
     case "sync_status": requireUnlocked(); return { ...state.sync };
     case "configure_sync": state.sync.phoneAddress = String(args.address); state.sync.automatic = Boolean(args.automatic); return null;
     case "set_sync_schedule":

@@ -9,6 +9,7 @@ import { StatusBanner, StatusChip, type StatusKind } from "../components/Status"
 import { useConfirm } from "../app/confirm";
 import { useBrowserStatus, useBuildStatus, useLastSync, useLock, useMembership, useSyncStatus } from "../app/hooks";
 import { PendingLeaveChip, useLeaveGroup } from "./sync/Membership";
+import { DuplicatePasswordsSection } from "./DuplicatePasswords";
 import { useRouter } from "../app/router";
 import { autoLockChoices, clipboardChoices, usePreferences } from "../app/settings";
 import { AccentPicker, AppearancePreview, SurfacePicker } from "../components/AppearancePicker";
@@ -113,6 +114,8 @@ export function SettingsPage({ section }: { section?: string }) {
           <p>{strings.theBrowserExtensionNeverSeesYour}</p>
         </div>
       </SettingsGroup>
+
+      <DuplicatePasswordsSection />
 
       <DangerZone />
     </div>
