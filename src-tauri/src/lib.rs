@@ -2081,6 +2081,15 @@ fn auto_lock_vault(app: &AppHandle, reason: auto_lock::Reason) {
     if !unlocked {
         return;
     }
+    if reason != auto_lock::Reason::Suspend
+        && let Some(sync) = app.try_state::<Arc<SyncController>>()
+    {
+        drive_pass_before_lock(reason, state.inner(), sync.inner());
+        // Sleep may have locked the vault meanwhile.
+        if !state.lock().is_ok_and(|state| state.unlocked.is_some()) {
+            return;
+        }
+    }
     let locked = lock(
         state.inner(),
         app.state::<Arc<BrowserIpcServer>>().inner(),
@@ -2089,6 +2098,42 @@ fn auto_lock_vault(app: &AppHandle, reason: auto_lock::Reason) {
     if locked.is_ok() {
         activity::log(Level::Info, Category::Security, reason.message());
         vault_changed(app, false);
+    }
+}
+
+/// M1: a locked PC neither listens on Wi-Fi nor checks Google Drive, so before an idle or
+/// Windows-lock auto-lock, one Google Drive pass runs when Drive is connected and checked
+/// automatically. The other devices then get what this PC holds (its own changes and the ones it
+/// received over Wi-Fi) and its progress. Best effort and bounded: the vault locks after this
+/// long whatever the pass is doing. Sleep locks at once, without a pass.
+const PRE_LOCK_DRIVE_WAIT: Duration = Duration::from_secs(20);
+
+/// Sleep gives a program about two seconds, so it never waits for Drive. Drive set to "only when
+/// you select Sync now" is not checked either.
+fn pass_before_lock(reason: auto_lock::Reason, drive_seconds: u64, connected: bool) -> bool {
+    reason != auto_lock::Reason::Suspend && drive_seconds > 0 && connected
+}
+
+fn drive_pass_before_lock(reason: auto_lock::Reason, state: &ManagedState, sync: &Arc<SyncController>) {
+    let drive_seconds = state.lock().ok().and_then(|mut app| {
+        app.unlocked.as_mut().filter(|vault| vault.is_enrolled().unwrap_or(false))
+            .map(|vault| lan_sync::schedule(vault.connection()).drive_seconds)
+    });
+    let Some(drive_seconds) = drive_seconds else { return };
+    if !pass_before_lock(reason, drive_seconds, CloudController::connected(state)) {
+        return;
+    }
+    let (state, sync) = (state.clone(), sync.clone());
+    let (done, finished) = std::sync::mpsc::channel();
+    let started = thread::Builder::new().name("nuvori-pre-lock-drive".to_owned()).spawn(move || {
+        // A pass already running is not waited for: the vault locks at once.
+        if let Ok(_guard) = sync.gate.try_lock() {
+            let _ = sync.cloud.pass(&state, &sync.tracker, false);
+        }
+        let _ = done.send(());
+    });
+    if started.is_ok() {
+        let _ = finished.recv_timeout(PRE_LOCK_DRIVE_WAIT);
     }
 }
 
@@ -3275,6 +3320,22 @@ mod start_fresh_tests {
         assert!(!app.store.is_initialized());
         drop(app);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod pre_lock_tests {
+    use super::*;
+
+    #[test]
+    fn a_drive_pass_runs_before_an_idle_or_windows_lock_but_not_before_sleep() {
+        use auto_lock::Reason::{Idle, SessionLocked, Suspend};
+        assert!(pass_before_lock(Idle, 300, true));
+        assert!(pass_before_lock(SessionLocked, 15, true));
+        assert!(!pass_before_lock(Suspend, 300, true));
+        assert!(!pass_before_lock(Idle, 0, true), "Drive checked only on Sync now");
+        assert!(!pass_before_lock(SessionLocked, 300, false), "Drive not connected");
+        assert!(PRE_LOCK_DRIVE_WAIT <= Duration::from_secs(30));
     }
 }
 
