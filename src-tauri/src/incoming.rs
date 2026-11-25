@@ -183,11 +183,10 @@ fn validate_record(
     if ciphertext.len() < 16 {
         return Err(IncomingError::InvalidRecord("invalid ciphertext size"));
     }
-    let nonce = URL_SAFE_NO_PAD
-        .decode(&record.payload_nonce)
-        .map_err(|_| IncomingError::InvalidRecord("invalid nonce encoding"))?;
-    if nonce.len() != 12 {
-        return Err(IncomingError::InvalidRecord("invalid nonce size"));
+    // A bare 12-byte nonce (epoch 1), or `e<N>.<nonce>` for a change of a rotated epoch N >= 2
+    // (`epoch_keys::nonce_field`, Android `EpochKeys.nonceField`). The epoch is part of the signed bytes.
+    if crate::epoch_keys::nonce_bytes(&record.payload_nonce).is_none() {
+        return Err(IncomingError::InvalidRecord("invalid nonce encoding"));
     }
     let signature: [u8; 64] = URL_SAFE_NO_PAD
         .decode(&record.device_signature)
@@ -327,5 +326,24 @@ mod tests {
             ]),
             Err(IncomingError::InvalidBatchSize)
         );
+    }
+
+    /// After a key rotation the phone writes `e<N>.<nonce>` (`epoch_keys::nonce_field`). Wi-Fi,
+    /// Google Drive and the enrollment checkpoint all verify changes here, so the form must pass.
+    #[test]
+    fn accepts_the_nonce_of_a_rotated_epoch_and_refuses_a_malformed_one() {
+        let key = SigningKey::from_bytes(&[19; 32]);
+        let change = |nonce: String| ChangeRecord::create_signed_with(
+            "vault-a", "device-a", 1, GENESIS_HASH, "mutation-1", "entry", "entry-1", ChangeKind::Upsert, 0,
+            RecordVersion::from_entries([("device-a", 1)]), "2026-09-26T12:00:00Z", URL_SAFE_NO_PAD.encode([8_u8; 16]),
+            nonce, |bytes| Ok::<_, ()>(key.sign(bytes).to_bytes())).unwrap();
+        let rotated = change(crate::epoch_keys::nonce_field(2, &[9; 12]));
+        assert!(rotated.payload_nonce.starts_with("e2."));
+        let batch = verifier().verify_batch(vec![rotated.clone()]).unwrap();
+        assert_eq!(batch.records(), std::slice::from_ref(&rotated));
+        assert_eq!(validate_signed(&rotated, &key.verifying_key().to_bytes()), Ok(()));
+        for bad in ["e1.CQkJCQkJCQkJCQkJ", "e2.CQkJ", "e02.CQkJCQkJCQkJCQkJ", "x2.CQkJCQkJCQkJCQkJ", ""] {
+            assert!(verifier().verify_batch(vec![change(bad.to_owned())]).is_err(), "{bad:?} must be refused");
+        }
     }
 }

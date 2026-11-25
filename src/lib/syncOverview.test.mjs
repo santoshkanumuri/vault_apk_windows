@@ -78,7 +78,22 @@ test("real problems stay visible", () => {
   assert.equal(syncOverview(facts([peer("Pixel 8")], { conflicts: 1 })).state, "conflicts");
   assert.equal(syncOverview(facts([peer("Pixel 8")], { waitingHere: true })).state, "waitingHere");
   assert.equal(syncOverview(facts([peer("Pixel 8", { seenAgo: null, reported: false })])).state, "notYet");
-  assert.equal(peerAck(peer("Pixel 8", { unconfirmed: 1, seenAgo: null, reported: false }), now), "waiting");
+  // Before its first report the count is every change this PC wrote, not what it misses.
+  assert.equal(peerAck(peer("Pixel 8", { unconfirmed: 1, seenAgo: null, reported: false }), now), "notChecked");
+});
+
+test("a device that never finished pairing never makes changes wait forever", () => {
+  const halfAdded = peer("Windows device", { unconfirmed: 1303, seenAgo: null, reported: false });
+  const alone = syncOverview(facts([halfAdded]));
+  assert.equal(alone.state, "notYet");
+  assert.equal(alone.waitingChanges, 0);
+  assert.equal(alone.waitingFor.length, 0);
+  const withPhone = syncOverview(facts([peer("Pixel 8"), halfAdded]));
+  assert.equal(withPhone.state, "upToDate");
+  assert.equal(withPhone.peers["id-Windows device"], "notChecked");
+  const reported = syncOverview(facts([peer("Windows device", { unconfirmed: 3, seenAgo: minute, reported: true })]));
+  assert.equal(reported.state, "waiting");
+  assert.equal(reported.waitingChanges, 3);
 });
 
 test("device rows", () => {

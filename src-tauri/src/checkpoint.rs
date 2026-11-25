@@ -268,15 +268,32 @@ fn last_writer<'a>(group: &[&'a HeldChange]) -> Option<&'a HeldChange> {
     best
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// Why a checkpoint was refused. The text names devices, sequences, entity types and short hash
+/// prefixes only, never a key or a payload, so the pairing error can show it.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CheckpointError {
-    Membership,
-    Issuer,
+    #[error("membership: {0}")]
+    Membership(&'static str),
+    #[error("issuer: {0}")]
+    Issuer(&'static str),
+    #[error("the managing device's signature does not verify")]
     Signature,
-    Heads,
-    Change,
-    Digest,
-    Reference,
+    #[error("heads: {0}")]
+    Heads(String),
+    #[error("change {device}:{sequence}: {reason}")]
+    Change { device: String, sequence: u64, reason: String },
+    #[error("digest: {0}")]
+    Digest(&'static str),
+    #[error("reference: {0}")]
+    Reference(String),
+}
+
+fn short(hash: &str) -> &str {
+    hash.get(..12).unwrap_or(hash)
+}
+
+fn change_error(operation: &ChangeRecord, reason: impl Into<String>) -> CheckpointError {
+    CheckpointError::Change { device: operation.device_id.clone(), sequence: operation.sequence, reason: reason.into() }
 }
 
 /// Checks a v4 snapshot's checkpoint against the snapshot's own content, in the design's order:
@@ -296,18 +313,24 @@ pub fn validate(
     tombstones: &[TombstoneRef],
     conflicts: &[ConflictRef],
 ) -> Result<(), CheckpointError> {
-    if checkpoint.format != FORMAT || checkpoint.vault_id != membership.vault_id {
-        return Err(CheckpointError::Membership);
+    if checkpoint.format != FORMAT {
+        return Err(CheckpointError::Membership("unsupported checkpoint format"));
+    }
+    if checkpoint.vault_id != membership.vault_id {
+        return Err(CheckpointError::Membership("checkpoint of another vault"));
     }
     // 1. The membership it names.
     if checkpoint.membership_count != membership_count as u64 || checkpoint.membership_head != membership.head {
-        return Err(CheckpointError::Membership);
+        return Err(CheckpointError::Membership("checkpoint names another membership history"));
     }
     // 2. Signed by the managing device, which is the paired peer.
-    if checkpoint.issuer_device_id != membership.manager_device_id || checkpoint.issuer_device_id != peer_device_id {
-        return Err(CheckpointError::Issuer);
+    if checkpoint.issuer_device_id != membership.manager_device_id {
+        return Err(CheckpointError::Issuer("not the managing device"));
     }
-    let issuer = membership.members.get(&checkpoint.issuer_device_id).ok_or(CheckpointError::Issuer)?;
+    if checkpoint.issuer_device_id != peer_device_id {
+        return Err(CheckpointError::Issuer("not the paired device"));
+    }
+    let issuer = membership.members.get(&checkpoint.issuer_device_id).ok_or(CheckpointError::Issuer("not a member"))?;
     if !signature_ok(&issuer.public_key, &checkpoint.signing_bytes(), &checkpoint.signature) {
         return Err(CheckpointError::Signature);
     }
@@ -315,14 +338,14 @@ pub fn validate(
     let mut claimed: HashMap<&str, &CheckpointHead> = HashMap::new();
     for head in &checkpoint.heads {
         if head.sequence == 0 || !is_hash(&head.hash) || claimed.insert(&head.device_id, head).is_some() {
-            return Err(CheckpointError::Heads);
+            return Err(CheckpointError::Heads(format!("invalid or repeated head {}:{}", head.device_id, head.sequence)));
         }
     }
     let mut by_hash: HashMap<&str, &ChangeRecord> = HashMap::new();
     let mut mutations = HashSet::new();
     for operation in operations {
         if by_hash.insert(&operation.hash, operation).is_some() || !mutations.insert(operation.mutation_id.as_str()) {
-            return Err(CheckpointError::Change);
+            return Err(change_error(operation, "repeated change or mutation ID"));
         }
     }
     for head in claimed.values() {
@@ -331,41 +354,43 @@ pub fn validate(
             .filter(|operation| operation.device_id == head.device_id && operation.sequence == head.sequence)
             .collect();
         if witnesses.len() != 1 || witnesses[0].hash != head.hash {
-            return Err(CheckpointError::Heads);
+            return Err(CheckpointError::Heads(format!("head {}:{} has no witness", head.device_id, head.sequence)));
         }
     }
     // 4. Every change: hash, author, signature, at or below its author's head.
     for operation in operations {
-        let member = membership.members.get(&operation.device_id).ok_or(CheckpointError::Change)?;
+        let member = membership.members.get(&operation.device_id).ok_or_else(|| change_error(operation, "unknown author"))?;
         // A removed device's change counts up to its cutoff. A removal signed before cutoffs
         // existed has none; its changes are then trusted as snapshot v3 trusts them.
         let allowed = member.active
             || member.removal_cutoff.is_none()
             || crate::protocol::within_removal_cutoff(member.removal_cutoff.as_ref(), operation.sequence, &operation.hash);
-        let head = claimed.get(operation.device_id.as_str()).map_or(0, |head| head.sequence);
-        if !allowed
-            || operation.vault_id != membership.vault_id
-            || operation.sequence > head
-            || crate::incoming::validate_signed(operation, &member.public_key).is_err()
-        {
-            return Err(CheckpointError::Change);
+        if !allowed {
+            return Err(change_error(operation, "after its removed author's cutoff"));
         }
+        if operation.vault_id != membership.vault_id {
+            return Err(change_error(operation, "of another vault"));
+        }
+        if operation.sequence > claimed.get(operation.device_id.as_str()).map_or(0, |head| head.sequence) {
+            return Err(change_error(operation, "beyond its author's head"));
+        }
+        crate::incoming::validate_signed(operation, &member.public_key).map_err(|error| change_error(operation, error.to_string()))?;
     }
     // 5. Digests.
     let hashes: Vec<&str> = operations.iter().map(|operation| operation.hash.as_str()).collect();
     if conflicts.iter().any(|conflict| conflict.resolved) {
-        return Err(CheckpointError::Digest);
+        return Err(CheckpointError::Digest("a resolved conflict is listed"));
     }
     let expected = digests(&hashes, records, tombstones, conflicts);
-    if expected
-        != (Digests {
-            operations: checkpoint.operations_digest.clone(),
-            records: checkpoint.records_digest.clone(),
-            tombstones: checkpoint.tombstones_digest.clone(),
-            conflicts: checkpoint.conflicts_digest.clone(),
-        })
-    {
-        return Err(CheckpointError::Digest);
+    for (name, computed, signed) in [
+        ("changes", &expected.operations, &checkpoint.operations_digest),
+        ("records", &expected.records, &checkpoint.records_digest),
+        ("tombstones", &expected.tombstones, &checkpoint.tombstones_digest),
+        ("conflicts", &expected.conflicts, &checkpoint.conflicts_digest),
+    ] {
+        if computed != signed {
+            return Err(CheckpointError::Digest(name));
+        }
     }
     // 6. The snapshot's heads, tombstones and conflicts agree with the included changes.
     let mut listed: Vec<&CheckpointHead> = heads.iter().collect();
@@ -373,19 +398,22 @@ pub fn validate(
     listed.sort_by(|l, r| l.device_id.cmp(&r.device_id));
     signed.sort_by(|l, r| l.device_id.cmp(&r.device_id));
     if listed != signed {
-        return Err(CheckpointError::Heads);
+        return Err(CheckpointError::Heads(format!("the snapshot lists {} heads, the checkpoint signs {}", listed.len(), signed.len())));
     }
     for tombstone in tombstones {
-        let change = by_hash.get(tombstone.change_hash).ok_or(CheckpointError::Reference)?;
+        let change = by_hash
+            .get(tombstone.change_hash)
+            .ok_or_else(|| CheckpointError::Reference(format!("{} tombstone without its change {}", tombstone.entity_type, short(tombstone.change_hash))))?;
         if change.kind != ChangeKind::Delete || change.entity_type != tombstone.entity_type || change.entity_id != tombstone.entity_id {
-            return Err(CheckpointError::Reference);
+            return Err(CheckpointError::Reference(format!("{} tombstone names change {} of another item", tombstone.entity_type, short(tombstone.change_hash))));
         }
     }
     for conflict in conflicts {
         if !by_hash.contains_key(conflict.remote_change_hash)
             || (conflict.local_change_hash != GENESIS_HASH && !by_hash.contains_key(conflict.local_change_hash))
         {
-            return Err(CheckpointError::Reference);
+            return Err(CheckpointError::Reference(format!("conflict without its changes {}/{}",
+                short(conflict.local_change_hash), short(conflict.remote_change_hash))));
         }
     }
     Ok(())
@@ -638,6 +666,81 @@ mod tests {
         kept.sort_unstable();
         // a: the two concurrent upserts (pc-1 is included in both); b: the delete; c: the live upsert (also pc's head).
         assert_eq!(kept, ["pc-2", "pc-4", "phone-1", "phone-2"]);
+    }
+
+    /// The cross-app vector of a realistic history (`fixtures/enrollment-realistic-v1.json`, written on an
+    /// emulator by Android `RealisticEnrollmentFixtureTest`): the exact snapshot the phone sends after a
+    /// tablet was removed with a cutoff, this PC left by a signed request (two key rotations), conflicts,
+    /// tombstones, icons, sign-in methods, appearance and compaction. This PC, reset to a fresh vault and
+    /// a new identity, imports it the way pairing does and then accepts the phone's next change.
+    #[test]
+    fn a_reset_pc_imports_a_realistic_android_enrollment_and_syncs_on() {
+        use base64::engine::general_purpose::STANDARD;
+        let vector: Value = serde_json::from_str(include_str!("../fixtures/enrollment-realistic-v1.json")).unwrap();
+        let text = |value: &Value| value.as_str().unwrap().to_owned();
+        let bytes32 = |hex: &Value| -> [u8; 32] {
+            let hex = hex.as_str().unwrap();
+            (0..32).map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap()).collect::<Vec<_>>().try_into().unwrap()
+        };
+        let identity_of = |device: &Value| DeviceIdentity {
+            device_id: text(&device["deviceId"]),
+            public_key: URL_SAFE_NO_PAD.decode(text(&device["publicKey"])).unwrap().try_into().unwrap(),
+        };
+        let vault_id = text(&vector["vaultId"]);
+        let (joiner, host) = (identity_of(&vector["joiner"]), identity_of(&vector["host"]));
+        let expected = &vector["expected"];
+        let stream = STANDARD.decode(text(&vector["stream"])).unwrap();
+        let prepared = crate::snapshot_import::PreparedEnrollment::read_with(
+            &mut Cursor::new(stream), &bytes32(&vector["pairingKeyHex"]), &vault_id, &joiner, &host, true)
+            .unwrap_or_else(|error| panic!("the PC must accept the phone's snapshot: {error}"));
+
+        // After "Start fresh": an empty vault and a new identity, the one the phone added.
+        let directory = std::env::temp_dir().join(format!("nuvori-realistic-{}", uuid::Uuid::new_v4()));
+        let store = crate::vault::VaultStore::new(&directory);
+        let mut vault = store.create("twelve-character-password").unwrap();
+        let identities = crate::identity::DeviceIdentityStore::new(directory.join("joiner-identity.json"));
+        assert_eq!(identities.create_known(&joiner.device_id, &bytes32(&vector["joiner"]["seedHex"])).unwrap(), joiner);
+        prepared.commit_joining(vault.connection(), &identities, true).unwrap();
+
+        let db = vault.connection();
+        let count = |sql: &str| db.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
+        let number = |name: &str| expected[name].as_i64().unwrap();
+        assert_eq!(count("SELECT (SELECT count(*) FROM local_entries) + (SELECT count(*) FROM local_notes)"), number("entries"));
+        assert_eq!(count("SELECT count(*) FROM local_groups"), number("groups"));
+        assert_eq!(count("SELECT count(*) FROM local_passkeys"), number("passkeys"));
+        assert_eq!(count("SELECT count(*) FROM sync_operations"), number("operations"));
+        assert_eq!(count("SELECT count(*) FROM sync_device_heads"), number("heads"));
+        // A deleted sign-in method stays as its record here (`snapshot_import::insert_snapshot`), not as a tombstone row.
+        assert_eq!(count("SELECT count(*) FROM sync_tombstones WHERE entity_type <> 'sign_in_method'"),
+            number("tombstones") - number("signInMethodTombstones"));
+        assert_eq!(count("SELECT count(*) FROM sync_conflicts WHERE resolved_at_utc = ''"), number("openConflicts"));
+        assert_eq!(count("SELECT count(*) FROM sync_membership_events"), number("membershipEvents"));
+        assert_eq!(count("SELECT count(*) FROM sync_epoch_keys"), expected["epochKeys"].as_array().unwrap().len() as i64);
+        assert_eq!(count("SELECT count(*) FROM sync_checkpoints"), 1);
+
+        // The phone's first change after the join (epoch 3) chains on its checkpoint head and decrypts here.
+        let next = &vector["next"];
+        let change = ChangeRecord {
+            mutation_id: text(&next["mutationId"]), format_version: next["formatVersion"].as_u64().unwrap() as u16,
+            vault_id: text(&next["vaultId"]), device_id: text(&next["deviceId"]), sequence: next["sequence"].as_u64().unwrap(),
+            previous_hash: text(&next["previousHash"]), entity_type: text(&next["entityType"]), entity_id: text(&next["entityId"]),
+            kind: serde_json::from_value(next["kind"].clone()).unwrap(), base_revision: next["baseRevision"].as_u64().unwrap(),
+            record_version: serde_json::from_str(next["recordVersionJson"].as_str().unwrap()).unwrap(),
+            occurred_at_utc: text(&next["occurredAtUtc"]), payload_ciphertext: text(&next["payloadCiphertext"]),
+            payload_nonce: text(&next["payloadNonce"]), device_signature: text(&next["deviceSignature"]), hash: text(&next["hash"]),
+        };
+        assert!(change.payload_nonce.starts_with("e3."));
+        let (sequence, hash): (i64, String) = db
+            .query_row("SELECT sequence, hash FROM sync_device_heads WHERE device_id = ?1", [&host.device_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap();
+        let verifier = crate::incoming::IncomingVerifier::new(&vault_id, &host.device_id, host.public_key, sequence as u64, hash).unwrap();
+        verifier.verify_batch(vec![change.clone()]).unwrap();
+        let content_key: Vec<u8> = db.query_row("SELECT content_key FROM sync_group_state", [], |row| row.get(0)).unwrap();
+        let plaintext = crate::payload::decrypt(&content_key, &change).unwrap();
+        assert!(serde_json::from_slice::<Value>(&plaintext).unwrap()["entry"]["title"].as_str().unwrap().contains("joined again"));
+        drop(vault);
+        crate::epoch_keys::forget(&vault_id);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

@@ -474,7 +474,7 @@ fn validate(
             &tombstones,
             &conflicts,
         )
-        .map_err(|_| SnapshotError::InvalidCheckpoint)?;
+        .map_err(SnapshotError::InvalidCheckpoint)?;
     }
     Ok(VerifiedSnapshotMetadata {
         vault_id: state.vault_id,
@@ -559,8 +559,9 @@ pub enum SnapshotError {
     InvalidMembership,
     #[error("snapshot operation history is invalid")]
     InvalidHistory,
-    #[error("snapshot checkpoint is invalid")]
-    InvalidCheckpoint,
+    /// The reason names devices, sequences and hash prefixes only (`checkpoint::CheckpointError`).
+    #[error("snapshot checkpoint is invalid: {0}")]
+    InvalidCheckpoint(crate::checkpoint::CheckpointError),
     #[error("snapshot signed membership is invalid: {0}")]
     Membership(#[from] MembershipError),
     #[error("snapshot operation is invalid: {0}")]
