@@ -855,6 +855,34 @@ impl UnlockedVault {
         Ok(())
     }
 
+    /// Marks one of an item's photos as its cover, the one lists and the item's page show first.
+    /// In a sync group this is Android's `photo_cover` change (`LocalPhotoChangeWriter.setCover`):
+    /// one record for the item, naming the photo, which this app already applies when it arrives
+    /// from a phone. A photo the group has never seen is marked here only.
+    pub fn set_cover_photo(&mut self, photo_id: &str) -> Result<(), VaultError> {
+        let entry_id: Option<String> = self
+            .connection
+            .query_row("SELECT entry_id FROM local_entry_photos WHERE id = ?1", [photo_id], |row| row.get(0))
+            .optional()?;
+        let entry_id = entry_id.ok_or(VaultError::PhotoNotFound)?;
+        let mark = "UPDATE local_entry_photos SET is_cover = (id = ?2) WHERE entry_id = ?1";
+        if ChangeStore::record(&self.connection, "photo", photo_id)?.is_none() {
+            self.connection.execute(mark, params![entry_id, photo_id])?;
+            return Ok(());
+        }
+        let (entry, photo) = (entry_id.clone(), photo_id.to_owned());
+        self.write_change(
+            "photo_cover",
+            &entry_id,
+            ChangeKind::Upsert,
+            serde_json::json!({"coverPhotoId": photo_id}),
+            move |transaction| {
+                transaction.execute(mark, params![entry, photo])?;
+                Ok(())
+            },
+        )
+    }
+
     fn membership_events(&self) -> Result<Vec<crate::membership::MembershipEvent>, VaultError> {
         let rows: Vec<String> = self
             .connection
@@ -4137,6 +4165,87 @@ mod tests {
         assert_eq!(photos.len(), 1);
         vault.delete_entry(entry_id).unwrap();
         assert!(vault.list_entry_photos(entry_id).is_err());
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_chosen_photo_covers_the_item_and_a_shared_one_tells_the_group() {
+        let directory = std::env::temp_dir().join(format!("nuvori-cover-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("twelve-character-password").unwrap();
+        let entry = vault
+            .save_entry(serde_json::json!({
+                "type": "CARD", "title": "Travel card", "primaryValue": "4111111111111111"
+            }))
+            .unwrap();
+        let entry_id = entry["id"].as_str().unwrap().to_owned();
+        let png = |tail: &[u8]| {
+            base64::engine::general_purpose::STANDARD
+                .encode([b"\x89PNG\r\n\x1a\n".as_slice(), tail].concat())
+        };
+        vault.add_entry_photo(&entry_id, "image/png", &png(b"one")).unwrap();
+        vault.add_entry_photo(&entry_id, "image/png", &png(b"two")).unwrap();
+        // The first photo covers the item until another is chosen, and the cover is listed first.
+        let photos = vault.list_entry_photos(&entry_id).unwrap();
+        assert_eq!((photos.len(), photos[0].is_cover, photos[1].is_cover), (2, true, false));
+        let (first, second) = (photos[0].id.clone(), photos[1].id.clone());
+
+        vault.set_cover_photo(&second).unwrap();
+        let photos = vault.list_entry_photos(&entry_id).unwrap();
+        assert_eq!((photos[0].id.as_str(), photos[0].is_cover, photos[1].is_cover), (second.as_str(), true, false));
+        // On its own the choice is kept here: these photos were never part of a signed history.
+        assert_eq!(ChangeStore::operation_count(vault.connection()).unwrap(), 1);
+        assert!(matches!(vault.set_cover_photo("no-such-photo"), Err(VaultError::PhotoNotFound)));
+
+        // In a sync group it travels as Android's `photo_cover` change: the item names the photo.
+        vault
+            .connection()
+            .execute(
+                "INSERT INTO sync_group_state (vault_id, content_key, transport_secret)
+                 VALUES ('android-vault', ?1, ?2)",
+                params![[7_u8; 32].as_slice(), [8_u8; 32].as_slice()],
+            )
+            .unwrap();
+        vault
+            .connection()
+            .execute("UPDATE local_sync_settings SET vault_id = 'android-vault' WHERE id = 1", [])
+            .unwrap();
+        assert_eq!(vault.publish_unsynced_photos().unwrap(), 2);
+        vault.set_cover_photo(&first).unwrap();
+        let photos = vault.list_entry_photos(&entry_id).unwrap();
+        assert_eq!((photos[0].id.as_str(), photos[0].is_cover, photos[1].is_cover), (first.as_str(), true, false));
+        let (mutation_id, device_id, kind, ciphertext, nonce, occurred_at, signature):
+            (String, String, String, String, String, String, String) = vault
+            .connection()
+            .query_row(
+                "SELECT mutation_id, device_id, kind, payload_ciphertext, payload_nonce,
+                        occurred_at_utc, device_signature FROM sync_operations
+                 WHERE entity_type = 'photo_cover' AND entity_id = ?1",
+                [&entry_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+            )
+            .unwrap();
+        assert_eq!(kind, "upsert");
+        let operation = ChangeRecord::create(
+            "android-vault",
+            &device_id,
+            4,
+            GENESIS_HASH,
+            mutation_id,
+            "photo_cover",
+            &entry_id,
+            ChangeKind::Upsert,
+            0,
+            RecordVersion::from_entries([(&device_id, 1)]),
+            occurred_at,
+            ciphertext,
+            nonce,
+            signature,
+        );
+        let payload: serde_json::Value =
+            serde_json::from_slice(&payload::decrypt(&[7_u8; 32], &operation).unwrap()).unwrap();
+        assert_eq!(payload, serde_json::json!({"coverPhotoId": first}));
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }

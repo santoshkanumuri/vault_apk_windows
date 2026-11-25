@@ -242,6 +242,7 @@ export const strings = {
   photo: "Photo",
   photoAttachedToThisItem: "Photo attached to this item",
   closePhoto: "Close photo",
+  setAsCover: "Set as cover",
   itMayHaveBeenDeletedOn: "It may have been deleted on another device.",
   thisItemIsnTAvailable: "This item isn't available",
   network: "Network",

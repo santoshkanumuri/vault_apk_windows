@@ -274,6 +274,21 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
     }
   };
 
+  // The cover is the photo lists and this page show first. On a phone it is picked the same way,
+  // and the choice travels to every paired device.
+  const chooseCover = async (photo: EntryPhoto) => {
+    setBusy(true);
+    try {
+      await api.setCoverPhoto(photo.id);
+      setPhotos(await api.listEntryPhotos(entryId));
+      toast.success("Cover photo set");
+    } catch (failure) {
+      toast.error(failure, "Couldn't set the cover photo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async (photo: EntryPhoto) => {
     if (!(await confirm({ title: "Delete this photo?", confirmLabel: "Delete photo", danger: true }))) return;
     setBusy(true);
@@ -303,7 +318,9 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
           {photos.map((photo) => (
             <figure key={photo.id} className="photo">
               <button type="button" className="photo-open" onClick={() => setViewing(photo)} aria-label={photo.isCover ? "View cover photo" : "View photo"}><img src={photo.dataUrl} alt="" /></button>
-              {photo.isCover && <span className="photo-badge">{strings.cover}</span>}
+              {photo.isCover
+                ? <span className="photo-badge">{strings.cover}</span>
+                : <button type="button" className="photo-badge photo-cover-set" onClick={() => void chooseCover(photo)} disabled={busy}>{strings.setAsCover}</button>}
               <IconButton label={strings.deletePhoto} icon={Trash2} size="sm" variant="secondary" className="photo-delete" onClick={() => void remove(photo)} disabled={busy} />
             </figure>
           ))}
