@@ -2294,6 +2294,8 @@ impl UnlockedVault {
             serde_json::json!({"deleted": true}),
             |transaction| {
                 crate::local_recovery::keep_deleted(transaction, id, now_millis().unwrap_or_default(), false)?;
+                // L6: logins linked to a deleted authenticator lose the link, as on Android.
+                crate::incoming_apply::clear_authenticator_links(transaction, id)?;
                 transaction.execute("DELETE FROM local_entries WHERE id = ?1", [id])?;
                 transaction.execute("DELETE FROM local_entry_photos WHERE entry_id = ?1", [id])?;
                 transaction.execute("DELETE FROM sync_attachment_manifests WHERE owner_entity_id = ?1", [id])?;
@@ -3361,6 +3363,13 @@ mod tests {
         // The same file again adds nothing new.
         let again = vault.import_keepass(&plan).unwrap();
         assert_eq!((again.logins, again.duplicates), (0, 4));
+
+        // L6: deleting the code on this PC clears the login's link to it, as on Android.
+        let (bank_id, code_id) = (bank["id"].as_str().unwrap().to_owned(), code["id"].as_str().unwrap().to_owned());
+        vault.delete_entry(&code_id).unwrap();
+        let entries = vault.list_entries().unwrap();
+        let bank = entries.iter().find(|entry| entry["id"] == bank_id.as_str()).unwrap();
+        assert_eq!(bank["linkedAuthenticatorId"], "");
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }

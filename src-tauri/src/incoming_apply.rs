@@ -98,7 +98,7 @@ impl IncomingApply {
         let payload =
             serde_json::from_slice::<Value>(&plaintext).map_err(|_| ApplyError::InvalidPayload);
         plaintext.zeroize();
-        let payload = payload?;
+        let payload = with_fallback_title(operation, payload?);
         validate_payload(operation, &payload)?;
 
         connection.execute_batch(APPLIED_SCHEMA)?;
@@ -527,6 +527,7 @@ pub(crate) fn materialize_checked(
     content_key: &[u8],
     blobs: Option<&PhotoBlobs>,
 ) -> Result<(), ApplyError> {
+    let payload = &with_fallback_title(operation, payload.clone());
     validate_payload(operation, payload)?;
     // Android records only the version when the image or cover has nothing left to attach to.
     let mut record_only = false;
@@ -750,6 +751,59 @@ pub(crate) fn resolve_links(
     groups.extend(folder);
     resolved["groupIds"] = Value::Array(groups.into_iter().map(|id| Value::String(id.to_owned())).collect());
     Ok(resolved)
+}
+
+/// L6: Android's authenticator import can save an entry with a blank title, and Android shows such
+/// an entry under a fixed fallback (`IncomingRecordRules.fallbackTitle`). The same rule applies
+/// here, so the entry is saved instead of set aside, and both apps show the same title.
+fn with_fallback_title(operation: &ChangeRecord, mut payload: Value) -> Value {
+    if operation.kind == ChangeKind::Upsert && operation.entity_type == "entry"
+        && let Some(entry) = payload.get_mut("entry").and_then(Value::as_object_mut)
+        && entry.get("title").and_then(Value::as_str).is_some_and(|title| title.trim().is_empty())
+    {
+        let title = fallback_title(entry);
+        entry.insert("title".to_owned(), Value::String(title));
+    }
+    payload
+}
+
+/// Android `IncomingRecordRules.fallbackTitle`, deterministic so every device shows the same title:
+/// for a login, the host of its web address (or first autofill site), else its user name (at most
+/// 200 characters), else "Login"; any other type "Untitled".
+pub(crate) fn fallback_title(entry: &serde_json::Map<String, Value>) -> String {
+    let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or_default();
+    if text("type") != "PASSWORD" {
+        return "Untitled".to_owned();
+    }
+    let address = text("tertiaryValue");
+    let origin = if address.trim().is_empty() {
+        text("autofillOrigins").split(['\n', '\r']).map(str::trim).find(|line| !line.is_empty()).unwrap_or_default()
+    } else {
+        address
+    };
+    let after_scheme = origin.split_once("://").map_or(origin, |(_, rest)| rest);
+    let host = after_scheme.split('/').next().unwrap_or_default().trim();
+    if !host.is_empty() {
+        return host.to_owned();
+    }
+    let user = text("primaryValue").trim();
+    if !user.is_empty() {
+        // Kotlin `take(200)` counts UTF-16 units.
+        let mut units = 0;
+        return user.chars().take_while(|c| { units += c.len_utf16(); units <= 200 }).collect();
+    }
+    "Login".to_owned()
+}
+
+/// L6: logins linked to authenticator `id` lose the link when it is deleted or becomes another
+/// type, on this PC only and without a new change, as Android `clearAuthenticatorLinks` does on
+/// every device. The entries keep their edit time.
+pub(crate) fn clear_authenticator_links(connection: &Connection, id: &str) -> rusqlite::Result<usize> {
+    connection.execute(
+        "UPDATE local_entries SET data_json = json_set(data_json, '$.linkedAuthenticatorId', '')
+         WHERE id != ?1 AND CASE WHEN json_valid(data_json) THEN json_extract(data_json, '$.linkedAuthenticatorId') END = ?1",
+        [id],
+    )
 }
 
 fn validate_payload(operation: &ChangeRecord, payload: &Value) -> Result<(), ApplyError> {
@@ -1058,6 +1112,14 @@ fn materialize(
                 let updated_at = entry["updatedAt"]
                     .as_i64()
                     .ok_or(ApplyError::InvalidPayload)?;
+                // A peer may turn an authenticator into another type: logins linked to it lose
+                // the link, as when it is deleted (Android `IncomingEntryChangeApplier`).
+                let previous_type: Option<String> = transaction
+                    .query_row("SELECT type FROM local_entries WHERE id = ?1", [&operation.entity_id], |row| row.get(0))
+                    .optional()?;
+                if previous_type.as_deref() == Some("AUTHENTICATOR") && entry_type != "AUTHENTICATOR" {
+                    clear_authenticator_links(transaction, &operation.entity_id)?;
+                }
                 if entry_type == "NOTE" {
                     // An entry that changed type must not stay visible under its old type.
                     transaction.execute(
@@ -1174,6 +1236,7 @@ fn materialize(
             } else {
                 // A paired device deleted it: this PC keeps a copy in Recently deleted.
                 crate::local_recovery::keep_deleted(transaction, &operation.entity_id, local_now(), true)?;
+                clear_authenticator_links(transaction, &operation.entity_id)?;
                 transaction.execute(
                     "DELETE FROM local_entries WHERE id = ?1",
                     [&operation.entity_id],
@@ -2489,5 +2552,81 @@ mod tests {
             ApplyOutcome::Applied);
         assert_eq!(fixture.ids(), owned("blue", "slate", false));
         assert_eq!(applied_count(&connection), 1);
+    }
+
+    /// L6: the same fallback title as Android `IncomingRecordRules.fallbackTitle`.
+    #[test]
+    fn a_blank_title_gets_the_android_fallback() {
+        let title = |fields: Value| {
+            let mut entry = entry("entry-a", " ");
+            for (key, value) in fields.as_object().unwrap() { entry[key] = value.clone(); }
+            super::fallback_title(entry.as_object().unwrap())
+        };
+        assert_eq!(title(json!({"tertiaryValue": "https://accounts.example.com/sign-in"})), "accounts.example.com");
+        assert_eq!(title(json!({"tertiaryValue": "example.org"})), "example.org");
+        assert_eq!(title(json!({"autofillOrigins": "\n  https://shop.example/x\nhttps://other.example"})), "shop.example");
+        assert_eq!(title(json!({"primaryValue": "  someone@example.com "})), "someone@example.com");
+        assert_eq!(title(json!({"primaryValue": "u".repeat(300)})), "u".repeat(200));
+        assert_eq!(title(json!({})), "Login");
+        assert_eq!(title(json!({"type": "AUTHENTICATOR", "tertiaryValue": "https://a.example"})), "Untitled");
+    }
+
+    /// L6: an entry with a blank title from a paired device is saved under the fallback title
+    /// instead of being refused.
+    #[test]
+    fn an_entry_with_a_blank_title_applies_under_the_fallback() {
+        let mut connection = connection();
+        let signer = SigningKey::from_bytes(&[23; 32]);
+        let mut blank = entry("entry-a", "   ");
+        blank["tertiaryValue"] = "https://mail.example.com/login".into();
+        let change = operation(&signer, "device-b", 1, GENESIS_HASH, "mutation-blank",
+            RecordVersion::from_entries([("device-b", 1)]), ChangeKind::Upsert, json!({"entry": blank, "groupIds": []}), 0);
+        insert_persisted(&connection, &change);
+        assert_eq!(IncomingApply::apply(&mut connection, &change, &CONTENT_KEY).unwrap(), ApplyOutcome::Applied);
+        let data: String = connection.query_row("SELECT data_json FROM local_entries WHERE id = 'entry-a'", [], |row| row.get(0)).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&data).unwrap()["title"], "mail.example.com");
+    }
+
+    /// L6: a login linked to an authenticator loses the link when the authenticator is deleted or
+    /// becomes another type, as on Android. Other logins keep theirs.
+    #[test]
+    fn deleting_or_retyping_an_authenticator_clears_links_to_it() {
+        let mut connection = connection();
+        let signer = SigningKey::from_bytes(&[29; 32]);
+        let code = |id: &str| {
+            let mut code = entry(id, "Code");
+            code["type"] = "AUTHENTICATOR".into();
+            code["secondaryValue"] = "JBSWY3DPEHPK3PXP".into();
+            code
+        };
+        let login = |id: &str, linked: &str| {
+            let mut login = entry(id, "Login");
+            login["linkedAuthenticatorId"] = linked.into();
+            login
+        };
+        let mut previous = GENESIS_HASH.to_owned();
+        let mut sequence = 0;
+        let mut apply = |connection: &mut Connection, id: &str, kind: ChangeKind, body: Value| {
+            sequence += 1;
+            let change = typed_operation(&signer, sequence, &previous, &format!("m-{sequence}"), "entry", id, kind, body);
+            insert_persisted(connection, &change);
+            previous = change.hash.clone();
+            IncomingApply::apply(connection, &change, &CONTENT_KEY).unwrap()
+        };
+        for (id, body) in [("code-1", code("code-1")), ("code-2", code("code-2")),
+            ("login-1", login("login-1", "code-1")), ("login-2", login("login-2", "code-2")), ("login-3", login("login-3", "code-2"))] {
+            assert_eq!(apply(&mut connection, id, ChangeKind::Upsert, json!({"entry": body, "groupIds": []})), ApplyOutcome::Applied);
+        }
+        let linked = |connection: &Connection, id: &str| -> String {
+            let data: String = connection.query_row("SELECT data_json FROM local_entries WHERE id = ?1", [id], |row| row.get(0)).unwrap();
+            serde_json::from_str::<Value>(&data).unwrap()["linkedAuthenticatorId"].as_str().unwrap().to_owned()
+        };
+        assert_eq!(apply(&mut connection, "code-1", ChangeKind::Delete, json!({"deleted": true})), ApplyOutcome::Applied);
+        assert_eq!(linked(&connection, "login-1"), "", "the deleted code's login loses its link");
+        assert_eq!(linked(&connection, "login-2"), "code-2", "other links stay");
+        let mut note = code("code-2");
+        note["type"] = "PASSWORD".into();
+        assert_eq!(apply(&mut connection, "code-2", ChangeKind::Upsert, json!({"entry": note, "groupIds": []})), ApplyOutcome::Applied);
+        assert_eq!((linked(&connection, "login-2"), linked(&connection, "login-3")), (String::new(), String::new()));
     }
 }
