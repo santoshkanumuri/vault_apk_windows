@@ -11,7 +11,8 @@ export const fallbackSnapshot: AppSnapshot = {
   revision: 0,
   chainState: "empty",
   welcomeBack: false,
-  lastUsedAt: 0
+  lastUsedAt: 0,
+  masterPasswordSwitch: null
 };
 
 type VaultValue = {

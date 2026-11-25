@@ -19,6 +19,8 @@ export type AppSnapshot = {
   welcomeBack?: boolean;
   /** While locked: when the vault was last changed (Unix ms, a file time); 0 when unknown. */
   lastUsedAt?: number;
+  /** The phone changed its master password and this PC hasn't switched yet: sync is paused (master_password.rs). */
+  masterPasswordSwitch?: { managerName: string } | null;
 };
 
 export type EntryType = "CARD" | "PASSWORD" | "AUTHENTICATOR" | "QUESTION" | "AUTOFILL";
@@ -327,6 +329,7 @@ export const api = {
   resetVault: (password: string) => call<AppSnapshot>("reset_vault", { password }),
   /** Wraps the vault key under a new master password on this PC. The vault stays unlocked. */
   changeMasterPassword: (current: string, replacement: string) => call<void>("change_master_password", { current, replacement }),
+  switchMasterPassword: (password: string) => call<AppSnapshot>("switch_master_password", { password }),
   /** Deletes this PC's locked vault without its password. `confirmation` is the typed word RESET. */
   startFresh: (confirmation: string) => call<AppSnapshot>("start_fresh", { confirmation }),
   showMainWindow: () => call<void>("show_main_window"),

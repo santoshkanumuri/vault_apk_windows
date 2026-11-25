@@ -79,6 +79,9 @@ pub struct UnlockedVault {
     blobs: PhotoBlobs,
     /// This instance's claim on the in-memory keys of rotated epochs (`epoch_keys::KeyringOwner`).
     keyring: crate::epoch_keys::KeyringOwner,
+    /// The managing phone's master password check that this PC still has to switch to, as last read
+    /// by [UnlockedVault::refresh_master_password]. While it is set, sync waits.
+    master_password_switch: Option<crate::master_password::PendingSwitch>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -214,6 +217,30 @@ impl VaultStore {
         write_new_bootstrap(&bootstrap_path, &replacement_file)
     }
 
+    /// Protocol `master-password-v1`: the same vault key, wrapped again under the managing phone's
+    /// new master password, without this PC's current one. Only for a `replacement` that the
+    /// caller tested against the phone's password check (`PendingSwitch::matches`), or that the
+    /// pairing handshake proved to be the phone's. Like [VaultStore::change_password], the key file
+    /// keeps its Argon2id settings (a format 1 file is timed again), is proven to open with
+    /// `replacement` before it is saved and replaces the old file in one step. The database, its
+    /// key, Windows Hello, the device identity and the sync keys stay as they are.
+    pub fn adopt_password(&self, unlocked_key: &[u8; 32], replacement: &str) -> Result<(), VaultError> {
+        if replacement.is_empty() {
+            return Err(VaultError::PasswordTooShort);
+        }
+        let bootstrap_path = self.directory.join(BOOTSTRAP_FILE);
+        let current: VaultBootstrap = serde_json::from_slice(&fs::read(&bootstrap_path)?)?;
+        let kdf = match current.kdf_params()? {
+            params if current.kdf.is_some() => params,
+            _ => KdfParams::calibrated()?,
+        };
+        let replacement_file = wrap_vault_key(unlocked_key, replacement, kdf)?;
+        if *unwrap_bootstrap(&replacement_file, replacement)? != *unlocked_key {
+            return Err(VaultError::KeyWrappingFailed);
+        }
+        write_new_bootstrap(&bootstrap_path, &replacement_file)
+    }
+
     /// When the vault was last changed, in Unix milliseconds: the newest write time of its
     /// database and key files. Reads file times only, never the files.
     pub fn last_used_millis(&self) -> Option<i64> {
@@ -325,6 +352,7 @@ impl VaultStore {
             ),
             blobs: PhotoBlobs::new(self.directory.join(PHOTO_BLOB_DIRECTORY)),
             keyring: crate::epoch_keys::KeyringOwner::new(),
+            master_password_switch: None,
         })
     }
 
@@ -388,6 +416,7 @@ impl VaultStore {
             ),
             blobs: PhotoBlobs::new(self.directory.join(PHOTO_BLOB_DIRECTORY)),
             keyring: crate::epoch_keys::KeyringOwner::new(),
+            master_password_switch: None,
         };
         vault.replace_retired_identity()?;
         vault.backfill_independent_history()?;
@@ -399,6 +428,10 @@ impl VaultStore {
         let _ = crate::site_icons::purge(&vault.connection, crate::site_icons::enabled());
         let _ = vault.sweep_orphan_photos();
         let _ = vault.publish_unsynced_photos();
+        // Whether sync waits for the phone's new master password (`master_password.rs`).
+        if let Err(error) = vault.refresh_master_password() {
+            crate::activity::diagnostic(crate::activity::Category::Sync, "Could not read the master password state", &error);
+        }
         Ok(vault)
     }
 }
@@ -2923,6 +2956,105 @@ fn initialize_local_sync_settings(connection: &Connection) -> Result<(), VaultEr
         [Uuid::new_v4().to_string()],
     )?;
     Ok(())
+}
+
+/// Protocol `master-password-v1` (`master_password.rs`): every paired device keeps the managing
+/// phone's master password. This PC never manages, so it only reads the phone's checks and writes
+/// its own switches.
+impl UnlockedVault {
+    /// The phone's check this PC still has to switch to, as last read. While it is set, sync waits:
+    /// no pass runs and this PC is not offered on Wi-Fi.
+    pub fn master_password_switch(&self) -> Option<&crate::master_password::PendingSwitch> {
+        self.master_password_switch.as_ref()
+    }
+
+    /// Reads the switch again from the stored changes and the membership. On an error the last
+    /// answer stays, so a sync that waits keeps waiting.
+    pub fn refresh_master_password(&mut self) -> Result<(), VaultError> {
+        self.master_password_switch = self.read_master_password_switch()?;
+        Ok(())
+    }
+
+    /// The current check (`master_password::current`) when this PC is an active member that has
+    /// not switched to it and was added before it. Checks come only from changes this PC applied,
+    /// which verified their author's signature and chain; a check from a device that was not the
+    /// managing device at the membership event it names is ignored there.
+    fn read_master_password_switch(&self) -> Result<Option<crate::master_password::PendingSwitch>, VaultError> {
+        use crate::master_password as rules;
+        if !self.is_enrolled()? {
+            return Ok(None);
+        }
+        let Some(local) = self.local_device_id() else { return Ok(None) };
+        let Some(key) = self.sync_content_key()? else { return Ok(None) };
+        let events = self.membership_events()?;
+        // A membership that doesn't verify syncs nothing either; a removed PC leaves the group.
+        let Ok(verified) = crate::membership::verify(&events) else { return Ok(None) };
+        if !verified.members.get(&local).is_some_and(|member| member.active) {
+            return Ok(None);
+        }
+        let rows: Vec<(String, String, String, String, String, String, String)> = self
+            .connection
+            .prepare(
+                "SELECT o.device_id, o.entity_id, o.kind, o.mutation_id, o.payload_ciphertext, o.payload_nonce, o.hash
+                 FROM sync_operations o LEFT JOIN sync_applied_operations a ON a.mutation_id = o.mutation_id
+                 WHERE o.vault_id = ?1 AND o.entity_type = ?2 AND (a.mutation_id IS NOT NULL OR o.device_id = ?3)",
+            )?
+            .query_map(params![verified.vault_id, rules::ENTITY_TYPE, local], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        let mut candidates = Vec::new();
+        let mut switched: Option<u64> = None;
+        for (author, entity_id, kind, mutation_id, ciphertext, nonce, hash) in rows {
+            let operation = ChangeRecord::create(
+                verified.vault_id.clone(), "", 1, GENESIS_HASH, mutation_id, rules::ENTITY_TYPE, entity_id.clone(),
+                ChangeKind::Upsert, 0, RecordVersion::default(), "", ciphertext, nonce, "",
+            );
+            let Ok(plaintext) = payload::decrypt(&*key, &operation) else { continue };
+            let plaintext = Zeroizing::new(plaintext);
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&plaintext) else { continue };
+            match rules::read(&verified.vault_id, &author, &entity_id, kind == "upsert", &value) {
+                Some(rules::Record::Check(check)) => candidates.push(rules::Candidate { author, hash, check }),
+                Some(rules::Record::Switched(epoch)) if author == local => switched = switched.max(Some(epoch)),
+                _ => {}
+            }
+        }
+        let steps: Vec<(rules::Step, &str)> = events.iter().map(|event| (membership_step(event.action), event.subject_device_id.as_str())).collect();
+        let managers = rules::managers_after(&steps);
+        let head = events.len() as u64;
+        let current = rules::current(candidates, head, |sequence| {
+            sequence.checked_sub(1).and_then(|index| managers.get(usize::try_from(index).ok()?)).cloned()
+        });
+        Ok(current
+            .filter(|current| !rules::satisfied(&local, current, switched, rules::added_at(&steps, &local)))
+            .map(|current| rules::PendingSwitch { vault_id: verified.vault_id.clone(), current }))
+    }
+
+    /// Records that this PC's vault now opens with the password of check `epoch`: a signed
+    /// `master_password` change under this PC's own device ID, `{"switchedEpoch": E}`. No feature
+    /// gate: the phone wrote the check only when every active member announced the feature, and
+    /// every device that receives this switch also holds that check.
+    pub fn record_master_password_switch(&mut self, epoch: u64) -> Result<(), VaultError> {
+        let device_id = self.local_device_id().ok_or(VaultError::NotSharing)?;
+        self.write_change(
+            crate::master_password::ENTITY_TYPE,
+            &device_id,
+            ChangeKind::Upsert,
+            crate::master_password::switched_payload(epoch),
+            |_| Ok(()),
+        )?;
+        self.refresh_master_password()
+    }
+}
+
+fn membership_step(action: crate::membership::MembershipAction) -> crate::master_password::Step {
+    use crate::{master_password::Step, membership::MembershipAction};
+    match action {
+        MembershipAction::Genesis => Step::Genesis,
+        MembershipAction::Add => Step::Add,
+        MembershipAction::Transfer => Step::Transfer,
+        _ => Step::Other,
+    }
 }
 
 impl Drop for UnlockedVault {

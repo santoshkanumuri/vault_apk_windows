@@ -68,6 +68,9 @@ state.conflicts = [
   { id: "c-2", entityType: "note", entityId: state.notes[0].id, title: state.notes[0].title, localUpdatedAt: minutes(300), remoteUpdatedAt: minutes(260), remoteDevice: "Pixel 8", summary: "Note text edited on both devices" }
 ];
 state.sync.conflicts = state.conflicts.length;
+// Preview the phone's master password change (master_password.rs) with ?switch in the URL: the new
+// password is "new master password".
+const mockSwitch = { pending: window.location.search.includes("switch") };
 // Preview "Welcome back" (a vault from an earlier install, last used 9 days ago) with ?welcome in the URL.
 const mockInstall = { welcomeBack: window.location.search.includes("welcome"), lastUsedAt: minutes(60 * 24 * 9 + 35) };
 // Sync status previews (lib/syncOverview.ts): ?wifidrive = Wi-Fi couldn't reach the devices but Google Drive
@@ -136,7 +139,8 @@ function snapshot(): AppSnapshot {
     counts: { cards: count("CARD"), logins: count("PASSWORD"), codes: count("AUTHENTICATOR"), questions: count("QUESTION"), autofill: count("AUTOFILL"), notes: state.notes.length },
     pairedDevices: state.enrolled ? 2 : 0, enrolled: state.enrolled, pendingChanges: 3, revision: state.revision, chainState: "recorded",
     // Like install_marker.rs: only for a locked vault, and only until this install opens it.
-    welcomeBack: state.vault === "locked" && mockInstall.welcomeBack, lastUsedAt: state.vault === "locked" ? mockInstall.lastUsedAt : 0
+    welcomeBack: state.vault === "locked" && mockInstall.welcomeBack, lastUsedAt: state.vault === "locked" ? mockInstall.lastUsedAt : 0,
+    masterPasswordSwitch: state.vault === "unlocked" && state.enrolled && mockSwitch.pending ? { managerName: "Pixel 8" } : null
   };
 }
 
@@ -205,9 +209,16 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "lock_vault": state.vault = "locked"; log("info", "vault", "Vault locked"); return snapshot();
     case "stop_sharing": state.enrolled = false; log("info", "pairing", "Stopped sharing"); return snapshot();
     case "reset_vault": state.vault = "notConfigured"; state.enrolled = false; return snapshot();
+    case "switch_master_password":
+      requireUnlocked();
+      if (!mockSwitch.pending) throw new Error("This PC already uses the phone's master password.");
+      if (args.password !== "new master password") throw new Error("That isn't your phone's new master password.");
+      mockSwitch.pending = false;
+      log("success", "security", "Switched to the phone's new master password. Sync resumes");
+      return snapshot();
     case "change_master_password":
       requireUnlocked();
-      if (state.enrolled) throw new Error("Master password changes are unavailable while devices share a vault. Paired devices must keep the same master password.");
+      if (state.enrolled) throw new Error("Master password changes are unavailable on a paired PC. Paired devices keep your phone's master password: change it on your phone, and this PC asks for the new one.");
       if (String(args.replacement ?? "").length < 12) throw new Error("Use a new master password with at least 12 characters.");
       if (args.current === "wrong password") throw new Error("The current password is wrong.");
       log("success", "security", "Master password changed");
