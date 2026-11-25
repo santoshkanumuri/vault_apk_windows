@@ -152,3 +152,26 @@ test("H1: Sync now says up to date only when the overview after the attempt is",
   assert.equal(syncNowOutcome({ ...report, conflicts: 1 }).kind, "warning");
   assert.equal(syncNowOutcome({ ...report, peersWaiting: 1 }).text, "Synced · received 2. 1 device will catch up when connected.");
 });
+
+test("M12: a device's refusal shows on its row; a dropped link is a Wi-Fi note", () => {
+  const membership = { devices: [
+    { deviceId: "phone", name: "Pixel 8", status: "active", isThisDevice: false, lastSeen: now - minute,
+      counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } },
+    { deviceId: "tablet", name: "Tablet", status: "active", isThisDevice: false, lastSeen: now - minute,
+      counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } },
+  ] };
+  const refusal = "Sent changes this PC can't accept. Update Nuvori on both. If it keeps happening, pair it again.";
+  const sync = { lastSync: new Date(now - minute).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "", automatic: true, running: false,
+    message: "", phase: "error", lastError: "A paired device sent changes Nuvori on this PC can't accept. Update Nuvori on both devices.", consecutiveFailures: 0,
+    deviceFailures: [{ deviceId: "phone", kind: "refused", message: refusal }, { deviceId: "tablet", kind: "temporary", message: "Connection interrupted." }] };
+  const f = syncFacts(sync, null, membership, 0, now);
+  const overview = syncOverview(f);
+  assert.equal(overview.state, "attention", "the worst is the headline, though the tablet synced");
+  assert.equal(overviewText(f, overview).detail, sync.lastError);
+  assert.equal(overview.peers.phone, "failed");
+  assert.deepEqual(peerAckText(f.peers[0], "failed", now), { kind: "error", label: "Can't sync", detail: refusal });
+  assert.equal(f.peers[1].wifiFailed, true);
+  assert.equal(overview.peers.tablet, "upToDate");
+  // An older backend without the list changes nothing.
+  assert.equal(syncFacts({ ...sync, deviceFailures: undefined }, null, membership, 0, now).peers[0].failure, undefined);
+});

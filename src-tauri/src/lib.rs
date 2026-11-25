@@ -496,8 +496,10 @@ impl SyncController {
                     ..lan
                 })
             }
-            (Err(_), Ok(cloud)) => {
-                self.tracker.succeed();
+            (Err(lan), Ok(cloud)) => {
+                // M12: Drive carried the changes, but a problem on this PC stays shown (a device's
+                // refusal is kept by `succeed`).
+                if lan_sync::failure_class(&lan) != lan_sync::FailureClass::NeedsYou { self.tracker.succeed(); }
                 Ok(lan_sync::SyncReport { cloud: true, ..cloud })
             }
             // The cloud card on the Sync page shows the cloud error; Wi-Fi sync still counts.
@@ -1072,10 +1074,13 @@ impl WayClock {
         self.last = Some(now);
     }
 
-    /// Records a result; returns the retry delay after a failure.
+    /// Records a result; returns the retry delay after a failure. M12: a refusal or a problem on
+    /// this PC is not retried at the fast rate; the next check comes at the usual interval.
     fn finish(&mut self, result: &Result<(), String>, now: Instant) -> Option<Duration> {
         match result {
             Ok(()) => { self.failures = 0; self.retry_at = None; None }
+            Err(error) if error == lan_sync::DEVICE_REFUSED
+                || lan_sync::failure_class(error) == lan_sync::FailureClass::NeedsYou => { self.failures = 0; self.retry_at = None; None }
             Err(error) => {
                 self.failures = self.failures.saturating_add(1);
                 let delay = if error == lan_sync::BUSY {
@@ -1086,6 +1091,20 @@ impl WayClock {
             }
         }
     }
+}
+
+#[test]
+fn a_refusal_waits_for_the_usual_interval_and_a_dropped_link_retries_soon() {
+    let start = Instant::now();
+    let mut clock = WayClock::default();
+    clock.start(&(String::new(), 1), start);
+    assert!(clock.finish(&Err(lan_sync::INTERRUPTED.into()), start).is_some());
+    assert!(clock.retry_at.is_some());
+    assert_eq!(clock.finish(&Err(lan_sync::DEVICE_REFUSED.into()), start), None);
+    assert_eq!((clock.retry_at, clock.failures), (None, 0));
+    let every = Some(Duration::from_secs(60));
+    assert!(!clock.due(&(String::new(), 1), every, start + Duration::from_secs(30)));
+    assert!(clock.due(&(String::new(), 1), every, start + Duration::from_secs(60)));
 }
 
 #[test]

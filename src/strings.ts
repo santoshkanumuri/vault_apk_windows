@@ -491,6 +491,7 @@ export const syncStatusText = {
   peerWaiting: "Waiting",
   peerSilent: "Not syncing",
   peerNotChecked: "Not checked yet",
+  peerCantSync: "Can't sync",
   peerDetailUpToDate: "Has all your changes.",
   peerDetailWaiting: (count: number, name: string) => `Waiting for ${name} to confirm ${count} ${count === 1 ? "change" : "changes"}.`,
   peerDetailSilent: (days: number) => `Hasn't synced in ${days} days. Open Nuvori on it to catch up.`,

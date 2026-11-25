@@ -5,7 +5,7 @@ import { Avatar, CountdownRing, Kbd } from "../components/Display";
 import { Menu, type MenuItem } from "../components/Menu";
 import { StatusIcon, type StatusKind } from "../components/Status";
 import { useCopy } from "../app/clipboard";
-import { useBrowserStatus, useConflicts, useHelloAvailable, useLastSync, useLock, useMembership, useNow, useSyncStatus } from "../app/hooks";
+import { useBrowserStatus, useCloudStatus, useConflicts, useHelloAvailable, useLastSync, useLock, useMembership, useNow, useSyncStatus } from "../app/hooks";
 import { RemovedNoticeBanner } from "./sync/Membership";
 import { useSyncOverview } from "../app/useSyncOverview";
 import { dismissHint, readDismissed, readRecent } from "../app/recent";
@@ -96,7 +96,8 @@ function AttentionStrip() {
   const conflictCount = !snapshot.enrolled ? 0 : conflicts.data ? conflicts.data.length : sync.data?.conflicts ?? 0;
   // One status over Wi-Fi and Google Drive: a Wi-Fi miss while Drive delivers is not a problem here.
   const overview = useSyncOverview(snapshot.enrolled ? sync.data : null, membership.error ? null : membership.data, conflictCount);
-  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error), lastSync);
+  const cloud = useCloudStatus();
+  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error), lastSync, cloud.data);
   const extension = browserIndicator(snapshot, browser.data, Boolean(browser.error));
 
   const items: Attention[] = [];

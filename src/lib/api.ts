@@ -113,7 +113,10 @@ export type SyncStatus = {
   driveCheckSeconds?: number;
   /** One pass over Wi-Fi and Google Drive each time Nuvori opens, also with automatic sync off. */
   syncOnOpen?: boolean;
+  /** Paired devices whose last session failed: dropped (temporary), a problem on this PC (needsYou), or refused. Absent on older builds. */
+  deviceFailures?: DeviceFailure[];
 };
+export type DeviceFailure = { deviceId: string; kind: "temporary" | "needsYou" | "refused"; message: string };
 export type SyncReport = { peersChecked: number; peersWaiting: number; sent: number; received: number; waitingToApply: number; conflicts: number; /** The pass also went through Google Drive. */ cloud?: boolean };
 /** Sync through the user's own Google Drive. */
 export type CloudStatus = {

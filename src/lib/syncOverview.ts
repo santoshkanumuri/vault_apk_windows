@@ -3,13 +3,13 @@
 // verified progress (a Wi-Fi exchange or a signed Drive `p.` file, both in `sync_peer_progress`) shows
 // it applied this PC's latest change, whichever transport carried it. A transport failure is only a
 // quiet note while the other one keeps devices in step.
-import type { CloudStatus, MembershipStatus, SyncReport, SyncStatus } from "./api";
+import type { CloudStatus, DeviceFailure, MembershipStatus, SyncReport, SyncStatus } from "./api";
 import type { StatusKind } from "../components/Status";
 import { plural, relativeTime, toMillis } from "./format.ts";
 import { syncStatusText as words } from "../strings.ts";
 
 export type TransportHealth = "off" | "ok" | "failed";
-export type PeerAck = "upToDate" | "waiting" | "silent" | "notChecked";
+export type PeerAck = "upToDate" | "waiting" | "silent" | "notChecked" | "failed";
 export type OverallSync = "syncing" | "attention" | "keys" | "conflicts" | "waiting" | "waitingHere" | "stale" | "notYet" | "upToDate";
 export type AttentionCause = "bothFailed" | "wifiOnlyFailed" | "driveOnlyFailed" | "localProblem" | "rejected" | "deviceSilent";
 export type TransportNote = "wifiFailedDriveKeptUp" | "wifiFailedDriveCarries" | "wifiFailed" | "driveFailedWifiKeptUp" | "driveFailedWifiCarries" | "driveFailed" | "paused";
@@ -17,7 +17,9 @@ export type TransportNote = "wifiFailedDriveKeptUp" | "wifiFailedDriveCarries" |
 /** One active paired device. `unconfirmed`: this PC's changes it has not applied yet. */
 export type PeerFacts = { deviceId: string; name: string; unconfirmed: number; reported: boolean; lastSeen: number; wifiFailed?: boolean;
   /** H1: its own changes that an active device reports applied but that have not arrived here. */
-  missingHere?: number };
+  missingHere?: number;
+  /** M12: its last session failed with a refusal or a problem on this PC (a dropped link sets `wifiFailed`). */
+  failure?: Pick<DeviceFailure, "kind" | "message"> };
 
 export type SyncFacts = {
   now: number;
@@ -58,6 +60,8 @@ export const STALE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function peerAck(peer: PeerFacts, now: number): PeerAck {
+  // M12: a refusal shows on that device's row, whatever else it reported.
+  if (peer.failure) return "failed";
   if (peer.unconfirmed > 0) return peer.lastSeen > 0 && now - peer.lastSeen > STALE_AFTER_MS ? "silent" : "waiting";
   if (peer.lastSeen === 0 && !peer.reported) return "notChecked";
   return "upToDate";
@@ -124,8 +128,10 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
   const reachFailed = Boolean(failedText) && looksUnreachable(failedText);
   const wifi: TransportHealth = reachFailed ? "failed" : !sync || !sync.automatic ? "off" : "ok";
   const drive: TransportHealth = !cloud?.connected ? "off" : cloud.needsSignIn || cloud.lastError ? "failed" : "ok";
+  const deviceFailures = new Map((sync?.deviceFailures ?? []).map((failure) => [failure.deviceId, failure]));
   const peers = (membership?.devices ?? []).filter((device) => device.status === "active" && !device.isThisDevice).map((device) => {
     const counts = device.counts;
+    const failure = deviceFailures.get(device.deviceId);
     return {
       deviceId: device.deviceId,
       name: device.name || "Paired device",
@@ -134,6 +140,8 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
       reported: Boolean(counts?.checked),
       lastSeen: device.lastSeen ?? 0,
       missingHere: counts?.missingHere ?? 0,
+      wifiFailed: failure?.kind === "temporary",
+      failure: failure && failure.kind !== "temporary" ? { kind: failure.kind, message: failure.message } : undefined,
     };
   });
   const waiting = sync ? sync.waitingToApply - (sync.setAside ?? 0) : 0;
@@ -223,6 +231,7 @@ export function peerAckText(peer: PeerFacts, ack: PeerAck, now: number): PeerAck
     case "upToDate": return { kind: "success", label: words.peerUpToDate, detail: words.peerDetailUpToDate };
     case "waiting": return { kind: "info", label: words.peerWaiting, detail: words.peerDetailWaiting(peer.unconfirmed, peer.name) };
     case "silent": return { kind: "error", label: words.peerSilent, detail: words.peerDetailSilent(Math.floor((now - peer.lastSeen) / DAY_MS)) };
+    case "failed": return { kind: "error", label: words.peerCantSync, detail: peer.failure?.message ?? "" };
     default: return { kind: "neutral", label: words.peerNotChecked, detail: words.peerDetailNotChecked };
   }
 }

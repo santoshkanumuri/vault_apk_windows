@@ -7,7 +7,7 @@ import { Dialog } from "../components/Dialog";
 import { PasswordField, Segmented, TextField, Toggle } from "../components/Field";
 import { StatusBanner, StatusChip, type StatusKind } from "../components/Status";
 import { useConfirm } from "../app/confirm";
-import { useBrowserStatus, useBuildStatus, useLastSync, useLock, useMembership, useSyncStatus } from "../app/hooks";
+import { useBrowserStatus, useBuildStatus, useCloudStatus, useLastSync, useLock, useMembership, useSyncStatus } from "../app/hooks";
 import { PendingLeaveChip, useLeaveGroup } from "./sync/Membership";
 import { useRouter } from "../app/router";
 import { autoLockChoices, clipboardChoices, usePreferences } from "../app/settings";
@@ -34,7 +34,8 @@ export function SettingsPage({ section }: { section?: string }) {
   const [keepass, setKeepass] = useState(false);
   const sync = useSyncStatus(10000);
   const lastSync = useLastSync(sync.data);
-  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error), lastSync);
+  const cloud = useCloudStatus();
+  const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error), lastSync, cloud.data);
   const build = useBuildStatus(4000).data;
 
   useEffect(() => {

@@ -156,9 +156,11 @@ function deviceChip(device: MemberDevice, membership: MembershipStatus, overview
   }
   if (device.isThisDevice) return <StatusChip kind="success" label={strings.active} />;
   const counts = device.counts;
-  if (counts?.toApplyHere) return <StatusChip kind="warning" label={strings.waitingToApply} />;
   // Up to date when its applied progress covers this PC's changes, whichever transport carried them.
   const ack = deviceAck(device, overview);
+  // M12: a refused session (or a device silent for days) shows before changes waiting here.
+  if (ack?.kind === "error") return <StatusChip kind={ack.kind} label={ack.label} title={ack.detail} />;
+  if (counts?.toApplyHere) return <StatusChip kind="warning" label={strings.waitingToApply} />;
   if (ack && ack.kind !== "success") return <StatusChip kind={ack.kind} label={ack.label} />;
   if (isStale(device)) return <StatusChip kind="warning" label={strings.notSeenRecently} />;
   if (ack) return <StatusChip kind={ack.kind} label={ack.label} />;
@@ -176,7 +178,8 @@ function deviceDetail(device: MemberDevice, managerName?: string, overview?: Syn
   if (isStale(device) && (!ack || ack.kind === "success")) return `${platform} · ${staleHint(device, managerName)}`;
   const counts = device.counts;
   const seen = device.lastSeen ? `Last seen ${relativeTime(device.lastSeen)}` : "Not seen yet";
-  const detail = counts?.toApplyHere ? `${changes(counts.toApplyHere)} received from it still need to apply here.`
+  const detail = ack?.kind === "error" ? ack.detail
+    : counts?.toApplyHere ? `${changes(counts.toApplyHere)} received from it still need to apply here.`
     : ack ? ack.detail
     : !counts?.checked ? "Waiting for the first check."
     : counts.toSend ? `${changes(counts.toSend)} from this PC still need to reach it.`
