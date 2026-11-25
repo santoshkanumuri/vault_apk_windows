@@ -331,6 +331,9 @@ var NuvoriSignIns = (() => {
   const MAX_POPUPS = 32;
   // A popup that closed itself: how long its opener has to navigate, or store new keys, after that.
   const POPUP_RETURN_MS = 20 * 1000;
+  // A popup that answers by postMessage: the opener often takes the answer (pushState) a moment
+  // before the browser reports the popup closed. A move this recent before the close counts.
+  const MOVED_BEFORE_CLOSE_MS = 3000;
   // A sign-in button click this recent links a popup that has no opener id to the clicked tab.
   const POPUP_CLICK_MS = 30 * 1000;
 
@@ -495,6 +498,16 @@ var NuvoriSignIns = (() => {
         // Popup modes that answer by postMessage never leave the provider: the user's choice there counts.
         if (flow.phase === "returned" || (flow.message && flow.chosen)) return finish(flow, homeUrl);
         if (flow.message && flow.phase === "authorizing" && !flow.cancelled) {
+          const moved = flow.homeMove;
+          delete flow.homeMove;
+          if (moved && at - moved.at <= MOVED_BEFORE_CLOSE_MS) {
+            // The opener already took the answer: its new page is the landing page; it settles from now.
+            flow.phase = "returned";
+            flow.returnedAt = at;
+            flow.landing = moved.url;
+            flow.landedAt = at;
+            return null;
+          }
           flow.phase = "awaiting";
           flow.closedAt = at;
           return null;
@@ -522,6 +535,23 @@ var NuvoriSignIns = (() => {
           keys.push(flow.tabId);
         }
         return keys;
+      },
+
+      /**
+       * The opener `tabId` changed its address while a postMessage popup is still open. Noted, so a
+       * popup that closes right after (`closed`) counts the move as the answer. True when noted.
+       */
+      homeMoved({ tabId, url, at }) {
+        purge(at);
+        let noted = false;
+        for (const flow of Object.values(flows)) {
+          if (flow.homeTabId !== tabId || flow.tabId === tabId || flow.phase !== "authorizing" || !flow.message) continue;
+          const provider = BY_ID.get(flow.provider);
+          if (!httpsOrigin(url || "") || onProvider(provider, hostOf(url)) || isBroker(url)) continue;
+          flow.homeMove = { url, at };
+          noted = true;
+        }
+        return noted;
       },
 
       /** Popups that closed by themselves and wait on the opener `tabId`. */

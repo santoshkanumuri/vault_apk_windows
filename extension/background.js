@@ -595,6 +595,8 @@ function onSignInTabUpdated(tabId, change, tab) {
       await keepSignInFlows();
       for (const key of answered) setTimeout(() => void settleSignIn(key), SIGNINS().SETTLE_MS + 100);
     }
+    // The same move while the popup is still open: it often closes a moment later.
+    if (change.url && flows.homeMoved({ tabId, url: change.url, at: Date.now() })) await keepSignInFlows();
     if (change.status !== "complete") return;
     const flow = flows.flowOf(tabId);
     if (!flow) return;
@@ -626,6 +628,8 @@ function onSignInTabRemoved(tabId) {
     if (found) await offerSignIn(found);
     const waiting = flows.flowOf(tabId);
     if (waiting?.phase === "awaiting") checkOpener(waiting.homeTabId, tabId);
+    // The opener took the answer just before the popup closed.
+    if (waiting?.phase === "returned") setTimeout(() => void settleSignIn(tabId), SIGNINS().SETTLE_MS + 100);
   }).catch(() => {});
 }
 

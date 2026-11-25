@@ -517,6 +517,23 @@ test("a popup that closes by itself with no choice seen: the opener's next navig
   assert.equal(toProvider.tracker.flowOf(2).phase, "awaiting");
 });
 
+test("a self-closing popup whose opener takes the answer a moment before the popup is reported closed", () => {
+  const authorize = req(2, "https://accounts.google.com/o/oauth2/v2/auth?client_id=1&redirect_uri=storagerelay%3A%2F%2Fhttps%2Fclaude.example%3Fid%3Dauth9&response_type=permission%20id_token&scope=openid%20email%20profile",
+    { initiator: "https://claude.example" });
+  const moved = (url, after) => ({ step: ["homeMoved", { tabId: 1, url }], after });
+  const { tracker } = play([opened(2, 1), authorize, moved("https://claude.example/new", 600), { ...closed(2, "https://claude.example/new"), after: 50 }]);
+  const flow = tracker.flowOf(2);
+  assert.equal(flow.phase, "returned", "the move just before the close is the answer");
+  assert.equal(flow.landing, "https://claude.example/new");
+  assert.equal(plain(tracker.settle({ tabId: 2, at: flow.landedAt + S.SETTLE_MS })).origin, "https://claude.example");
+  // A move long before the close (the user browsed while the popup sat open) is not the answer.
+  const stale = play([opened(2, 1), authorize, moved("https://claude.example/other", 600), { ...closed(2, "https://claude.example/other"), after: 5000 }]);
+  assert.equal(stale.tracker.flowOf(2).phase, "awaiting");
+  // A move to the provider, or with no popup open, notes nothing.
+  assert.equal(play([opened(2, 1), authorize]).tracker.homeMoved({ tabId: 1, url: "https://accounts.google.com/x", at: 1_000_500 }), false);
+  assert.equal(S.createTracker().homeMoved({ tabId: 1, url: "https://claude.example/new", at: 1 }), false);
+});
+
 test("Microsoft MSAL loginPopup: the popup returns to the site's blank page and closes at once", () => {
   const { found } = play([
     click(1, "microsoft"),
