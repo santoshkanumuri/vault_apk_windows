@@ -7,7 +7,7 @@
 use crate::{
     ManagedState,
     identity::verify_signature,
-    incoming::IncomingVerifier,
+    incoming::{IncomingError, IncomingVerifier},
     incoming_apply::{ApplyError, IncomingApply},
     incoming_store::IncomingStore,
     membership::{self, MembershipEvent, VerifiedMembership},
@@ -104,7 +104,18 @@ pub struct DeviceFailure {
 const TOO_LARGE: &str = "A saved change is too large to sync. Existing items are kept.";
 /// Android serves and requests at most 32 photos per exchange (`servePhotos` `require(requests.size <= 32)`).
 const MAX_PHOTO_REQUESTS: usize = 32;
-const PHOTO_FAILED: &str = "A photo failed its integrity check. It will download again next time.";
+/// A photo a peer said it lacks (`-1`) is not asked from that peer again for this long, so the
+/// next missing photos get their turn within the 32 per session (M13).
+const PHOTO_LACKING_WAIT: Duration = Duration::from_secs(60 * 60);
+/// A photo whose bytes from a peer failed the integrity check is not asked from that peer again
+/// for this long: its copy is bad. Another device can still send it (M5).
+const PHOTO_CORRUPT_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
+const PHOTO_SKIPS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS sync_photo_skips (vault_id TEXT NOT NULL, peer_device_id TEXT NOT NULL, hash TEXT NOT NULL, until_millis INTEGER NOT NULL, PRIMARY KEY (vault_id, peer_device_id, hash))";
+/// Internal: a received change does not continue this PC's copy of its author's chain (a fork).
+/// [named_refusal] turns it into a message that names the devices.
+const FORKED_CHANGE: &str = "Peer sent a conflicting change";
+/// Internal: a received change comes after the last change allowed from a device this PC marked as lost.
+const LOST_CHANGE: &str = "That device was marked as lost";
 
 #[derive(Serialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +138,22 @@ pub struct SyncReport {
     pub cloud: bool,
     /// This PC knows a REMOVE that made new keys but its package has not arrived: it only reads.
     pub waiting_for_keys: bool,
+    /// Authors whose changes this PC holds above a gap in the drive's copy that it cannot fill (C1).
+    #[serde(skip)]
+    pub drive_gaps: Vec<String>,
+    /// Authors whose next change Google Drive holds only in files this PC can't use (M6). A device
+    /// that holds the range uploads it again (`drive_refill::reupload`).
+    #[serde(skip)]
+    pub drive_stuck: Vec<String>,
+    /// Photos the peer lacked or sent corrupt in this session. They are not asked from it again
+    /// for a while, so a session that only skipped photos still made progress (M13).
+    #[serde(skip)]
+    pub photos_skipped: usize,
+    /// L1: every session made progress but the session cap ended the pass (or, serving, the
+    /// connecting device's round limit ended the session) before both sides were caught up. Not a
+    /// failure: the pass that follows continues at once.
+    #[serde(skip)]
+    pub more_remain: bool,
 }
 
 #[derive(Serialize)]
@@ -163,6 +190,18 @@ pub struct SyncStatus {
     pub sync_on_open: bool,
     /// M12: paired devices whose last session failed, each with how and why.
     pub device_failures: Vec<DeviceFailure>,
+    /// Part of `waiting_to_apply`: changes of a kind this version doesn't know, per device that made
+    /// them. They apply after Nuvori is updated on this PC (M4).
+    pub needs_update: Vec<NeedsUpdate>,
+}
+
+/// Changes from one device that wait for a newer Nuvori on this PC.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NeedsUpdate {
+    pub device_id: String,
+    pub name: String,
+    pub count: usize,
 }
 
 /// Wi-Fi check intervals offered on the Sync page; the same choices as the phone.
@@ -558,6 +597,9 @@ pub(crate) fn status(vault: &mut UnlockedVault) -> Result<SyncStatus> {
         drive_check_seconds: schedule(db).drive_seconds,
         sync_on_open: sync_on_open(db),
         device_failures: Vec::new(),
+        needs_update: needs_update(db, &id).into_iter()
+            .map(|(device_id, count)| NeedsUpdate { name: device_name(db, &device_id), device_id, count })
+            .collect(),
     })
 }
 
@@ -591,6 +633,8 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
         let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
         let local = app.store.identity_store().get_or_create().map_err(storage_error)?.device_id;
         let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+        // Changes that arrived earlier and can apply now show before this pass connects (H5).
+        let _ = apply_received(vault);
         let revision = u64::from(vault.local_change_count().map_err(storage_error)?);
         let events = vault.stored_membership().map_err(storage_error)?;
         let membership = membership::verify(&events).map_err(storage_error)?;
@@ -624,6 +668,7 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
                 tracker.device_succeeded(&report.peer_device_id);
                 failed.remove(&report.peer_device_id);
                 if report.peer_device_id != local { checked.insert(report.peer_device_id.clone()); }
+                total.more_remain |= report.more_remain;
                 total.sent += report.sent;
                 total.received += report.received;
                 total.photos_sent += report.photos_sent;
@@ -701,7 +746,13 @@ pub(crate) fn serve_proved(state: &ManagedState, helper: &Path, stream: TcpStrea
     let result = exchange_gated(state, helper, tracker, true, |_| Ok(stream), gate);
     match result {
         Ok((report, true)) => { tracker.device_succeeded(&report.peer_device_id); tracker.succeed(); (Ok(report), true) }
-        Ok((_, false)) => { tracker.fail(MORE_REMAIN); (Err(MORE_REMAIN.into()), true) }
+        // L1: the connecting device's round limit ended the session after progress. It connects
+        // again at once, so this counts as progress, not as a failure.
+        Ok((report, false)) => {
+            tracker.device_succeeded(&report.peer_device_id);
+            tracker.succeed();
+            (Ok(SyncReport { more_remain: true, ..report }), true)
+        }
         Err(error) => {
             // A nearby device outside this group must not replace the paired-device status.
             let authenticated = tracker.state.lock().is_ok_and(|state| state.generation != before);
@@ -748,6 +799,8 @@ fn run_to(
 
 /// Repeats bounded sessions until one completes, a session makes no progress, or the cap is hit.
 /// Each session commits what it received, so a later pass resumes from the saved frontier.
+/// L1: reaching the cap while every session made progress is progress (`more_remain`), not a
+/// failure; only a session that moved nothing and still was not caught up fails the pass.
 fn run_sessions(mut session: impl FnMut() -> Result<(SyncReport, bool)>) -> Result<SyncReport> {
     let mut total = SyncReport::default();
     for _ in 0..MAX_SESSIONS {
@@ -758,15 +811,17 @@ fn run_sessions(mut session: impl FnMut() -> Result<(SyncReport, bool)>) -> Resu
         total.conflicts = report.conflicts;
         total.photos_received += report.photos_received;
         total.photos_sent += report.photos_sent;
+        total.photos_skipped += report.photos_skipped;
         total.peer_device_id = report.peer_device_id;
         if complete {
             return Ok(total);
         }
-        if report.sent == 0 && report.received == 0 && report.photos_received == 0 {
-            break;
+        if report.sent == 0 && report.received == 0 && report.photos_received == 0 && report.photos_skipped == 0 {
+            return Err(MORE_REMAIN.into());
         }
     }
-    Err(MORE_REMAIN.into())
+    total.more_remain = true;
+    Ok(total)
 }
 
 /// Sets per-write timeouts proportional to the buffer size. Reads use an idle timeout set on
@@ -1092,24 +1147,33 @@ fn exchange_gated(
         }
     };
     // Photo blobs, in Android's order: the phone serves our requests first, then asks for its own.
+    // Photos this peer recently lacked or sent corrupt are left out, so the next ones get their
+    // turn within the 32 a session may ask for (M13).
+    let started = crate::activity::now_millis() as i64;
     let wanted = with_vault(state, &vault_id, &accepted.head, |vault| {
-        vault.waiting_photo_blobs().map_err(storage_error)
+        let skips = photo_skips(vault.connection(), &vault_id, &session.peer.device_id, started)?;
+        Ok(vault.waiting_photo_blobs().map_err(storage_error)?.into_iter()
+            .filter(|(hash, _)| !skips.contains(hash)).collect::<Vec<_>>())
     })?;
     let missing: Vec<(String, u64)> =
         wanted.into_iter().filter(|(hash, size)| !blobs.has(hash, *size)).collect();
     let more_photos = missing.len() > MAX_PHOTO_REQUESTS;
     if server { report.photos_sent = serve_photos(&mut channel, &blobs, tracker)?; }
-    report.photos_received = request_photos(
+    let photos = request_photos(
         &mut channel,
         &blobs,
         &missing[..missing.len().min(MAX_PHOTO_REQUESTS)],
         tracker,
     )?;
+    report.photos_received = photos.received;
+    report.photos_skipped = photos.lacking.len() + photos.corrupt.len();
     if !server { report.photos_sent = serve_photos(&mut channel, &blobs, tracker)?; }
-    let complete = complete && !(more_photos && report.photos_received > 0);
+    // Skipped photos count as progress: the next session asks for the photos after them.
+    let complete = complete && !(more_photos && report.photos_received + report.photos_skipped > 0);
     tracker.set_phase(Phase::Applying);
     let peer_id = session.peer.device_id.clone();
     with_vault(state, &vault_id, &accepted.head, |vault| {
+        record_photo_skips(vault.connection(), &vault_id, &peer_id, &photos, started)?;
         apply_waiting(vault, &vault_id, &content_key)?;
         vault.record_peer_seen(&peer_id).map_err(storage_error)?;
         report.peer_device_id = peer_id.clone();
@@ -1164,13 +1228,15 @@ fn exchange_rounds_role<R: Read, W: Write>(
     relay_removed: bool,
 ) -> Result<(SyncReport, bool)> {
     let mut report = SyncReport::default();
+    // What the peer acknowledged in this session, by author: never sent again in this session.
+    let mut acknowledged = BTreeMap::new();
     for _ in 0..MAX_ROUNDS {
         let (sent, received) = if server {
-            let sent = send_batch(channel, state, membership, local, peer, tracker, relay_removed)?;
-            (sent, receive_batch(channel, state, membership, key, tracker)?)
+            let sent = send_batch(channel, state, membership, local, peer, tracker, relay_removed, &mut acknowledged)?;
+            (sent, receive_batch(channel, state, membership, key, local, peer, tracker)?)
         } else {
-            let received = receive_batch(channel, state, membership, key, tracker)?;
-            (send_batch(channel, state, membership, local, peer, tracker, relay_removed)?, received)
+            let received = receive_batch(channel, state, membership, key, local, peer, tracker)?;
+            (send_batch(channel, state, membership, local, peer, tracker, relay_removed, &mut acknowledged)?, received)
         };
         report.received += received;
         report.sent += sent;
@@ -1520,17 +1586,57 @@ fn set_aside_count(db: &Connection, id: &str) -> usize {
     .map_or(0, |count| count as usize)
 }
 
+/// Received changes of a kind this version of Nuvori does not know (a newer device made them). They
+/// wait, counted as received, until an update can apply them: the rule shared with Android (M4).
+const NEEDS_UPDATE_SCHEMA: &str =
+    "CREATE TABLE IF NOT EXISTS sync_needs_update_operations (mutation_id TEXT NOT NULL PRIMARY KEY)";
+
+/// Entity types this version applies. Anything else waits for an update ([NEEDS_UPDATE_SCHEMA]).
+fn known_entity_type(entity_type: &str) -> bool {
+    matches!(entity_type, "entry" | "group" | "passkey" | "photo" | "photo_cover" | "device_name")
+        || entity_type == crate::appearance::ENTITY_TYPE
+        || entity_type == crate::site_icon_sync::ENTITY_TYPE
+        || entity_type == crate::sign_in_sync::ENTITY_TYPE
+}
+
+/// Waiting changes that need a newer Nuvori on this PC, per author: `(author, count)`.
+pub(crate) fn needs_update(db: &Connection, id: &str) -> Vec<(String, usize)> {
+    let Ok(mut query) = db.prepare(
+        "SELECT o.device_id, count(*) FROM sync_needs_update_operations u CROSS JOIN sync_operations o ON o.mutation_id = u.mutation_id
+         WHERE o.vault_id = ?1 AND NOT EXISTS (SELECT 1 FROM sync_applied_operations a WHERE a.mutation_id = u.mutation_id)
+         GROUP BY o.device_id ORDER BY o.device_id",
+    ) else {
+        return Vec::new();
+    };
+    query
+        .query_map([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)? as usize)))
+        .and_then(|rows| rows.collect())
+        .unwrap_or_default()
+}
+
+/// Applies every received change that can apply now. A change that waits for something (its
+/// group, its photo, a key, an update of this PC) stays waiting. A change that fails for any
+/// other reason is set aside and retried on each pass, and the rest still apply (M3): one bad
+/// change never stops the others, or the pass. Only a storage failure returns an error.
 fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> {
     let blobs = vault.photo_blobs();
     let db = vault.connection();
     db.execute_batch(SET_ASIDE_SCHEMA).map_err(storage_error)?;
+    db.execute_batch(NEEDS_UPDATE_SCHEMA).map_err(storage_error)?;
     loop {
         let mut advanced = false;
         for operation in waiting(db, id)? {
             match IncomingApply::apply_with_blobs(db, &operation, key, Some(&blobs)) {
                 Ok(_) => {
                     advanced = true;
-                    db.execute("DELETE FROM sync_set_aside_operations WHERE mutation_id = ?1", [&operation.mutation_id])
+                    for table in ["sync_set_aside_operations", "sync_needs_update_operations"] {
+                        db.execute(&format!("DELETE FROM {table} WHERE mutation_id = ?1"), [&operation.mutation_id])
+                            .map_err(storage_error)?;
+                    }
+                }
+                // A kind of change this version does not know: it waits for an update (M4).
+                Err(ApplyError::UnsupportedEntity) if !known_entity_type(&operation.entity_type) => {
+                    db.execute("INSERT OR IGNORE INTO sync_needs_update_operations (mutation_id) VALUES (?1)", [&operation.mutation_id])
                         .map_err(storage_error)?;
                 }
                 Err(
@@ -1564,13 +1670,56 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
                     Duration::from_secs(15 * 60),
                     );
                 }
-                Err(_) => return Err("Received changes are saved, but one could not be applied. Existing items are kept.".into()),
+                // Anything else (a database rule, a record in an unexpected state) is set aside too
+                // and tried again on each pass. It used to stop every other change from applying,
+                // end the Wi-Fi session and stop the Google Drive pass before its uploads (M3).
+                Err(error) => {
+                    let new = db.execute("INSERT OR IGNORE INTO sync_set_aside_operations (mutation_id) VALUES (?1)", [&operation.mutation_id])
+                        .map_err(storage_error)?;
+                    if new > 0 {
+                        crate::activity::diagnostic(crate::activity::Category::Sync, "A received change could not be applied", &error);
+                        crate::activity::global().record_coalesced(
+                            crate::activity::Level::Warning,
+                            crate::activity::Category::Sync,
+                            format!("A change from {} could not be applied and was set aside. Other changes still sync, and it is tried again on each sync",
+                                device_name(db, &operation.device_id)),
+                            Duration::from_secs(15 * 60),
+                        );
+                    }
+                }
             }
         }
         if !advanced {
-            return Ok(());
+            break;
         }
     }
+    for (author, count) in needs_update(db, id) {
+        crate::activity::global().record_coalesced(
+            crate::activity::Level::Warning,
+            crate::activity::Category::Sync,
+            format!("{} {} from {} need a newer version of Nuvori on this PC. Update Nuvori to apply them",
+                count, if count == 1 { "change" } else { "changes" }, device_name(db, &author)),
+            Duration::from_secs(6 * 60 * 60),
+        );
+    }
+    Ok(())
+}
+
+/// Applies received changes that wait (H5): when the vault unlocks and at the start of every pass,
+/// so a change that arrived in an earlier session shows without waiting for the next exchange.
+/// Nothing happens on a PC that is not in a sync group.
+pub(crate) fn apply_received(vault: &mut UnlockedVault) -> Result<()> {
+    let group: Option<(String, Vec<u8>)> = vault
+        .connection()
+        .query_row("SELECT vault_id, content_key FROM sync_group_state", [], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()
+        .map_err(storage_error)?;
+    let Some((id, key)) = group else { return Ok(()) };
+    let key = Zeroizing::new(key);
+    if key.len() != 32 {
+        return Ok(());
+    }
+    apply_waiting(vault, &id, &key)
 }
 
 /// Verifies one received change against its author's signed chain and commits it. Wi-Fi sync
@@ -1588,7 +1737,7 @@ fn store_received(state: &ManagedState, membership: &VerifiedMembership, operati
         if crate::merge_join::lost_freeze(db, &membership.vault_id).map_err(storage_error)?
             .is_some_and(|freeze| !freeze.allows(&operation.device_id, operation.sequence, &operation.hash))
         {
-            return Err("That device was marked as lost".into());
+            return Err(LOST_CHANGE.into());
         }
         initialize_received(db)?;
         let head = progress(db, &membership.vault_id)?
@@ -1609,7 +1758,11 @@ fn store_received(state: &ManagedState, membership: &VerifiedMembership, operati
         .map_err(storage_error)?;
         let batch = verifier
             .verify_batch(vec![operation.clone()])
-            .map_err(storage_error)?;
+            .map_err(|error| match error {
+                // The change does not continue this PC's copy of the chain: a fork (M5).
+                IncomingError::BrokenLink => FORKED_CHANGE.to_owned(),
+                error => storage_error(error),
+            })?;
         IncomingStore::persist_batch(db, &batch).map_err(storage_error)?;
         Ok(())
     })
@@ -1636,7 +1789,7 @@ fn old_resend(db: &Connection, id: &str, operation: &ChangeRecord, head: &(u64, 
     };
     match held {
         Some(hash) if hash == operation.hash => Ok(true),
-        Some(_) => Err("Peer sent a conflicting change".into()),
+        Some(_) => Err(FORKED_CHANGE.into()),
         None => {
             crate::activity::global().record_coalesced(
                 crate::activity::Level::Info,
@@ -1649,11 +1802,14 @@ fn old_resend(db: &Connection, id: &str, operation: &ChangeRecord, head: &(u64, 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn receive_batch<R: Read, W: Write>(
     channel: &mut EncryptedSyncChannel<R, W>,
     state: &ManagedState,
     membership: &VerifiedMembership,
     key: &[u8],
+    local: &str,
+    peer: &str,
     tracker: &SyncTracker,
 ) -> Result<usize> {
     tracker.set_phase(Phase::Receiving);
@@ -1675,7 +1831,13 @@ fn receive_batch<R: Read, W: Write>(
     tracker.incoming_announced(count as u64);
     for _ in 0..count {
         let operation = operation_from_wire(&channel.receive().map_err(network_error)?)?;
-        store_received(state, membership, &operation)?;
+        if let Err(error) = store_received(state, membership, &operation) {
+            // The sender waits for this change's acknowledgement, so the session ends here; the
+            // message says which device sent it and whose changes differ (M5).
+            return Err(with_vault(state, &membership.vault_id, &membership.head, |vault| {
+                Ok(named_refusal(vault.connection(), &error, peer, &operation.device_id, local))
+            }).unwrap_or(error));
+        }
         // Acknowledge only after the verified operation is committed.
         channel
             .send(operation.hash.as_bytes())
@@ -1691,15 +1853,67 @@ fn receive_batch<R: Read, W: Write>(
     Ok(count)
 }
 
+/// The name a paired device gave itself, for messages; "a paired device" when it has none yet.
+pub(crate) fn device_name(db: &Connection, device_id: &str) -> String {
+    db.query_row("SELECT member_json FROM sync_memberships WHERE device_id = ?1", [device_id], |row| row.get::<_, String>(0))
+        .optional()
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str::<SnapshotMember>(&json).ok())
+        .map(|member| member.display_name)
+        .filter(|name| !name.trim().is_empty() && name != "Paired device")
+        .unwrap_or_else(|| "a paired device".to_owned())
+}
+
+/// `text` with its first letter in upper case, for a device name that starts a sentence.
+fn sentence_start(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
+}
+
+/// "this PC" for the local device, otherwise its name.
+fn author_label(db: &Connection, author: &str, local_id: &str) -> String {
+    if author == local_id { "this PC".to_owned() } else { device_name(db, author) }
+}
+
+/// The message for a change refused from `peer` (M5), naming the devices so the user can tell
+/// which device's data differs. Any other error passes through unchanged.
+fn named_refusal(db: &Connection, error: &str, peer: &str, author: &str, local_id: &str) -> String {
+    let sender = sentence_start(&device_name(db, peer));
+    match error {
+        FORKED_CHANGE => format!("{sender}'s copy of the changes from {} doesn't match this PC's. Wi-Fi sync with it stops at that change.",
+            author_label(db, author, local_id)),
+        LOST_CHANGE => format!("{sender} sent changes from {}, which this PC marked as lost. Wi-Fi sync with it stops at that change.",
+            device_name(db, author)),
+        _ => error.to_owned(),
+    }
+}
+
+/// Checks a peer's progress report and saves it. `live`: the report came in a Wi-Fi session now.
+///
+/// H2 (shared rule with Android): a live report whose received head for an author is lower than
+/// the one saved, with a hash that matches where this PC still holds that change, means the peer
+/// lost ground (it set a change aside, or restored older data). It is accepted, logged and saved,
+/// and the changes it lacks are sent again from the lower head. A different hash at the same
+/// sequence is still refused. A Google Drive `p.` file can be older than a report this PC already
+/// got over Wi-Fi, so a lower head from Drive is still refused there (the file is skipped).
+///
+/// M5: in a live report, a head that does not match this PC's copy of an author's chain (a fork,
+/// for instance after one device's data was copied back from an old backup) no longer ends the
+/// session. That author is returned, the caller sends none of its changes to this peer (the peer
+/// would refuse them), and the author is left out of what is saved for this peer, so history
+/// cleanup keeps waiting for it. Every other author keeps syncing. A Drive report still fails.
 fn validate_peer_progress(
     db: &mut Connection,
     id: &str,
     local_id: &str,
     peer: &str,
     progress: &SyncProgress,
-) -> Result<()> {
+    live: bool,
+) -> Result<std::collections::BTreeSet<String>> {
     progress.validate().map_err(storage_error)?;
     let tx = db.transaction().map_err(storage_error)?;
+    let mut forked = std::collections::BTreeSet::new();
     for (author, (seq, hash)) in progress.received.iter().chain(&progress.applied) {
         let known: Option<String> = if *seq == 0 {
             Some(GENESIS_HASH.into())
@@ -1712,24 +1926,52 @@ fn validate_peer_progress(
             && known.is_none()
             && *seq > local_head(&tx, id, local_id)?;
         if known.as_ref().is_some_and(|known| known != hash) || unknown_own {
-            return Err("Peer reported a conflicting change head".into());
+            if !live {
+                return Err("Peer reported a conflicting change head".into());
+            }
+            forked.insert(author.clone());
         }
     }
-    for (author, (seq, _)) in &progress.received {
+    for author in &forked {
+        let message = if author == local_id {
+            format!("{} holds newer changes from this PC than this PC has. This PC's data may have been copied back from an old backup. This PC's changes aren't sent to it",
+                sentence_start(&device_name(&tx, peer)))
+        } else {
+            format!("{}'s copy of the changes from {} doesn't match this PC's. Those changes aren't sent to it, and everything else keeps syncing",
+                sentence_start(&device_name(&tx, peer)), device_name(&tx, author))
+        };
+        crate::activity::global().record_coalesced(
+            crate::activity::Level::Warning, crate::activity::Category::Sync, message, Duration::from_secs(6 * 60 * 60));
+    }
+    for (author, (seq, _)) in progress.received.iter().filter(|(author, _)| !forked.contains(*author)) {
         let old: Option<i64> = tx.query_row("SELECT sequence FROM sync_peer_acknowledgements WHERE vault_id = ?1 AND peer_device_id = ?2 AND source_device_id = ?3", params![id, peer, author], |r| r.get(0)).optional().map_err(storage_error)?;
         let sequence = integer(*seq)?;
-        if old.is_some_and(|old| old > sequence) {
-            return Err("Peer progress moved backward".into());
+        if let Some(old) = old.filter(|old| *old > sequence) {
+            if !live {
+                return Err("Peer progress moved backward".into());
+            }
+            crate::activity::global().record_coalesced(
+                crate::activity::Level::Warning,
+                crate::activity::Category::Sync,
+                format!("{} now has {} fewer changes from {} than it reported before. They are sent again",
+                    sentence_start(&device_name(&tx, peer)), old - sequence, author_label(&tx, author, local_id)),
+                Duration::from_secs(15 * 60),
+            );
         }
         tx.execute("INSERT INTO sync_peer_acknowledgements (vault_id, peer_device_id, source_device_id, sequence, acknowledged_at_utc) VALUES (?1, ?2, ?3, ?4, '') ON CONFLICT(vault_id, peer_device_id, source_device_id) DO UPDATE SET sequence = excluded.sequence", params![id, peer, author, sequence]).map_err(storage_error)?;
     }
     // The whole report, for the per-device counts in the devices list (as the phone shows them).
-    let encoded = String::from_utf8(progress.encode().map_err(storage_error)?).map_err(storage_error)?;
+    // Forked authors are left out: a missing author counts as nothing applied (M5).
+    let mut kept = progress.clone();
+    kept.received.retain(|author, _| !forked.contains(author));
+    kept.applied.retain(|author, _| !forked.contains(author));
+    let encoded = String::from_utf8(kept.encode().map_err(storage_error)?).map_err(storage_error)?;
     tx.execute("CREATE TABLE IF NOT EXISTS sync_peer_progress (vault_id TEXT NOT NULL, peer_device_id TEXT NOT NULL, progress_json TEXT NOT NULL, PRIMARY KEY (vault_id, peer_device_id))", [])
         .map_err(storage_error)?;
     tx.execute("INSERT INTO sync_peer_progress (vault_id, peer_device_id, progress_json) VALUES (?1, ?2, ?3) ON CONFLICT(vault_id, peer_device_id) DO UPDATE SET progress_json = excluded.progress_json",
         params![id, peer, encoded]).map_err(storage_error)?;
-    tx.commit().map_err(storage_error)
+    tx.commit().map_err(storage_error)?;
+    Ok(forked)
 }
 
 fn local_head(db: &Connection, id: &str, local_id: &str) -> Result<u64> {
@@ -1826,6 +2068,24 @@ fn gap_free_end(db: &Connection, id: &str, device: &str, after: i64) -> Result<i
     .map_err(storage_error)
 }
 
+/// The frontier one round sends after: the peer's reported head for each author, raised to what it
+/// acknowledged earlier in this session. A peer on an older build that set a change aside reports
+/// a lower head than it acknowledged (H2), so without this the same changes would go every round
+/// until the round limit. Across sessions they still go again once, as Android does.
+fn session_frontier(
+    reported: &BTreeMap<String, (u64, String)>,
+    acknowledged: &BTreeMap<String, (u64, String)>,
+) -> BTreeMap<String, (u64, String)> {
+    let mut frontier = reported.clone();
+    for (author, head) in acknowledged {
+        if frontier.get(author).is_none_or(|reported| reported.0 < head.0) {
+            frontier.insert(author.clone(), head.clone());
+        }
+    }
+    frontier
+}
+
+#[allow(clippy::too_many_arguments)]
 fn send_batch<R: Read, W: Write>(
     channel: &mut EncryptedSyncChannel<R, W>,
     state: &ManagedState,
@@ -1834,13 +2094,14 @@ fn send_batch<R: Read, W: Write>(
     peer: &str,
     tracker: &SyncTracker,
     relay_removed: bool,
+    acknowledged: &mut BTreeMap<String, (u64, String)>,
 ) -> Result<usize> {
     let progress =
         SyncProgress::parse(&channel.receive().map_err(network_error)?).map_err(storage_error)?;
     tracker.set_phase(Phase::Sending);
     let (pending, remaining) = with_vault(state, &membership.vault_id, &membership.head, |vault| {
         let db = vault.connection();
-        validate_peer_progress(db, &membership.vault_id, local, peer, &progress)?;
+        let forked = validate_peer_progress(db, &membership.vault_id, local, peer, &progress, true)?;
         // Waiting for new keys (H1): nothing leaves this PC until they arrive.
         let events = read_membership(db, &membership.vault_id)?;
         if crate::epoch_keys::stranded(db, &events, membership, local).map_err(storage_error)? {
@@ -1849,10 +2110,12 @@ fn send_batch<R: Read, W: Write>(
         pending_operations(
             db,
             &membership.vault_id,
-            &progress.received,
+            &session_frontier(&progress.received, acknowledged),
             MAX_BATCH_OPERATIONS,
             BATCH_BYTE_BUDGET,
             &|author| match membership.members.get(author) {
+                // The peer's copy of this author's chain differs: it would refuse these (M5).
+                _ if forked.contains(author) => None,
                 Some(member) if member.active => Some(u64::MAX),
                 Some(member) if relay_removed => member.removal_cutoff.as_ref().map(|cutoff| cutoff.0),
                 _ => None,
@@ -1869,9 +2132,22 @@ fn send_batch<R: Read, W: Write>(
         if channel.receive().map_err(network_error)? != operation.hash.as_bytes() {
             return Err("Peer did not acknowledge the saved change".into());
         }
+        if acknowledged.get(&operation.device_id).is_none_or(|head| head.0 < operation.sequence) {
+            acknowledged.insert(operation.device_id.clone(), (operation.sequence, operation.hash.clone()));
+        }
         tracker.sent_one();
     }
     Ok(pending.len())
+}
+
+/// What one photo request brought: the photos saved, and the photos the peer lacks or sent with
+/// bytes that failed the integrity check. [record_photo_skips] keeps the last two from being
+/// asked from that peer again for a while (M5, M13).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PhotoOutcome {
+    received: usize,
+    lacking: Vec<String>,
+    corrupt: Vec<String>,
 }
 
 /// Android `requestPhotos` counterpart: asks for missing blobs, resuming partial downloads.
@@ -1881,7 +2157,7 @@ fn request_photos<R: Read, W: Write>(
     blobs: &PhotoBlobs,
     missing: &[(String, u64)],
     tracker: &SyncTracker,
-) -> Result<usize> {
+) -> Result<PhotoOutcome> {
     let mut requests = Vec::with_capacity(missing.len());
     for (hash, size) in missing {
         let mut offset = blobs.partial_size(hash).map_err(storage_error)?;
@@ -1898,7 +2174,7 @@ fn request_photos<R: Read, W: Write>(
     if !requests.is_empty() {
         tracker.set_phase(Phase::Receiving);
     }
-    let mut received = 0;
+    let mut outcome = PhotoOutcome::default();
     for request in &requests {
         let hash = request["hash"].as_str().unwrap_or_default();
         let offset = request["offset"].as_u64().unwrap_or_default();
@@ -1912,6 +2188,7 @@ fn request_photos<R: Read, W: Write>(
             continue;
         }
         if size < 0 {
+            outcome.lacking.push(hash.to_owned());
             continue;
         }
         let size = size as u64;
@@ -1929,11 +2206,54 @@ fn request_photos<R: Read, W: Write>(
             position += chunk.len() as u64;
             tracker.photo_moved(chunk.len() as u64);
         }
-        blobs.finish(hash, size).map_err(|_| PHOTO_FAILED)?;
+        // M5: a photo whose bytes fail the check is dropped and skipped, not a failed session.
+        // The sender only checks that the acknowledgement names the photo (Android `servePhotos`
+        // too), so it is acknowledged like any other and the session goes on.
+        let verified = blobs.finish(hash, size).is_ok();
         channel.send(hash.as_bytes()).map_err(network_error)?;
-        received += 1;
+        if verified {
+            outcome.received += 1;
+        } else {
+            let _ = blobs.discard_partial(hash);
+            outcome.corrupt.push(hash.to_owned());
+        }
     }
-    Ok(received)
+    Ok(outcome)
+}
+
+/// Photos `peer` recently lacked or sent corrupt, which are not asked from it now (M5, M13).
+fn photo_skips(db: &Connection, id: &str, peer: &str, now_millis: i64) -> Result<std::collections::BTreeSet<String>> {
+    db.execute_batch(PHOTO_SKIPS_SCHEMA).map_err(storage_error)?;
+    db.execute("DELETE FROM sync_photo_skips WHERE until_millis <= ?1", [now_millis]).map_err(storage_error)?;
+    let mut query = db.prepare("SELECT hash FROM sync_photo_skips WHERE vault_id = ?1 AND peer_device_id = ?2").map_err(storage_error)?;
+    let hashes = query.query_map(params![id, peer], |row| row.get(0)).map_err(storage_error)?
+        .collect::<std::result::Result<_, _>>().map_err(storage_error)?;
+    Ok(hashes)
+}
+
+/// Saves what [request_photos] found, and names the device when its photo bytes were bad.
+fn record_photo_skips(db: &Connection, id: &str, peer: &str, outcome: &PhotoOutcome, now_millis: i64) -> Result<()> {
+    db.execute_batch(PHOTO_SKIPS_SCHEMA).map_err(storage_error)?;
+    for (hashes, wait) in [(&outcome.lacking, PHOTO_LACKING_WAIT), (&outcome.corrupt, PHOTO_CORRUPT_WAIT)] {
+        let until = now_millis.saturating_add(i64::try_from(wait.as_millis()).unwrap_or(i64::MAX));
+        for hash in hashes {
+            db.execute("INSERT INTO sync_photo_skips (vault_id, peer_device_id, hash, until_millis) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(vault_id, peer_device_id, hash) DO UPDATE SET until_millis = excluded.until_millis",
+                params![id, peer, hash, until]).map_err(storage_error)?;
+        }
+    }
+    if !outcome.corrupt.is_empty() {
+        let count = outcome.corrupt.len();
+        crate::activity::global().record_coalesced(
+            crate::activity::Level::Warning,
+            crate::activity::Category::Sync,
+            format!("{count} {} from {} failed {} integrity check and {} saved. {} asked for again later",
+                if count == 1 { "photo" } else { "photos" }, device_name(db, peer),
+                if count == 1 { "its" } else { "their" }, if count == 1 { "wasn't" } else { "weren't" },
+                if count == 1 { "It's" } else { "They're" }),
+            Duration::from_secs(6 * 60 * 60),
+        );
+    }
+    Ok(())
 }
 
 /// Android `servePhotos` counterpart: answers with each blob's size (`-1` unknown, `-2` the
@@ -2376,7 +2696,10 @@ mod tests {
             received: heads.received.clone(),
             applied: BTreeMap::from([("phone".into(), (1, "a".repeat(64)))]),
         };
-        assert!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged).is_err());
+        // Live: the forked author is skipped for this peer instead of ending the session (M5).
+        assert_eq!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged, true).unwrap(),
+            std::collections::BTreeSet::from(["phone".to_owned()]));
+        assert!(validate_peer_progress(&mut db, "vault-a", "phone", "pc", &forged, false).is_err(), "a Drive report is still refused");
     }
 
     #[test]
@@ -2874,9 +3197,253 @@ mod tests {
             received: BTreeMap::from([(author.clone(), (sequence, hash.to_owned()))]),
             applied: BTreeMap::from([(author.clone(), (sequence, hash.to_owned()))]),
         };
-        validate_peer_progress(db, "vault-a", &author, "phone", &report(3, &all[2].hash)).unwrap();
-        assert!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64))).is_err());
+        validate_peer_progress(db, "vault-a", &author, "phone", &report(3, &all[2].hash), true).unwrap();
+        assert_eq!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64)), true).unwrap(),
+            std::collections::BTreeSet::from([author.clone()]), "this PC's own chain is not sent to that peer");
+        assert!(validate_peer_progress(db, "vault-a", &author, "phone", &report(7, &"e".repeat(64)), false).is_err());
         drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M3: one change that fails in an unexpected way (here a database rule) is set aside and the
+    /// others still apply. It used to stop every change after it and end the session. It applies
+    /// once the cause is gone. H5: `apply_received` (unlock, start of a pass) applies what waits.
+    #[test]
+    fn an_unexpected_apply_error_sets_one_change_aside_and_the_rest_apply() {
+        let synthetic = synthetic_vault(0);
+        let version = RecordVersion::from_entries([("phone", 1)]);
+        let mut previous = GENESIS_HASH.to_owned();
+        let mut chain = Vec::new();
+        for id in ["login-a", "login-b", "login-c"] {
+            let change = phone_op(chain.len() as u64 + 1, &previous, "entry", id, version.clone(), 0,
+                serde_json::json!({"entry": login_entry(id, id), "groupIds": []}));
+            previous = change.hash.clone();
+            chain.push(change);
+        }
+        stage(&synthetic, &chain);
+        let mut app = synthetic.state.lock().unwrap();
+        let vault = app.unlocked.as_mut().unwrap();
+        vault.connection().execute_batch(&format!(
+            "CREATE TEMP TRIGGER refuse_b BEFORE INSERT ON main.sync_applied_operations WHEN NEW.mutation_id = '{}'
+             BEGIN SELECT RAISE(ABORT, 'refused for the test'); END;", chain[1].mutation_id)).unwrap();
+        apply_waiting(vault, "vault-a", &[4; 32]).expect("one bad change no longer fails the whole apply");
+        let mut titles: Vec<String> = vault.list_entries().unwrap().into_iter().map(|entry| entry["title"].as_str().unwrap().to_owned()).collect();
+        titles.sort();
+        assert_eq!(titles, ["login-a", "login-c"]);
+        let db = vault.connection();
+        assert_eq!((waiting(db, "vault-a").unwrap().len(), set_aside_count(db, "vault-a")), (1, 1));
+        assert_eq!(progress(db, "vault-a").unwrap().applied["phone"].0, 1, "the applied head stops before the change set aside");
+        assert_eq!(progress(db, "vault-a").unwrap().received["phone"].0, 3, "it still counts as received");
+        db.execute_batch("DROP TRIGGER refuse_b").unwrap();
+        apply_received(vault).unwrap();
+        let db = vault.connection();
+        assert_eq!((waiting(db, "vault-a").unwrap().len(), set_aside_count(db, "vault-a")), (0, 0), "it applies on the next try");
+        assert_eq!(vault.list_entries().unwrap().len(), 3);
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M5: a change that does not continue this PC's copy of an author's chain is a fork. It is
+    /// refused, and the message names the device that sent it and whose changes differ.
+    #[test]
+    fn a_forked_change_is_refused_with_the_devices_named() {
+        let synthetic = synthetic_vault(0);
+        let version = RecordVersion::from_entries([("phone", 1)]);
+        let entry = |sequence: u64, previous: &str, id: &str| phone_op(sequence, previous, "entry", id, version.clone(), 0,
+            serde_json::json!({"entry": login_entry(id, "Login"), "groupIds": []}));
+        let held = entry(1, GENESIS_HASH, "login-a");
+        stage(&synthetic, &[held]);
+        let other = entry(1, GENESIS_HASH, "login-b");
+        let next = entry(2, &other.hash, "login-c");
+        assert_eq!(store_received(&synthetic.state, &synthetic.membership, &other).unwrap_err(), FORKED_CHANGE, "another change at a held place");
+        assert_eq!(store_received(&synthetic.state, &synthetic.membership, &next).unwrap_err(), FORKED_CHANGE, "a change after another chain");
+        let mut app = synthetic.state.lock().unwrap();
+        let db = app.unlocked.as_mut().unwrap().connection();
+        let member = serde_json::json!({"vaultId": "vault-a", "deviceId": "phone", "displayName": "Pixel 9", "identityPublicKey": "",
+            "status": "ACTIVE", "addedByDeviceId": "phone", "membershipSequence": 1, "keyEpoch": 1});
+        db.execute("INSERT OR REPLACE INTO sync_memberships (vault_id, device_id, member_json) VALUES ('vault-a', 'phone', ?1)", [member.to_string()]).unwrap();
+        let local = synthetic.local.device_id.clone();
+        assert_eq!(named_refusal(db, FORKED_CHANGE, "phone", &local, &local),
+            "Pixel 9's copy of the changes from this PC doesn't match this PC's. Wi-Fi sync with it stops at that change.");
+        assert_eq!(named_refusal(db, LOST_CHANGE, "pc-2", "phone", &local),
+            "A paired device sent changes from Pixel 9, which this PC marked as lost. Wi-Fi sync with it stops at that change.");
+        assert_eq!(named_refusal(db, TIMED_OUT, "phone", "phone", &local), TIMED_OUT, "other errors pass through");
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M5, M13: a photo whose bytes fail the check is acknowledged, dropped and skipped instead of
+    /// ending the session; a photo the peer lacks is skipped too. Neither is asked from that peer
+    /// again for a while, so the next missing photos get their turn.
+    #[test]
+    fn a_corrupt_or_lacking_photo_is_skipped_and_the_session_goes_on() {
+        let synthetic = synthetic_vault(0);
+        let blobs = synthetic.state.lock().unwrap().unlocked.as_ref().unwrap().photo_blobs();
+        let (bad, missing) = ("a".repeat(64), "b".repeat(64));
+        let wanted = vec![(bad.clone(), 70_000), (missing.clone(), 1_000)];
+        let tracker = SyncTracker::default();
+        let (listener, address) = loopback_pair();
+        let phone = std::thread::spawn(move || {
+            let mut channel = phone_channel(&listener);
+            let requests: serde_json::Value = serde_json::from_slice(&channel.receive().unwrap()).unwrap();
+            assert_eq!(requests.as_array().unwrap().len(), 2);
+            let garbage = vec![7u8; 70_000];
+            channel.send(garbage.len().to_string().as_bytes()).unwrap();
+            for chunk in garbage.chunks(photo_blobs::CHUNK_BYTES) {
+                channel.send(chunk).unwrap();
+            }
+            let acknowledged = channel.receive().unwrap();
+            channel.send(b"-1").unwrap();
+            acknowledged
+        });
+        let outcome = request_photos(&mut windows_channel(address), &blobs, &wanted, &tracker).unwrap();
+        assert_eq!(phone.join().unwrap(), bad.as_bytes(), "the sender gets the acknowledgement it waits for");
+        assert_eq!(outcome, PhotoOutcome { received: 0, lacking: vec![missing.clone()], corrupt: vec![bad.clone()] });
+        assert!(!blobs.has(&bad, 70_000) && blobs.partial_size(&bad).unwrap() == 0, "bad bytes are not kept");
+
+        let mut app = synthetic.state.lock().unwrap();
+        let db = app.unlocked.as_mut().unwrap().connection();
+        let now = 1_000_000_000;
+        record_photo_skips(db, "vault-a", "phone", &outcome, now).unwrap();
+        let skipped = photo_skips(db, "vault-a", "phone", now).unwrap();
+        assert_eq!(skipped, std::collections::BTreeSet::from([bad.clone(), missing.clone()]));
+        assert!(photo_skips(db, "vault-a", "pc-2", now).unwrap().is_empty(), "another device is still asked");
+        let hour = PHOTO_LACKING_WAIT.as_millis() as i64;
+        assert_eq!(photo_skips(db, "vault-a", "phone", now + hour).unwrap(), std::collections::BTreeSet::from([bad]),
+            "a lacking photo is asked again after an hour, a corrupt one after a day");
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M4: a kind of change this version doesn't know waits (never set aside), counts as received,
+    /// and the sync status names the device and the count. The changes after it still apply.
+    #[test]
+    fn an_unknown_change_type_waits_for_an_update_and_is_shown_by_device() {
+        let synthetic = synthetic_vault(0);
+        let version = RecordVersion::from_entries([("phone", 1)]);
+        let future = phone_op(1, GENESIS_HASH, "calendar_event", "event-1", version.clone(), 0, serde_json::json!({"event": {"id": "event-1"}}));
+        let login = phone_op(2, &future.hash, "entry", "login-a", version, 0,
+            serde_json::json!({"entry": login_entry("login-a", "After the unknown change"), "groupIds": []}));
+        stage(&synthetic, &[future, login]);
+        let mut app = synthetic.state.lock().unwrap();
+        let vault = app.unlocked.as_mut().unwrap();
+        apply_waiting(vault, "vault-a", &[4; 32]).unwrap();
+        assert_eq!(vault.list_entries().unwrap().len(), 1, "later changes still apply");
+        let db = vault.connection();
+        assert_eq!(set_aside_count(db, "vault-a"), 0, "an unknown type is never set aside");
+        assert_eq!(needs_update(db, "vault-a"), vec![("phone".to_owned(), 1)]);
+        let heads = progress(db, "vault-a").unwrap();
+        assert_eq!((heads.received["phone"].0, heads.applied["phone"].0), (2, 0), "counted as received, not as applied");
+        drop(app);
+        let mut app = synthetic.state.lock().unwrap();
+        let status = status(app.unlocked.as_mut().unwrap()).unwrap();
+        assert_eq!(status.needs_update, vec![NeedsUpdate { device_id: "phone".into(), name: "a paired device".into(), count: 1 }]);
+        assert_eq!(status.waiting_to_apply, 1);
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// H2 (audit R10): a peer that set a change aside reports a lower received head for this PC.
+    /// Over Wi-Fi that is lost ground: accepted, saved, and the changes go again. A different hash at
+    /// the same place is still refused, and an older Google Drive report is still skipped.
+    #[test]
+    fn a_live_peer_that_lost_ground_is_accepted_and_resent_but_a_fork_is_not() {
+        let synthetic = synthetic_vault(3);
+        let local = synthetic.local.device_id.clone();
+        let mut app = synthetic.state.lock().unwrap();
+        let db = app.unlocked.as_mut().unwrap().connection();
+        let hash = |sequence: u64| -> String {
+            db.query_row("SELECT hash FROM sync_operations WHERE device_id = ?1 AND sequence = ?2",
+                params![local, sequence as i64], |r| r.get(0)).unwrap()
+        };
+        let (h1, h3) = (hash(1), hash(3));
+        let report = |sequence: u64, hash: &str| SyncProgress {
+            received: BTreeMap::from([(local.clone(), (sequence, hash.to_owned()))]),
+            applied: BTreeMap::from([(local.clone(), (sequence, hash.to_owned()))]),
+        };
+        validate_peer_progress(db, "vault-a", &local, "phone", &report(3, &h3), true).expect("first report");
+        for _ in 0..3 {
+            validate_peer_progress(db, "vault-a", &local, "phone", &report(1, &h1), true).expect("lost ground is accepted every time");
+        }
+        let saved: i64 = db.query_row("SELECT sequence FROM sync_peer_acknowledgements WHERE peer_device_id = 'phone' AND source_device_id = ?1",
+            [&local], |r| r.get(0)).unwrap();
+        assert_eq!(saved, 1, "the lower head replaces the saved one");
+        let (resend, remaining) = pending_operations(db, "vault-a", &report(1, &h1).received, 100, usize::MAX, &|_| Some(u64::MAX)).unwrap();
+        assert_eq!((resend.iter().map(|(op, _)| op.sequence).collect::<Vec<_>>(), remaining), (vec![2, 3], 2), "the lost changes go again");
+        // The same place with another hash is a fork: that author is not sent to this peer, and
+        // nothing is saved for it (M5). A Drive report with a fork is still refused.
+        assert_eq!(validate_peer_progress(db, "vault-a", &local, "phone", &report(1, &"e".repeat(64)), true).unwrap(),
+            std::collections::BTreeSet::from([local.clone()]));
+        let saved: i64 = db.query_row("SELECT sequence FROM sync_peer_acknowledgements WHERE peer_device_id = 'phone' AND source_device_id = ?1",
+            [&local], |r| r.get(0)).unwrap();
+        assert_eq!(saved, 1, "a forked head is not saved");
+        let kept: String = db.query_row("SELECT progress_json FROM sync_peer_progress WHERE peer_device_id = 'phone'", [], |r| r.get(0)).unwrap();
+        assert!(SyncProgress::parse(kept.as_bytes()).unwrap().applied.is_empty(), "cleanup keeps waiting for a forked author");
+        assert_eq!(validate_peer_progress(db, "vault-a", &local, "pc-2", &report(1, &"e".repeat(64)), false).unwrap_err(),
+            "Peer reported a conflicting change head");
+        // A Drive report older than the saved one is skipped, as Android skips a stale `p.` file.
+        validate_peer_progress(db, "vault-a", &local, "pc-2", &report(3, &h3), false).unwrap();
+        assert_eq!(validate_peer_progress(db, "vault-a", &local, "pc-2", &report(1, &h1), false).unwrap_err(), "Peer progress moved backward");
+        drop(app);
+        drop(synthetic.state);
+        std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// H2 with a peer on an older build: it acknowledges this PC's changes, sets one aside and
+    /// keeps reporting a lower head. Each change goes once in a session, which then ends as
+    /// finished instead of resending every round up to the round limit.
+    #[test]
+    fn a_peer_that_reports_a_lower_head_after_acknowledging_gets_each_change_once_per_session() {
+        let synthetic = synthetic_vault(3);
+        let local = synthetic.local.device_id.clone();
+        let tracker = SyncTracker::default();
+        // The one change the phone keeps; it still has it in the next session.
+        let mut kept: Option<ChangeRecord> = None;
+        for session in 0..2 {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let author = local.clone();
+            let mut first = kept.take();
+            let phone = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+                let frames = SyncFrames::new(stream.try_clone().unwrap(), stream);
+                let mut channel = EncryptedSyncChannel::new(frames, &[8; 32], true).unwrap();
+                let mut sizes = Vec::new();
+                for _ in 0..MAX_ROUNDS {
+                    let _ = channel.receive().unwrap();
+                    channel.send(b"0").unwrap();
+                    // Only the first change is kept; the rest are acknowledged and set aside.
+                    let heads: BTreeMap<String, (u64, String)> = first.iter()
+                        .map(|op| (author.clone(), (op.sequence, op.hash.clone()))).collect();
+                    channel.send(&SyncProgress { received: heads.clone(), applied: heads }.encode().unwrap()).unwrap();
+                    let count: usize = std::str::from_utf8(&channel.receive().unwrap()).unwrap().parse().unwrap();
+                    sizes.push(count);
+                    for _ in 0..count {
+                        let op = operation_from_wire(&channel.receive().unwrap()).unwrap();
+                        channel.send(op.hash.as_bytes()).unwrap();
+                        if op.sequence == 1 { first = Some(op); }
+                    }
+                    if count == 0 { break; }
+                }
+                (sizes, first)
+            });
+            tracker.begin();
+            let (report, complete) = windows_rounds(&synthetic, address, &tracker).unwrap();
+            let (sizes, first) = phone.join().unwrap();
+            kept = first;
+            assert!(complete, "session {session} ends as finished, not at the round limit");
+            if session == 0 {
+                assert_eq!((report.sent, sizes), (3, vec![3, 0]));
+            } else {
+                assert_eq!((report.sent, sizes), (2, vec![2, 0]), "the next session sends what was set aside once more");
+            }
+        }
         drop(synthetic.state);
         std::fs::remove_dir_all(synthetic.directory).unwrap();
     }
@@ -2899,6 +3466,15 @@ mod tests {
             Ok((SyncReport::default(), false))
         });
         assert_eq!((calls, stalled), (1, Err(MORE_REMAIN.to_owned())));
+        // L1: the session cap with progress every time is progress, and the next pass continues.
+        let mut calls = 0;
+        let capped = run_sessions(|| {
+            calls += 1;
+            Ok((SyncReport { received: 100, ..Default::default() }, false))
+        })
+        .unwrap();
+        assert_eq!((calls, capped.received, capped.more_remain), (MAX_SESSIONS, 100 * MAX_SESSIONS, true));
+        assert!(!report.more_remain, "a pass that caught up has nothing more");
         let failed = run_sessions(|| Err(UNREACHABLE.to_owned()));
         assert_eq!(failed, Err(UNREACHABLE.to_owned()));
     }
@@ -2948,7 +3524,7 @@ mod tests {
             message: String::new(), phase: "idle", progress_done: 0, progress_total: 0,
             last_error: String::new(), last_attempt: String::new(),
             consecutive_failures: 0, next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15,
-            sync_on_open: true, device_failures: Vec::new(),
+            sync_on_open: true, device_failures: Vec::new(), needs_update: Vec::new(),
         };
         tracker.fill(&mut status);
         assert_eq!(status.phase, "error");
@@ -2981,7 +3557,7 @@ mod tests {
             let mut app_status = SyncStatus { last_sync: String::new(), waiting_to_apply: 0, set_aside: 0, waiting_for_keys: false,
                 conflicts: 0, phone_address: String::new(), automatic: true, running: false, message: String::new(), phase: "idle",
                 progress_done: 0, progress_total: 0, last_error: String::new(), last_attempt: String::new(), consecutive_failures: 0,
-                next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15, sync_on_open: true, device_failures: Vec::new() };
+                next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15, sync_on_open: true, device_failures: Vec::new(), needs_update: Vec::new() };
             tracker.fill(&mut app_status);
             app_status
         };
@@ -3114,7 +3690,7 @@ mod tests {
             }
             channel.receive().unwrap()
         });
-        assert_eq!(request_photos(&mut windows_channel(address), &blobs, &wanted, &tracker).unwrap(), 1);
+        assert_eq!(request_photos(&mut windows_channel(address), &blobs, &wanted, &tracker).unwrap().received, 1);
         assert_eq!(phone.join().unwrap(), hash.as_bytes());
         let (moved, total) = tracker.photo_bytes();
         assert!(moved >= size && total >= moved);

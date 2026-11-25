@@ -11,6 +11,7 @@ pub mod change_store;
 pub mod checkpoint;
 pub mod compaction;
 pub mod conflicts;
+pub mod drive_refill;
 mod desktop;
 pub mod dpapi;
 pub mod enrollment;
@@ -464,13 +465,16 @@ impl SyncController {
         let mut outcome = self.pass(state, helper, address, &endpoints, manual, ways, opened);
         // Continuous editing: edits saved on this PC while the pass ran get a prompt follow-up
         // pass (after a short debounce) instead of waiting for the next interval.
+        // L1: when the pass ended at its session cap with more to exchange, the next pass starts
+        // at once, without the debounce.
         for _ in 0..MAX_FOLLOW_UP_PASSES {
             let Ok(report) = &outcome.result else { break };
-            if !local_edits_since(state, report.local_revision_at_start) {
+            let edited = local_edits_since(state, report.local_revision_at_start);
+            if !edited && !report.more_remain {
                 break;
             }
             let previous = report.clone();
-            thread::sleep(FOLLOW_UP_DEBOUNCE);
+            if edited && !report.more_remain { thread::sleep(FOLLOW_UP_DEBOUNCE); }
             let endpoints = if ways.wifi { self.endpoints() } else { Vec::new() };
             let follow_up = self.pass(state, helper, address, &endpoints, false, ways, opened);
             outcome = PassOutcome {
@@ -598,6 +602,12 @@ impl PassOutcome {
 const DRIVE_NOT_CONNECTED: &str = "Google Drive is not connected on this PC.";
 
 fn sync_summary(report: &lan_sync::SyncReport) -> String {
+    let summary = sync_counts(report);
+    // L1: honest about a pass that stopped at its cap: the next pass continues.
+    if report.more_remain { format!("{summary} More changes remain, and sync continues.") } else { summary }
+}
+
+fn sync_counts(report: &lan_sync::SyncReport) -> String {
     match (report.cloud, report.peers_checked) {
         (true, 0) => format!("Synced through Google Drive. Sent {} changes and received {}.", report.sent, report.received),
         (true, devices) => format!("Sent {} changes and received {}, over Wi-Fi ({devices} devices) and Google Drive.", report.sent, report.received),
@@ -1954,6 +1964,8 @@ async fn unlock_vault(
             public_vault_error(error)
         })?;
         app.unlocked = Some(vault);
+        // Received changes that wait apply now, before the vault is shown (H5).
+        if let Some(vault) = app.unlocked.as_mut() { let _ = lan_sync::apply_received(vault); }
         let snapshot = app.snapshot()?;
         drop(app);
         browser.set_provider(Some(Arc::new(VaultBrowserProvider { state })));
@@ -2048,6 +2060,8 @@ async fn unlock_hello(
             public_vault_error(error)
         })?;
         app.unlocked = Some(vault);
+        // Received changes that wait apply now, before the vault is shown (H5).
+        if let Some(vault) = app.unlocked.as_mut() { let _ = lan_sync::apply_received(vault); }
         let snapshot = app.snapshot()?;
         drop(app);
         browser.set_provider(Some(Arc::new(VaultBrowserProvider { state: state.clone() })));
@@ -2147,6 +2161,15 @@ fn auto_lock_vault(app: &AppHandle, reason: auto_lock::Reason) {
     if !unlocked {
         return;
     }
+    if reason != auto_lock::Reason::Suspend
+        && let Some(sync) = app.try_state::<Arc<SyncController>>()
+    {
+        drive_pass_before_lock(reason, state.inner(), sync.inner());
+        // Sleep may have locked the vault meanwhile.
+        if !state.lock().is_ok_and(|state| state.unlocked.is_some()) {
+            return;
+        }
+    }
     let locked = lock(
         state.inner(),
         app.state::<Arc<BrowserIpcServer>>().inner(),
@@ -2155,6 +2178,42 @@ fn auto_lock_vault(app: &AppHandle, reason: auto_lock::Reason) {
     if locked.is_ok() {
         activity::log(Level::Info, Category::Security, reason.message());
         vault_changed(app, false);
+    }
+}
+
+/// M1: a locked PC neither listens on Wi-Fi nor checks Google Drive, so before an idle or
+/// Windows-lock auto-lock, one Google Drive pass runs when Drive is connected and checked
+/// automatically. The other devices then get what this PC holds (its own changes and the ones it
+/// received over Wi-Fi) and its progress. Best effort and bounded: the vault locks after this
+/// long whatever the pass is doing. Sleep locks at once, without a pass.
+const PRE_LOCK_DRIVE_WAIT: Duration = Duration::from_secs(20);
+
+/// Sleep gives a program about two seconds, so it never waits for Drive. Drive set to "only when
+/// you select Sync now" is not checked either.
+fn pass_before_lock(reason: auto_lock::Reason, drive_seconds: u64, connected: bool) -> bool {
+    reason != auto_lock::Reason::Suspend && drive_seconds > 0 && connected
+}
+
+fn drive_pass_before_lock(reason: auto_lock::Reason, state: &ManagedState, sync: &Arc<SyncController>) {
+    let drive_seconds = state.lock().ok().and_then(|mut app| {
+        app.unlocked.as_mut().filter(|vault| vault.is_enrolled().unwrap_or(false))
+            .map(|vault| lan_sync::schedule(vault.connection()).drive_seconds)
+    });
+    let Some(drive_seconds) = drive_seconds else { return };
+    if !pass_before_lock(reason, drive_seconds, CloudController::connected(state)) {
+        return;
+    }
+    let (state, sync) = (state.clone(), sync.clone());
+    let (done, finished) = std::sync::mpsc::channel();
+    let started = thread::Builder::new().name("nuvori-pre-lock-drive".to_owned()).spawn(move || {
+        // A pass already running is not waited for: the vault locks at once.
+        if let Ok(_guard) = sync.gate.try_lock() {
+            let _ = sync.cloud.pass(&state, &sync.tracker, false);
+        }
+        let _ = done.send(());
+    });
+    if started.is_ok() {
+        let _ = finished.recv_timeout(PRE_LOCK_DRIVE_WAIT);
     }
 }
 
@@ -3372,8 +3431,33 @@ mod start_fresh_tests {
 }
 
 #[cfg(test)]
+mod pre_lock_tests {
+    use super::*;
+
+    #[test]
+    fn a_drive_pass_runs_before_an_idle_or_windows_lock_but_not_before_sleep() {
+        use auto_lock::Reason::{Idle, SessionLocked, Suspend};
+        assert!(pass_before_lock(Idle, 300, true));
+        assert!(pass_before_lock(SessionLocked, 15, true));
+        assert!(!pass_before_lock(Suspend, 300, true));
+        assert!(!pass_before_lock(Idle, 0, true), "Drive checked only on Sync now");
+        assert!(!pass_before_lock(SessionLocked, 300, false), "Drive not connected");
+        assert!(PRE_LOCK_DRIVE_WAIT <= Duration::from_secs(30));
+    }
+}
+
+#[cfg(test)]
 mod activity_tests {
     use super::*;
+
+    /// L1: a pass that stopped at its session cap says that sync continues, not that it failed.
+    #[test]
+    fn a_pass_with_more_remaining_says_sync_continues() {
+        let report = lan_sync::SyncReport { sent: 3, received: 3200, peers_checked: 1, more_remain: true, ..Default::default() };
+        assert_eq!(sync_summary(&report),
+            "Sent 3 changes and received 3200. Checked 1 devices; 0 waiting to connect. More changes remain, and sync continues.");
+        assert!(!sync_summary(&lan_sync::SyncReport { more_remain: false, ..report }).contains("remain"));
+    }
 
     #[test]
     fn only_web_and_mail_links_in_notes_can_be_opened() {
