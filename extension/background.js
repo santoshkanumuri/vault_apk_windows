@@ -452,12 +452,96 @@ const originOf = (value) => { try { const url = new URL(value); return url.proto
 /** "app.example.com" belongs to the site "example.com". */
 const onSite = (origin, site) => { const name = hostOf(origin).toLowerCase(); return Boolean(site) && (name === site || name.endsWith(`.${site}`)); };
 
-/** A tab that a page opened for this sign-in (a popup window, or a new tab with nothing in it yet). */
-async function openerOf(tab, url) {
-  if (!Number.isInteger(tab.openerTabId) || tab.openerTabId === tab.id) return null;
-  let popup = !tab.url || tab.url === "about:blank" || tab.url === url;
-  if (!popup && chrome.windows?.get) { try { popup = (await chrome.windows.get(tab.windowId))?.type === "popup"; } catch { /* a normal tab */ } }
-  return popup ? tab.openerTabId : null;
+/** True for a tab in a popup window (window.open with a size or features). */
+async function inPopupWindow(tab) {
+  if (!chrome.windows?.get || !Number.isInteger(tab?.windowId)) return false;
+  try { return (await chrome.windows.get(tab.windowId))?.type === "popup"; } catch { return false; }
+}
+
+/**
+ * The tab that opened a sign-in popup, when the browser does not say: Firefox sets openerTabId only
+ * for a tab in the opener's own window, and a popup opened with noopener has none. The page that
+ * opened it is, in order: the tab where the user just clicked a sign-in button, else the active tab of the
+ * last focused normal window when its page is the site that started the request (`initiator`), else
+ * the only tab showing that site. Never a tab of the other profile (private windows).
+ */
+async function guessOpener(tab, flows, initiator) {
+  const site = originOf(initiator || "");
+  const clicked = flows.recentClick({ at: Date.now(), except: tab.id });
+  let active = null;
+  try {
+    const last = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    [active] = await chrome.tabs.query({ active: true, windowId: last.id });
+  } catch { /* no normal window */ }
+  for (const [id, trusted] of [[clicked, true], [active?.id, false]]) {
+    if (!Number.isInteger(id) || id === tab.id) continue;
+    const home = await tabOf(id);
+    if (!home || Boolean(home.incognito) !== Boolean(tab.incognito)) continue;
+    if (trusted || !site || originOf(home.url || "") === site) return home.id;
+  }
+  if (!site) return null;
+  let same = [];
+  try { same = (await chrome.tabs.query({})).filter((other) => other.id !== tab.id && Boolean(other.incognito) === Boolean(tab.incognito) && originOf(other.url || "") === site); } catch { /* none */ }
+  return same.length === 1 ? same[0].id : null;
+}
+
+/**
+ * The tab a sign-in in `tab` belongs to, or null for the tab itself: the opener noted when the popup
+ * opened, a same-window opener (a new tab with nothing in it yet, or opened straight at the
+ * provider), or a guessed opener for a popup window.
+ */
+async function homeTabFor(tab, url, flows, initiator) {
+  const noted = flows.homeOf(tab.id);
+  if (noted !== null && (await tabOf(noted))) return noted;
+  const popupWindow = await inPopupWindow(tab);
+  if (Number.isInteger(tab.openerTabId) && tab.openerTabId !== tab.id) {
+    if (popupWindow || !tab.url || tab.url === "about:blank" || tab.url === url) return tab.openerTabId;
+  }
+  return popupWindow ? guessOpener(tab, flows, initiator) : null;
+}
+
+/**
+ * tabs.onCreated: a popup window, or a tab a page opened straight at a provider or a broker, may
+ * become a sign-in. Note its opener now: a broker's popup (Auth0, Firebase) reaches the provider only
+ * after its own page, whose address says nothing about the site. A blank new tab in a normal window
+ * is not noted (any new tab can be blank at first); homeTabFor links it when it asks the provider.
+ */
+function onSignInTabCreated(tab) {
+  if (!SIGNINS() || !(tab?.id >= 0) || tab.incognito) return;
+  void signInStep(async () => {
+    const opener = Number.isInteger(tab.openerTabId) && tab.openerTabId !== tab.id ? tab.openerTabId : null;
+    const pending = tab.pendingUrl || tab.url || "";
+    const signInPage = Boolean(SIGNINS().parseAuthorize(pending)) || SIGNINS().isBroker(pending);
+    const popupWindow = await inPopupWindow(tab);
+    if (!popupWindow && !(opener !== null && signInPage)) return;
+    const flows = await signInFlows();
+    const home = opener ?? await guessOpener(tab, flows, null);
+    if (home === null) return;
+    flows.opened({ tabId: tab.id, homeTabId: home, at: Date.now() });
+    await keepSignInFlows();
+  }).catch(() => {});
+}
+
+/** Asks the opener's page to note its storage key names now (a popup sign-in begins). */
+function watchOpener(homeTabId) {
+  try { void chrome.tabs.sendMessage(homeTabId, { target: "nuvori-top", action: "signin_watch" }, { frameId: 0 })?.catch?.(() => {}); } catch { /* no page there */ }
+}
+
+/** The opener of a popup that closed by itself: an answer shows as a navigation or new storage keys. */
+function checkOpener(homeTabId, popupTabId, delays = [1000, 3000, 6000, 10000, 16000]) {
+  for (const delay of delays) {
+    setTimeout(() => void signInStep(async () => {
+      const flows = await signInFlows();
+      if (flows.flowOf(popupTabId)?.phase !== "awaiting") return;
+      let answer = null;
+      try { answer = await chrome.tabs.sendMessage(homeTabId, { target: "nuvori-top", action: "signin_changed" }, { frameId: 0 }); } catch { answer = null; }
+      if (answer?.changed !== true) return;
+      const home = await tabOf(homeTabId);
+      const keys = flows.homeChanged({ tabId: homeTabId, url: home?.url || "", at: Date.now() });
+      await keepSignInFlows();
+      for (const key of keys) setTimeout(() => void settleSignIn(key), SIGNINS().SETTLE_MS + 100);
+    }).catch(() => {}), delay);
+  }
 }
 
 /** webRequest: a provider's authorize request, or a page request in a tab with a sign-in under way. */
@@ -473,14 +557,15 @@ function onSignInRequest(details) {
     if (authorize && !(await signInsSupported())) return;
     const tab = await tabOf(details.tabId);
     if (!tab || tab.incognito) { flows.forget(details.tabId); return; }
-    const opener = authorize && details.type === "main_frame" ? await openerOf(tab, details.url) : null;
+    const initiator = details.initiator || originOf(details.originUrl || "");
+    const opener = authorize && details.type === "main_frame" ? await homeTabFor(tab, details.url, flows, initiator) : null;
     const home = opener === null ? null : await tabOf(opener);
-    flows.request({
-      tabId: details.tabId, url: details.url, type: details.type, at: Date.now(),
-      initiator: details.initiator || originOf(details.originUrl || ""),
+    const started = flows.request({
+      tabId: details.tabId, url: details.url, type: details.type, at: Date.now(), initiator,
       startUrl: home ? home.url : tab.url, homeTabId: home ? home.id : details.tabId,
     });
     await keepSignInFlows();
+    if (started?.started && started.homeTabId !== details.tabId) watchOpener(started.homeTabId);
   }).catch(() => {});
 }
 
@@ -501,9 +586,18 @@ function onSignInRedirect(details) {
 }
 
 function onSignInTabUpdated(tabId, change, tab) {
-  if (change?.status !== "complete" || !SIGNINS() || signInIdle()) return;
+  if ((change?.status !== "complete" && !change?.url) || !SIGNINS() || signInIdle()) return;
   void signInStep(async () => {
     const flows = await signInFlows();
+    // The opener of a popup that closed by itself loaded a page or changed its address (pushState).
+    const answered = flows.homeChanged({ tabId, url: tab?.url || change.url || "", at: Date.now() });
+    if (answered.length) {
+      await keepSignInFlows();
+      for (const key of answered) setTimeout(() => void settleSignIn(key), SIGNINS().SETTLE_MS + 100);
+    }
+    // The same move while the popup is still open: it often closes a moment later.
+    if (change.url && flows.homeMoved({ tabId, url: change.url, at: Date.now() })) await keepSignInFlows();
+    if (change.status !== "complete") return;
     const flow = flows.flowOf(tabId);
     if (!flow) return;
     const homeUrl = flow.homeTabId === tabId ? tab?.url : (await tabOf(flow.homeTabId))?.url;
@@ -532,6 +626,10 @@ function onSignInTabRemoved(tabId) {
     const found = flows.closed({ tabId, homeUrl, at: Date.now() });
     await keepSignInFlows();
     if (found) await offerSignIn(found);
+    const waiting = flows.flowOf(tabId);
+    if (waiting?.phase === "awaiting") checkOpener(waiting.homeTabId, tabId);
+    // The opener took the answer just before the popup closed.
+    if (waiting?.phase === "returned") setTimeout(() => void settleSignIn(tabId), SIGNINS().SETTLE_MS + 100);
   }).catch(() => {});
 }
 
@@ -544,7 +642,15 @@ async function handleSignInMessage(sender, message) {
   return signInStep(async () => {
     const flows = await signInFlows();
     if (message.action === "signin_click") {
-      if (sender.frameId !== 0 || typeof message.provider !== "string") return { status: "ignored" };
+      if (typeof message.provider !== "string") return { status: "ignored" };
+      // From a frame: a provider's own button frame (Google's GIS button) counts for that provider
+      // only; a site's sign-in frame (its login service) reports its buttons like the page does.
+      if (sender.frameId !== 0) {
+        let page = null;
+        try { page = new URL(url); } catch { /* checked above */ }
+        const button = SIGNINS().buttonFrameProvider(page?.hostname, page?.pathname);
+        if (button ? button !== message.provider : SIGNINS().providerOfPage(page?.hostname, page?.pathname)) return { status: "ignored" };
+      }
       flows.click({ tabId, provider: message.provider, at: Date.now() });
     } else {
       if (!flows.flowOf(tabId)) return { status: "ignored" };
@@ -2019,7 +2125,9 @@ chrome.tabs.onRemoved?.addListener((tabId) => {
 if (SIGNINS() && chrome.webRequest?.onBeforeRequest) {
   chrome.webRequest.onBeforeRequest.addListener(onSignInRequest, { urls: SIGNINS().authorizePatterns(), types: ["main_frame", "sub_frame"] });
   chrome.webRequest.onBeforeRequest.addListener(onSignInPage, { urls: ["https://*/*"], types: ["main_frame"] });
-  chrome.webRequest.onBeforeRedirect.addListener(onSignInRedirect, { urls: SIGNINS().watchPatterns(), types: ["main_frame", "sub_frame"] });
+  // Every redirect: a provider's last hop can leave from another of its hosts (accounts.youtube.com).
+  chrome.webRequest.onBeforeRedirect.addListener(onSignInRedirect, { urls: ["https://*/*"], types: ["main_frame", "sub_frame"] });
+  chrome.tabs.onCreated?.addListener(onSignInTabCreated);
   chrome.tabs.onUpdated.addListener(onSignInTabUpdated);
   chrome.tabs.onRemoved?.addListener(onSignInTabRemoved);
 }

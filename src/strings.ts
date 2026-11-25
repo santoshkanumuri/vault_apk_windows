@@ -300,7 +300,7 @@ export const strings = {
   link: "Link",
   httpsExampleComOrNameExample: "https://example.com or name@example.com",
   linksOpenOnlyAfterYouConfirm: "Links open only after you confirm.",
-  whenYouSignInToA: "When you sign in to a site with Google, Apple, GitHub or another account in your browser, the Nuvori extension asks to remember which one you used. It reminds you on that site's sign-in page.",
+  whenYouSignInToA: "When you sign in to a site with Google, Apple, GitHub or another account in your browser, the Nuvori extension asks to remember which one you used. It reminds you on that site's sign-in page. A sign-in finished in the browser's own account dialog (Google One Tap and some \"Sign in with Google\" buttons in Chrome) is invisible to extensions, so Nuvori can't ask about it.",
   theExtensionDoesnTWatchSign: "The extension doesn't watch sign-ins or show reminders. The methods below stay until you forget them.",
   rememberingSignInMethodsIsOff: "Remembering sign-in methods is off",
   searchBySite: "Search by site",
