@@ -492,7 +492,7 @@ export const syncStatusText = {
   peerDetailUpToDate: "Has all your changes.",
   peerDetailWaiting: (count: number, name: string) => `Waiting for ${name} to confirm ${count} ${count === 1 ? "change" : "changes"}.`,
   peerDetailSilent: (days: number) => `Hasn't synced in ${days} days. Open Nuvori on it to catch up.`,
-  peerDetailNotChecked: "Waiting for the first check.",
+  peerDetailNotChecked: "It has not synced yet. If pairing did not finish on it, remove it on the managing phone and pair it again.",
   factWifi: "Wi-Fi",
   factDrive: "Google Drive",
   factLastSynced: "Last synced",

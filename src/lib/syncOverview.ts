@@ -53,16 +53,21 @@ export type SyncOverview = {
 export const STALE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * A device never heard from (no verified progress, no contact) is "notChecked", whatever `unconfirmed`
+ * says: before its first report that count is every change this PC ever wrote, not changes it misses.
+ * A device whose pairing never finished stays here, so it never makes changes look stuck.
+ */
 export function peerAck(peer: PeerFacts, now: number): PeerAck {
-  if (peer.unconfirmed > 0) return peer.lastSeen > 0 && now - peer.lastSeen > STALE_AFTER_MS ? "silent" : "waiting";
   if (peer.lastSeen === 0 && !peer.reported) return "notChecked";
+  if (peer.unconfirmed > 0) return peer.lastSeen > 0 && now - peer.lastSeen > STALE_AFTER_MS ? "silent" : "waiting";
   return "upToDate";
 }
 
 export function syncOverview(facts: SyncFacts): SyncOverview {
   const { now } = facts;
   const peers = Object.fromEntries(facts.peers.map((peer) => [peer.deviceId, peerAck(peer, now)])) as Record<string, PeerAck>;
-  const waitingFor = facts.peers.filter((peer) => peer.unconfirmed > 0)
+  const waitingFor = facts.peers.filter((peer) => peer.unconfirmed > 0 && peers[peer.deviceId] !== "notChecked")
     .sort((a, b) => (a.lastSeen || Number.MAX_SAFE_INTEGER) - (b.lastSeen || Number.MAX_SAFE_INTEGER));
   const waitingChanges = Math.max(0, ...waitingFor.map((peer) => peer.unconfirmed));
   const lastHeard = Math.max(0, ...facts.peers.map((peer) => peer.lastSeen));

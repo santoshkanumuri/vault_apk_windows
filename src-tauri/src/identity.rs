@@ -123,9 +123,19 @@ impl DeviceIdentityStore {
     }
 
     fn create_from_seed(&self, private_seed: &[u8; 32]) -> Result<DeviceIdentity, IdentityError> {
+        self.create_with(&Uuid::new_v4().to_string(), private_seed)
+    }
+
+    /// A known identity for the cross-app enrollment vector (`fixtures/enrollment-realistic-v1.json`).
+    #[cfg(test)]
+    pub(crate) fn create_known(&self, device_id: &str, private_seed: &[u8; 32]) -> Result<DeviceIdentity, IdentityError> {
+        self.create_with(device_id, private_seed)
+    }
+
+    fn create_with(&self, device_id: &str, private_seed: &[u8; 32]) -> Result<DeviceIdentity, IdentityError> {
         let signing_key = SigningKey::from_bytes(private_seed);
         let identity = DeviceIdentity {
-            device_id: Uuid::new_v4().to_string(),
+            device_id: device_id.to_owned(),
             public_key: signing_key.verifying_key().to_bytes(),
         };
         let stored = StoredIdentity {

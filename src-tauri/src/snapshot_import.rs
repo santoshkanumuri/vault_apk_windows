@@ -55,6 +55,12 @@ impl PreparedEnrollment {
             return Err(ImportError::Mismatch);
         }
         let backup = portable_backup::read_portable_backup(input, &metadata.vault_id)?;
+        // Every check of the content runs here, before this PC sends `ready`: the phone stores this
+        // PC's ADD on `ready`, so a refusal after it would leave a member that never syncs.
+        if let Err(error) = validate_snapshot(&metadata, &backup) {
+            crate::epoch_keys::forget(&metadata.vault_id);
+            return Err(error);
+        }
         Ok(Self { metadata, backup })
     }
 
@@ -269,6 +275,11 @@ fn validate_snapshot<'a>(
 ) -> Result<(PresentRecords<'a>, Vec<CurrentRecord<'a>>), ImportError> {
     if metadata.vault_id != backup.vault_id {
         return Err(ImportError::Mismatch);
+    }
+    // A change of a rotated epoch N decrypts only with K(N) (`payload::key_for` reads the keyring),
+    // and the snapshot brings those keys. Before this, every such change failed here.
+    for (epoch, content, secret) in &metadata.epoch_keys {
+        crate::epoch_keys::install(&metadata.vault_id, *epoch, content, secret);
     }
     let mut operation_by_entity: HashMap<(&str, &str), Vec<&ChangeRecord>> = HashMap::new();
     for operation in &metadata.operations {
