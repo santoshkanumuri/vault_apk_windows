@@ -20,6 +20,8 @@ import { useTotpCodes } from "../codes/useTotp";
 import { markUsed } from "../../app/recent";
 import { LoginSignIns } from "../signins/SignInsPage";
 import { strings } from "../../strings";
+import { StatusBanner } from "../../components/Status";
+import { cardExpiryKind } from "../../lib/cardExpiry";
 
 export function ItemDetailPage({ id }: { id: string }) {
   const { entries, groups, loaded, upsertEntry, removeEntry, refresh } = useVault();
@@ -89,6 +91,7 @@ export function ItemDetailPage({ id }: { id: string }) {
   return (
     <div className="page page-narrow">
       {entry.type === "CARD" && <div className="detail-card"><CardFace entry={entry} size="lg" /></div>}
+      {entry.type === "CARD" && <CardExpiryBanner expiry={entry.tertiaryValue} />}
       <section className="detail-hero">
         {entry.type !== "CARD" && <Avatar title={entry.title} size="lg" {...iconHints(entry, entries)} />}
         <div className="detail-hero-text">
@@ -182,6 +185,14 @@ function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt:
       </>}
     </div>
   );
+}
+
+/** Android's card details show "Expired" or "Expires soon" under the card face. */
+function CardExpiryBanner({ expiry }: { expiry: string }) {
+  const now = useNow(60000);
+  const kind = cardExpiryKind(expiry, now);
+  if (!kind) return null;
+  return <StatusBanner kind={kind} className="detail-expiry">{kind === "error" ? strings.expired : strings.expiresSoon}</StatusBanner>;
 }
 
 function EntryFields({ entry }: { entry: VaultEntry }) {

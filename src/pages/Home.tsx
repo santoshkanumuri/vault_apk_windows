@@ -21,6 +21,7 @@ import { totpAt } from "../lib/totp";
 import { useTotpCodes } from "./codes/useTotp";
 import { EntryQuickActions } from "./items/actions";
 import { strings } from "../strings";
+import { cardExpiryKind, cardLastFour } from "../lib/cardExpiry";
 
 /** Items for the Add type picker. Shared with the Home quick actions. */
 export function useAddItems(): MenuItem[] {
@@ -83,7 +84,7 @@ function HomeRemovedNotice() {
 type Attention = { key: string; kind: StatusKind; label: string; detail?: string; onClick: () => void; dismissible?: boolean };
 
 function AttentionStrip() {
-  const { snapshot } = useVault();
+  const { snapshot, entries } = useVault();
   const router = useRouter();
   const sync = useSyncStatus(4000);
   const lastSync = useLastSync(sync.data);
@@ -92,6 +93,7 @@ function AttentionStrip() {
   const hello = useHelloAvailable();
   const [dismissed, setDismissed] = useState(readDismissed);
   const membership = useMembership();
+  const now = useNow(60_000);
   const conflictCount = !snapshot.enrolled ? 0 : conflicts.data ? conflicts.data.length : sync.data?.conflicts ?? 0;
   // One status over Wi-Fi and Google Drive: a Wi-Fi miss while Drive delivers is not a problem here.
   const overview = useSyncOverview(snapshot.enrolled ? sync.data : null, membership.error ? null : membership.data, conflictCount);
@@ -107,6 +109,14 @@ function AttentionStrip() {
   if (sync.data && (sync.data.setAside ?? 0) > 0) items.push({ key: "set-aside", kind: "warning", label: `${plural(sync.data.setAside ?? 0, "change")} couldn't be read`, detail: "Set aside and tried again on each sync", onClick: () => void router.root({ page: "sync" }) });
   if (sync.data && sync.data.waitingToApply - (sync.data.setAside ?? 0) > 0) items.push({ key: "waiting", kind: "info", label: `${plural(sync.data.waitingToApply - (sync.data.setAside ?? 0), "change")} waiting`, detail: "Applied on a later sync", onClick: () => void router.root({ page: "sync" }) });
   if (browser.data && extension.label === "Not listening") items.push({ key: "browser", kind: "warning", label: "Browser filling is off", detail: "Nuvori isn't listening for the extension", onClick: () => void router.root({ page: "settings", section: "browser" }) });
+  // Cards that have expired or expire within 90 days, the first three as on Android's Home.
+  entries.filter((entry) => entry.type === "CARD" && cardExpiryKind(entry.tertiaryValue, now)).slice(0, 3).forEach((entry) => {
+    const kind = cardExpiryKind(entry.tertiaryValue, now) ?? "warning";
+    const title = entry.title || "Untitled";
+    const lastFour = cardLastFour(entry.primaryValue);
+    items.push({ key: `card-${entry.id}`, kind, label: kind === "error" ? strings.cardHasExpired(title) : strings.cardExpiresSoon(title),
+      detail: lastFour ? strings.cardEnding(lastFour) : undefined, onClick: () => void router.navigate({ page: "item", id: entry.id }) });
+  });
   if (!snapshot.enrolled) items.push({ key: "pair", kind: "info", label: "Pair with your phone", detail: "Keep both devices in sync", onClick: () => void router.root({ page: "sync" }), dismissible: true });
   if (hello && !snapshot.helloEnabled) items.push({ key: "hello", kind: "info", label: "Turn on Windows Hello", detail: "Unlock with your face, fingerprint, or PIN", onClick: () => void router.root({ page: "settings", section: "security" }), dismissible: true });
   const visible = items.filter((item) => !item.dismissible || !dismissed.includes(item.key));
