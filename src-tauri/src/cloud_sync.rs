@@ -423,6 +423,8 @@ fn load(state: &ManagedState) -> Result<Context> {
     let identity_store = app.store.identity_store();
     let local = identity_store.get_or_create().map_err(|_| "Device identity unavailable")?;
     let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+    // Changes that arrived earlier and can apply now show before this pass starts (H5).
+    let _ = crate::lan_sync::apply_received(vault);
     let _ = vault.publish_unsynced_photos();
     // A waiting appearance choice is written now if the gate is open, and uploaded in this pass.
     // Drive files carry no handshake, so a Drive pass never records peer features: the gate opens

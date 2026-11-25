@@ -513,6 +513,8 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
         let mut app = state.lock().map_err(|_| "Vault state unavailable")?;
         let local = app.store.identity_store().get_or_create().map_err(storage_error)?.device_id;
         let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+        // Changes that arrived earlier and can apply now show before this pass connects (H5).
+        let _ = apply_received(vault);
         let revision = u64::from(vault.local_change_count().map_err(storage_error)?);
         let events = vault.stored_membership().map_err(storage_error)?;
         let membership = membership::verify(&events).map_err(storage_error)?;
@@ -1494,6 +1496,23 @@ fn apply_waiting(vault: &mut UnlockedVault, id: &str, key: &[u8]) -> Result<()> 
         );
     }
     Ok(())
+}
+
+/// Applies received changes that wait (H5): when the vault unlocks and at the start of every pass,
+/// so a change that arrived in an earlier session shows without waiting for the next exchange.
+/// Nothing happens on a PC that is not in a sync group.
+pub(crate) fn apply_received(vault: &mut UnlockedVault) -> Result<()> {
+    let group: Option<(String, Vec<u8>)> = vault
+        .connection()
+        .query_row("SELECT vault_id, content_key FROM sync_group_state", [], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()
+        .map_err(storage_error)?;
+    let Some((id, key)) = group else { return Ok(()) };
+    let key = Zeroizing::new(key);
+    if key.len() != 32 {
+        return Ok(());
+    }
+    apply_waiting(vault, &id, &key)
 }
 
 /// Verifies one received change against its author's signed chain and commits it. Wi-Fi sync
@@ -2847,7 +2866,7 @@ mod tests {
 
     /// M3: one change that fails in an unexpected way (here a database rule) is set aside and the
     /// others still apply. It used to stop every change after it and end the session. It applies
-    /// once the cause is gone.
+    /// once the cause is gone. H5: `apply_received` (unlock, start of a pass) applies what waits.
     #[test]
     fn an_unexpected_apply_error_sets_one_change_aside_and_the_rest_apply() {
         let synthetic = synthetic_vault(0);
@@ -2875,7 +2894,7 @@ mod tests {
         assert_eq!(progress(db, "vault-a").unwrap().applied["phone"].0, 1, "the applied head stops before the change set aside");
         assert_eq!(progress(db, "vault-a").unwrap().received["phone"].0, 3, "it still counts as received");
         db.execute_batch("DROP TRIGGER refuse_b").unwrap();
-        apply_waiting(vault, "vault-a", &[4; 32]).unwrap();
+        apply_received(vault).unwrap();
         let db = vault.connection();
         assert_eq!((waiting(db, "vault-a").unwrap().len(), set_aside_count(db, "vault-a")), (0, 0), "it applies on the next try");
         assert_eq!(vault.list_entries().unwrap().len(), 3);

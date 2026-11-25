@@ -1875,6 +1875,8 @@ async fn unlock_vault(
             public_vault_error(error)
         })?;
         app.unlocked = Some(vault);
+        // Received changes that wait apply now, before the vault is shown (H5).
+        if let Some(vault) = app.unlocked.as_mut() { let _ = lan_sync::apply_received(vault); }
         let snapshot = app.snapshot()?;
         drop(app);
         browser.set_provider(Some(Arc::new(VaultBrowserProvider { state })));
@@ -1969,6 +1971,8 @@ async fn unlock_hello(
             public_vault_error(error)
         })?;
         app.unlocked = Some(vault);
+        // Received changes that wait apply now, before the vault is shown (H5).
+        if let Some(vault) = app.unlocked.as_mut() { let _ = lan_sync::apply_received(vault); }
         let snapshot = app.snapshot()?;
         drop(app);
         browser.set_provider(Some(Arc::new(VaultBrowserProvider { state: state.clone() })));
