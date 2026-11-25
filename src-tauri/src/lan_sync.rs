@@ -91,6 +91,9 @@ pub struct SyncReport {
     pub cloud: bool,
     /// This PC knows a REMOVE that made new keys but its package has not arrived: it only reads.
     pub waiting_for_keys: bool,
+    /// Authors whose changes this PC holds above a gap in the drive's copy that it cannot fill (C1).
+    #[serde(skip)]
+    pub drive_gaps: Vec<String>,
 }
 
 #[derive(Serialize)]

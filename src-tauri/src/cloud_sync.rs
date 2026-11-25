@@ -625,6 +625,17 @@ pub(crate) fn remove_account(db: &Connection) -> Result<Option<Account>> {
     Ok(saved)
 }
 
+/// The first change of `author` this PC holds above `after`, with its previous hash.
+fn first_held_after(db: &Connection, vault_id: &str, author: &str, after: u64) -> Result<Option<(u64, String)>> {
+    db.query_row(
+        "SELECT sequence, previous_hash FROM sync_operations WHERE vault_id = ?1 AND device_id = ?2 AND sequence > ?3 ORDER BY sequence LIMIT 1",
+        params![vault_id, author, integer(after)?],
+        |row| Ok((counter(row, 0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(storage_error)
+}
+
 fn remember(context: &mut Context, file: CloudFile) {
     context.files.retain(|known| known.id != file.id);
     if file.modified > context.cursor {
@@ -870,7 +881,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         let entry = markers.entry(author.clone()).or_default();
         *entry = (*entry).max(marker.floor);
     }
-    let counted: BTreeMap<String, u64> = markers.iter()
+    let mut counted: BTreeMap<String, u64> = markers.iter()
         .map(|(author, floor)| (author.clone(), crate::compaction::drive::counted_floor(Some(*floor), own_floors.get(author).copied().unwrap_or(0))))
         .collect();
 
@@ -900,6 +911,33 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             segments.get(&author).map(|files| files.iter().map(|(first, last, _)| (*first, *last)).collect()).unwrap_or_default();
         // Coverage starts after a floor marker this PC counts: a deleted range is never uploaded again.
         let mut covered = crate::compaction::drive::coverage(&ranges, counted.get(&author).copied().unwrap_or(0));
+        // C1, a refill marker (rule shared with Android): the drive's copy of this author ends below
+        // the first change this PC still holds (L), because history trimmed here while Google Drive
+        // was off, or the drive was emptied. When every active member applied up to L - 1 (this PC's
+        // own floor, as for Drive cleanup) and no marker on the drive is that high yet, a marker at
+        // L - 1 says so, and the upload goes on from L. A marker is never lowered.
+        let first_held = with_vault(state, &context.vault_id, &membership.head, |vault| {
+            first_held_after(vault.connection(), &context.vault_id, &author, covered)
+        })?;
+        if let Some((first, previous)) = first_held.filter(|(first, _)| *first > covered + 1 && *first <= limit) {
+            let floor = first - 1;
+            let own = own_floors.get(&author).copied().unwrap_or(0);
+            if floor <= own && floor > markers.get(&author).copied().unwrap_or(0) {
+                let name = context.keys.floor_name(&author);
+                let marker = crate::compaction::drive::Marker { author: author.clone(), floor, hash: previous,
+                    writer: context.local.device_id.clone(), at: crate::activity::now_millis() as i64 };
+                let sealed = context.keys.seal(&name, &serde_json::to_vec(&marker).map_err(storage_error)?)?;
+                let existing = context.files.iter().find(|file| file.name == name).map(|file| file.id.clone());
+                let file = match existing {
+                    Some(id) => store.replace(&id, &sealed).or_else(|_| upload_bytes(store, &name, &sealed)).map_err(cloud)?,
+                    None => upload_bytes(store, &name, &sealed).map_err(cloud)?,
+                };
+                remember(&mut context, file);
+                markers.insert(author.clone(), floor);
+                counted.insert(author.clone(), floor);
+                covered = crate::compaction::drive::coverage(&ranges, floor);
+            }
+        }
         loop {
             let (pending, remaining) = with_vault(state, &context.vault_id, &membership.head, |vault| {
                 pending_operations(
@@ -911,7 +949,31 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                     &|device| (device == author).then_some(limit),
                 )
             })?;
-            let (Some(first), Some(last)) = (pending.first(), pending.last()) else { break };
+            let (Some(first), Some(last)) = (pending.first(), pending.last()) else {
+                // Changes held above a gap the drive can't fill from here: report the author. Only
+                // this PC's own chain makes the pass incomplete; another device's gap is filled by
+                // that device or another holder, and must not keep this PC's pass from finishing.
+                let stuck = with_vault(state, &context.vault_id, &membership.head, |vault| {
+                    first_held_after(vault.connection(), &context.vault_id, &author, covered)
+                })?
+                .is_some_and(|(first, _)| first <= limit);
+                if stuck {
+                    let name = with_vault(state, &context.vault_id, &membership.head, |vault| {
+                        Ok(if author == context.local.device_id { "this PC".to_owned() } else { device_name(vault.connection(), &author) })
+                    })?;
+                    crate::activity::global().record_coalesced(
+                        crate::activity::Level::Warning,
+                        crate::activity::Category::Sync,
+                        format!("Google Drive lacks older changes from {name} that this PC no longer holds. Devices that sync only through Google Drive may miss them until another device uploads them"),
+                        Duration::from_secs(6 * 60 * 60),
+                    );
+                    if author == context.local.device_id {
+                        complete = false;
+                    }
+                    report.drive_gaps.push(author.clone());
+                }
+                break;
+            };
             if uploaded_files >= UPLOAD_FILES_PER_PASS {
                 complete = false;
                 break 'authors;
@@ -1567,6 +1629,94 @@ pub(crate) mod tests {
         // Only its own note goes up: none of the phone's deleted range.
         assert_eq!(pass(&b, &drive).sent, 1);
         assert_eq!(phone_files(), 0);
+        cleanup([a, b]);
+    }
+
+    /// C1 (audit A1, A2): history trimmed here while Google Drive was off. The drive must start from
+    /// change 1 of the phone, and no device holds it any more. A refill marker at the trim floor lets
+    /// the upload go on from the first held change, and a device that applied up to the floor counts
+    /// the marker and downloads the rest. Without a floor every member reached, nothing is marked:
+    /// the author is reported, and only this PC's own chain would make the pass incomplete.
+    #[test]
+    fn a_drive_gap_below_the_first_held_change_is_bridged_by_a_refill_marker() {
+        let (a, b, _) = group();
+        let drive = MemoryDrive::default();
+        let mut previous = GENESIS_HASH.to_owned();
+        let mut chain = Vec::new();
+        for sequence in 1..=10u64 {
+            let id = format!("login-{sequence}");
+            let change = phone_op(sequence, &previous, "entry", &id, RecordVersion::from_entries([("phone", 1)]), 0,
+                serde_json::json!({"entry": login_entry(&id, &format!("Login {sequence}")), "groupIds": []}));
+            previous = change.hash.clone();
+            chain.push(change);
+        }
+        let apply = |device: &Synthetic| {
+            let mut app = device.state.lock().unwrap();
+            apply_waiting(app.unlocked.as_mut().unwrap(), "vault-a", &[4u8; 32]).unwrap();
+        };
+        let report = |device: &Synthetic, peer: &str, applied: u64| {
+            let head = (applied, chain[applied as usize - 1].hash.clone());
+            let heads = BTreeMap::from([("phone".to_owned(), head)]);
+            let progress = crate::progress::SyncProgress { received: heads.clone(), applied: heads };
+            let mut app = device.state.lock().unwrap();
+            let db = app.unlocked.as_mut().unwrap().connection();
+            db.execute("CREATE TABLE IF NOT EXISTS sync_peer_progress (vault_id TEXT NOT NULL, peer_device_id TEXT NOT NULL, progress_json TEXT NOT NULL, PRIMARY KEY (vault_id, peer_device_id))", []).unwrap();
+            db.execute("INSERT OR REPLACE INTO sync_peer_progress VALUES ('vault-a', ?1, ?2)",
+                params![peer, String::from_utf8(progress.encode().unwrap()).unwrap()]).unwrap();
+        };
+        // `a` applied the phone's 10 changes, then trimmed 1 to 4 (Drive was off, so no Drive limit).
+        stage(&a, &chain);
+        apply(&a);
+        {
+            let mut app = a.state.lock().unwrap();
+            let db = app.unlocked.as_mut().unwrap().connection();
+            for table in ["sync_applied_operations", "sync_received_operations"] {
+                db.execute(&format!("DELETE FROM {table} WHERE mutation_id IN (SELECT mutation_id FROM sync_operations WHERE device_id = 'phone' AND sequence <= 4)"), []).unwrap();
+            }
+            db.execute("DELETE FROM sync_operations WHERE device_id = 'phone' AND sequence <= 4", []).unwrap();
+        }
+        let keys = CloudKeys::derive(&[5; 32], "vault-a").unwrap();
+        let phone_ranges = || {
+            let mut ranges: Vec<(u64, u64)> = drive.names().iter().filter_map(|name| match keys.parse(name)? {
+                CloudName::Operations { device, first, last } if device == keys.device_tag("phone") => Some((first, last)),
+                _ => None,
+            }).collect();
+            ranges.sort_unstable();
+            ranges
+        };
+
+        // `b` reported only 2 applied: the floor is 2, below the gap. No marker, the phone is reported.
+        report(&a, "phone", 10);
+        report(&a, &b.local.device_id, 2);
+        let first = pass(&a, &drive);
+        assert_eq!(first.drive_gaps, vec!["phone".to_owned()]);
+        assert!(phone_ranges().is_empty(), "nothing above the gap goes up without a marker");
+        assert!(!drive.names().contains(&keys.floor_name("phone")));
+
+        // Every active member applied 10: a marker at 4 (the hash of change 4), then 5 to 10 go up.
+        report(&a, &b.local.device_id, 10);
+        let second = pass(&a, &drive);
+        assert!(second.drive_gaps.is_empty());
+        assert_eq!(phone_ranges(), [(5, 10)]);
+        let marker = drive.files.lock().unwrap().iter().find(|(file, _)| file.name == keys.floor_name("phone"))
+            .and_then(|(file, sealed)| keys.open(&file.name, sealed))
+            .and_then(|plain| serde_json::from_slice::<crate::compaction::drive::Marker>(&plain).ok())
+            .expect("a readable marker");
+        assert_eq!((marker.author.as_str(), marker.floor, marker.hash.as_str(), marker.writer.as_str()),
+            ("phone", 4, chain[3].hash.as_str(), a.local.device_id.as_str()));
+
+        // `b` applied 1 to 4: it counts the marker, downloads 5 to 10 and uploads nothing of the phone.
+        stage(&b, &chain[..4]);
+        apply(&b);
+        report(&b, "phone", 10);
+        report(&b, &a.local.device_id, 10);
+        let caught_up = pass(&b, &drive);
+        assert_eq!(caught_up.received, 7, "the phone's 5 to 10 and a's note");
+        assert_eq!(b.state.lock().unwrap().unlocked.as_mut().unwrap().list_entries().unwrap().len(), 10);
+        assert_eq!(phone_ranges(), [(5, 10)]);
+        // A later pass on `a` never lowers or rewrites the marker.
+        pass(&a, &drive);
+        assert_eq!(drive.names().iter().filter(|name| **name == keys.floor_name("phone")).count(), 1);
         cleanup([a, b]);
     }
 
