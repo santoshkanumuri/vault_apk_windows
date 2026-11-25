@@ -1209,6 +1209,14 @@ pub(crate) fn sync_port(vault_id: &str) -> u16 {
     (20_000 + hash.rem_euclid(30_000)) as u16
 }
 
+/// L5: the port the listener takes when another program holds [`sync_port`]: half the range away,
+/// so it is the same on every start. Devices find it through the local advertisement, as before,
+/// and remember the address they reached; nothing on the wire changes.
+pub(crate) fn fallback_sync_port(vault_id: &str) -> u16 {
+    let port = sync_port(vault_id);
+    20_000 + (port - 20_000 + 15_000) % 30_000
+}
+
 fn integer(value: u64) -> Result<i64> {
     value.try_into().map_err(storage_error)
 }
@@ -3671,6 +3679,8 @@ mod tests {
     #[test]
     fn endpoints_are_private_and_ports_match_java() {
         assert_eq!(sync_port("android-vault"), 23492);
+        // L5: the second port is half the range away, wrapping inside 20000-49999.
+        assert_eq!(fallback_sync_port("android-vault"), 38492);
         assert_eq!(
             endpoint("192.168.1.4", "android-vault").unwrap().port(),
             sync_port("android-vault")

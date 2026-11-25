@@ -60,8 +60,7 @@ impl LanDiscovery {
             let _ = self.daemon.unregister(&name);
         }
         let Some(vault) = vault else { return Ok(()); };
-        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, crate::lan_sync::sync_port(vault)))
-            .or_else(|_| TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))).map_err(|e| e.to_string())?;
+        let listener = bind_sync_listener(vault).map_err(|e| e.to_string())?;
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let service = ServiceInfo::new(SERVICE, &self.instance, &format!("{}.local.", self.instance),
             "", listener.local_addr().map_err(|e| e.to_string())?.port(), None)
@@ -81,6 +80,14 @@ impl LanDiscovery {
     }
 }
 
+/// The sync listener: the port derived from the vault, then a fixed second port when another
+/// program holds it (L5), and only then any free port. The advertisement carries the port it got.
+fn bind_sync_listener(vault: &str) -> std::io::Result<TcpListener> {
+    TcpListener::bind((Ipv4Addr::UNSPECIFIED, crate::lan_sync::sync_port(vault)))
+        .or_else(|_| TcpListener::bind((Ipv4Addr::UNSPECIFIED, crate::lan_sync::fallback_sync_port(vault))))
+        .or_else(|_| TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)))
+}
+
 impl Drop for LanDiscovery {
     fn drop(&mut self) { let _ = self.daemon.shutdown(); }
 }
@@ -97,6 +104,23 @@ mod tests {
             assert!(!private_address(ip.parse().unwrap()));
         }
     }
+    /// L5: a held sync port moves the listener to the same second port every time, not a random one.
+    #[test]
+    fn a_held_sync_port_falls_back_to_a_fixed_second_port() {
+        let vault = format!("port-test-{}", uuid::Uuid::new_v4());
+        let (port, second) = (crate::lan_sync::sync_port(&vault), crate::lan_sync::fallback_sync_port(&vault));
+        assert_ne!(port, second);
+        assert!((20_000..50_000).contains(&second));
+        let Ok(_held) = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)) else { return };
+        for _ in 0..2 {
+            let listener = bind_sync_listener(&vault).unwrap();
+            if listener.local_addr().unwrap().port() != second {
+                // Another program holds the second port too: any free port is the last resort.
+                assert!(TcpListener::bind((Ipv4Addr::UNSPECIFIED, second)).is_err());
+            }
+        }
+    }
+
     #[test]
     #[ignore = "requires a private local network with multicast enabled"]
     fn discovers_windows_listener_and_removes_it_when_sync_is_disabled() {
