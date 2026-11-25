@@ -625,6 +625,22 @@ pub(crate) fn remove_account(db: &Connection) -> Result<Option<Account>> {
     Ok(saved)
 }
 
+/// L4: this PC's progress report on Google Drive is rewritten after this long unchanged, as
+/// Android does (`CloudSync.PROGRESS_HEARTBEAT_MS`).
+const PROGRESS_HEARTBEAT: Duration = Duration::from_secs(60 * 60);
+
+/// True when `file` (this PC's progress report) was written at least [PROGRESS_HEARTBEAT] ago.
+/// A time up to an hour ahead of this PC's clock counts as just written; an unreadable time never
+/// forces a rewrite (a changed report is still written at once).
+fn heartbeat_due(file: &CloudFile, now_millis: i64) -> bool {
+    let Ok(modified) = time::OffsetDateTime::parse(&file.modified, &time::format_description::well_known::Rfc3339) else {
+        return false;
+    };
+    let heartbeat = PROGRESS_HEARTBEAT.as_millis() as i64;
+    let age = now_millis.saturating_sub((modified.unix_timestamp_nanos() / 1_000_000) as i64);
+    !(-heartbeat..heartbeat).contains(&age)
+}
+
 /// Shows that changes from `author` on Google Drive were refused here (M5), with the reason.
 fn report_drive_refusal(db: &Connection, author: &str, error: &str) {
     let name = device_name(db, author);
@@ -1146,7 +1162,10 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         crate::protocol::SYNC_FEATURES.join(",").as_bytes()].concat()));
     let own_name = context.keys.progress_name(&context.local.device_id);
     let own_file = context.files.iter().find(|file| file.name == own_name).cloned();
-    if !stranded && (digest != context.progress_digest || own_file.is_none()) {
+    // L4: rewritten at least hourly while unchanged, like Android, so a PC whose report stays the
+    // same is not shown as stale on the other devices.
+    let due = own_file.as_ref().is_none_or(|file| heartbeat_due(file, crate::activity::now_millis() as i64));
+    if !stranded && (digest != context.progress_digest || due) {
         // Signed by this PC's identity (H2): only a signed report counts for what may be deleted.
         let key_epoch = with_vault(state, &context.vault_id, &membership.head, |vault| {
             Ok(crate::epoch_keys::stored_keys(vault.connection(), &context.vault_id).map_err(storage_error)?.keys().next_back().copied().unwrap_or(1))
@@ -1666,6 +1685,21 @@ pub(crate) mod tests {
     /// the upload go on from the first held change, and a device that applied up to the floor counts
     /// the marker and downloads the rest. Without a floor every member reached, nothing is marked:
     /// the author is reported, and only this PC's own chain would make the pass incomplete.
+    /// L4: the progress report is rewritten hourly while unchanged, as on Android.
+    #[test]
+    fn the_progress_report_is_rewritten_hourly_while_unchanged() {
+        let file = |modified: &str| CloudFile { id: "p".into(), name: "p.x".into(), size: 1, modified: modified.into() };
+        let written = time::OffsetDateTime::parse("2026-11-25T10:00:00.000Z", &time::format_description::well_known::Rfc3339).unwrap();
+        let at = |minutes: i64| ((written.unix_timestamp() + minutes * 60) * 1000) as i64;
+        let report = file("2026-11-25T10:00:00.000Z");
+        assert!(!heartbeat_due(&report, at(0)));
+        assert!(!heartbeat_due(&report, at(59)));
+        assert!(heartbeat_due(&report, at(60)), "an hour unchanged");
+        assert!(!heartbeat_due(&report, at(-30)), "a drive clock a little ahead counts as just written");
+        assert!(heartbeat_due(&report, at(-120)), "a time far ahead is rewritten");
+        assert!(!heartbeat_due(&file(""), at(600)), "an unreadable time never forces a rewrite");
+    }
+
     #[test]
     fn a_drive_gap_below_the_first_held_change_is_bridged_by_a_refill_marker() {
         let (a, b, _) = group();
