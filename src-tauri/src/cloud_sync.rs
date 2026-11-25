@@ -63,7 +63,9 @@ const SCHEMA: &str = "
         vault_id TEXT NOT NULL PRIMARY KEY, drive_compacted_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS cloud_sync_state (
         vault_id TEXT NOT NULL PRIMARY KEY, cursor TEXT NOT NULL DEFAULT '',
-        last_sync_utc TEXT NOT NULL DEFAULT '', progress_digest TEXT NOT NULL DEFAULT '');";
+        last_sync_utc TEXT NOT NULL DEFAULT '', progress_digest TEXT NOT NULL DEFAULT '');
+    CREATE TABLE IF NOT EXISTS cloud_sync_reuploads (
+        vault_id TEXT NOT NULL, author TEXT NOT NULL, reuploaded_at INTEGER NOT NULL, PRIMARY KEY (vault_id, author));";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CloudError {
@@ -528,7 +530,7 @@ pub(crate) fn last_sync(db: &Connection) -> String {
 /// Forgets the cached file list, so the next pass lists the whole folder (after a new sign-in).
 pub(crate) fn forget(db: &Connection) -> Result<()> {
     db.execute_batch(SCHEMA).map_err(storage_error)?;
-    db.execute_batch("DELETE FROM cloud_sync_files; DELETE FROM cloud_sync_state;").map_err(storage_error)
+    db.execute_batch("DELETE FROM cloud_sync_files; DELETE FROM cloud_sync_state; DELETE FROM cloud_sync_reuploads;").map_err(storage_error)
 }
 
 /// The body of a leave file: the same signed request as the Wi-Fi `leave1` frame, as
@@ -655,6 +657,30 @@ fn report_drive_refusal(db: &Connection, author: &str, error: &str) {
 }
 
 /// The first change of `author` this PC holds above `after`, with its previous hash.
+/// When the drive got `file`, in Unix milliseconds; 0 when its time can't be read.
+fn modified_millis(file: &CloudFile) -> i64 {
+    time::OffsetDateTime::parse(&file.modified, &time::format_description::well_known::Rfc3339)
+        .map_or(0, |modified| (modified.unix_timestamp_nanos() / 1_000_000) as i64)
+}
+
+/// Seals a run of one author's changes as one operations file and uploads it.
+fn upload_operations(store: &mut dyn CloudStore, context: &Context, author: &str, pending: &[(ChangeRecord, Vec<u8>)]) -> Result<CloudFile> {
+    let (Some(first), Some(last)) = (pending.first(), pending.last()) else {
+        return Err("Nothing to upload".into());
+    };
+    let mut plain = Vec::with_capacity(pending.iter().map(|(_, wire)| wire.len() + 1).sum::<usize>() + 2);
+    plain.push(b'[');
+    for (index, (_, wire)) in pending.iter().enumerate() {
+        if index > 0 {
+            plain.push(b',');
+        }
+        plain.extend_from_slice(wire);
+    }
+    plain.push(b']');
+    let name = context.keys.operations_name(author, first.0.sequence, last.0.sequence);
+    upload_bytes(store, &name, &context.keys.seal(&name, &plain)?).map_err(|error| error.message())
+}
+
 fn first_held_after(db: &Connection, vault_id: &str, author: &str, after: u64) -> Result<Option<(u64, String)>> {
     db.query_row(
         "SELECT sequence, previous_hash FROM sync_operations WHERE vault_id = ?1 AND device_id = ?2 AND sequence > ?3 ORDER BY sequence LIMIT 1",
@@ -849,6 +875,12 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                 .filter(|(first, last, file)| *first <= head + 1 && *last > head && !unusable.contains(&file.id))
                 .max_by_key(|(_, last, _)| *last)
             else {
+                // M6: every file with the next change failed here. Not in sync, whatever the other
+                // authors say; a device that holds the range uploads it again (`drive_refill::reupload`).
+                if files.iter().any(|(first, last, _)| *first <= head + 1 && *last > head) {
+                    complete = false;
+                    report.drive_stuck.push(author.clone());
+                }
                 break;
             };
             let (first, last) = (*first, *last);
@@ -859,6 +891,12 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                     context.files.retain(|known| known.id != file.id);
                     unusable.insert(file.id.clone());
                     complete = false;
+                    continue;
+                }
+                // M6: a file that fails for its own reason (too large, unreadable) is skipped, and the
+                // uploads still run. Sign-in, connection, quota and rate limits stop the pass.
+                Err(CloudError::Other(_)) => {
+                    unusable.insert(file.id.clone());
                     continue;
                 }
                 Err(error) => return Err(cloud(error)),
@@ -908,6 +946,17 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             })?;
         }
     }
+    if !report.drive_stuck.is_empty() {
+        let names = with_vault(state, &context.vault_id, &membership.head, |vault| {
+            Ok(report.drive_stuck.iter().map(|author| device_name(vault.connection(), author)).collect::<Vec<_>>().join(", "))
+        })?;
+        crate::activity::global().record_coalesced(
+            crate::activity::Level::Warning,
+            crate::activity::Category::Sync,
+            format!("Google Drive holds changes from {names} that this PC can't read. A device that has them uploads them again within a day, or sync over Wi-Fi with it"),
+            Duration::from_secs(6 * 60 * 60),
+        );
+    }
     // Floor markers (`compaction.rs` `drive`), counted only at or below this PC's own floor(A).
     let own_floors = with_vault(state, &context.vault_id, &membership.head, |vault| {
         crate::compaction::own_floors(vault.connection(), &context.vault_id, &context.local.device_id, &membership).map_err(storage_error)
@@ -943,6 +992,8 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             .map_err(storage_error)
     })?;
     let mut uploaded_files = 0usize;
+    // Per author, how far the drive's copy reaches from the start (M6 re-upload below).
+    let mut reach: BTreeMap<String, u64> = BTreeMap::new();
     'authors: for author in local_authors.into_iter().filter(|_| !stranded) {
         let limit = match membership.members.get(&author) {
             Some(member) if member.active => u64::MAX,
@@ -964,10 +1015,11 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         let first_held = with_vault(state, &context.vault_id, &membership.head, |vault| {
             first_held_after(vault.connection(), &context.vault_id, &author, covered)
         })?;
-        if let Some((first, previous)) = first_held.filter(|(first, _)| *first > covered + 1 && *first <= limit) {
+        if let Some((first, previous)) = first_held.filter(|(first, _)| *first <= limit) {
             let floor = first - 1;
             let own = own_floors.get(&author).copied().unwrap_or(0);
-            if floor <= own && floor > markers.get(&author).copied().unwrap_or(0) {
+            let marker = markers.get(&author).copied().unwrap_or(0);
+            if crate::drive_refill::plan(covered, Some(first), own, marker) == crate::drive_refill::Step::Mark {
                 let name = context.keys.floor_name(&author);
                 let marker = crate::compaction::drive::Marker { author: author.clone(), floor, hash: previous,
                     writer: context.local.device_id.clone(), at: crate::activity::now_millis() as i64 };
@@ -983,6 +1035,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                 covered = crate::compaction::drive::coverage(&ranges, floor);
             }
         }
+        reach.insert(author.clone(), covered);
         loop {
             let (pending, remaining) = with_vault(state, &context.vault_id, &membership.head, |vault| {
                 pending_operations(
@@ -994,7 +1047,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                     &|device| (device == author).then_some(limit),
                 )
             })?;
-            let (Some(first), Some(last)) = (pending.first(), pending.last()) else {
+            let Some(last) = pending.last() else {
                 // Changes held above a gap the drive can't fill from here: report the author. Only
                 // this PC's own chain makes the pass incomplete; another device's gap is filled by
                 // that device or another holder, and must not keep this PC's pass from finishing.
@@ -1024,21 +1077,12 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
                 break 'authors;
             }
             tracker.outgoing_remaining(remaining as u64);
-            let (first, last) = (first.0.sequence, last.0.sequence);
-            let mut plain = Vec::with_capacity(pending.iter().map(|(_, wire)| wire.len() + 1).sum::<usize>() + 2);
-            plain.push(b'[');
-            for (index, (_, wire)) in pending.iter().enumerate() {
-                if index > 0 {
-                    plain.push(b',');
-                }
-                plain.extend_from_slice(wire);
-            }
-            plain.push(b']');
-            let name = context.keys.operations_name(&author, first, last);
-            let file = upload_bytes(store, &name, &context.keys.seal(&name, &plain)?).map_err(cloud)?;
+            let last = last.0.sequence;
+            let file = upload_operations(store, &context, &author, &pending)?;
             remember(&mut context, file);
             uploaded_files += 1;
             covered = last;
+            reach.insert(author.clone(), covered);
             report.sent += pending.len();
             for _ in &pending {
                 tracker.sent_one();
@@ -1186,6 +1230,8 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         remember(&mut context, file);
         context.progress_digest = digest;
     }
+    // Signed reports of other devices, with when they wrote them (M6 re-upload below).
+    let mut reports: Vec<(String, i64, crate::progress::SyncProgress)> = Vec::new();
     for file in &listed {
         let Some(CloudName::Progress { device }) = context.parse(&file.name) else { continue };
         let Some(peer) = authors.get(&device).filter(|peer| **peer != context.local.device_id) else { continue };
@@ -1210,6 +1256,7 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
         // Only a signed report proves the member synced: an unsigned one may come from a removed device
         // that still holds an old key, so it never makes a member look seen or up to date (Sync page).
         let Some((peer_progress, features)) = &signed else { continue };
+        reports.push((peer.clone(), body["updatedAt"].as_i64().unwrap_or(0), peer_progress.clone()));
         // A report older than one this PC got over Wi-Fi is refused there and simply skipped here.
         let _ = with_vault(state, &context.vault_id, &membership.head, |vault| {
             let db = vault.connection();
@@ -1221,6 +1268,89 @@ pub(crate) fn run(state: &ManagedState, store: &mut dyn CloudStore, tracker: &Sy
             }
             validate_peer_progress(db, &context.vault_id, &context.local.device_id, peer, peer_progress, false).map(|_| ())
         });
+    }
+
+    // 6b. M6: a device that stays below a range the drive holds, well after the drive got it, may
+    // not be able to read that file. If this PC holds the range, it uploads it again as a new file
+    // (`drive_refill::reupload`, shared with Android), at most once a day per author.
+    if !stranded {
+        let now = crate::activity::now_millis() as i64;
+        let reuploaded: BTreeMap<String, i64> = with_vault(state, &context.vault_id, &membership.head, |vault| {
+            vault.connection().prepare("SELECT author, reuploaded_at FROM cloud_sync_reuploads WHERE vault_id = ?1")
+                .map_err(storage_error)?
+                .query_map([&context.vault_id], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(storage_error)?
+                .collect::<std::result::Result<_, _>>()
+                .map_err(storage_error)
+        })?;
+        for (author, member) in &membership.members {
+            let Some(&covered) = reach.get(author) else { continue };
+            let limit = if member.active {
+                u64::MAX
+            } else {
+                match &member.removal_cutoff {
+                    Some(cutoff) => cutoff.0,
+                    None => continue,
+                }
+            };
+            let peers: Vec<crate::drive_refill::PeerReport> = reports
+                .iter()
+                .filter(|(peer, _, _)| peer != author)
+                .map(|(_, at, progress)| crate::drive_refill::PeerReport {
+                    received: progress.received.get(author).map_or(0, |head| head.0),
+                    reported_at: *at,
+                })
+                .collect();
+            let files: Vec<crate::drive_refill::Segment> = segments
+                .get(author)
+                .map(|files| files.iter().map(|(first, last, file)| crate::drive_refill::Segment {
+                    first: *first, last: *last, modified_at: modified_millis(file),
+                }).collect())
+                .unwrap_or_default();
+            let Some((after, through)) = crate::drive_refill::reupload(covered, &peers, &files,
+                reuploaded.get(author).copied().unwrap_or(0), now)
+            else {
+                continue;
+            };
+            let through = through.min(limit);
+            // Only a PC that holds the change right after the stuck point can upload the range.
+            let holds = with_vault(state, &context.vault_id, &membership.head, |vault| {
+                first_held_after(vault.connection(), &context.vault_id, author, after)
+            })?
+            .is_some_and(|(first, _)| first == after + 1);
+            if !holds {
+                continue;
+            }
+            let mut done = after;
+            while done < through && uploaded_files < UPLOAD_FILES_PER_PASS {
+                let (pending, _) = with_vault(state, &context.vault_id, &membership.head, |vault| {
+                    pending_operations(
+                        vault.connection(),
+                        &context.vault_id,
+                        &BTreeMap::from([(author.clone(), (done, String::new()))]),
+                        UPLOAD_OPERATIONS,
+                        UPLOAD_BYTES,
+                        &|device| (device == author).then_some(through),
+                    )
+                })?;
+                let Some(last) = pending.last().map(|(change, _)| change.sequence) else { break };
+                let file = upload_operations(store, &context, author, &pending)?;
+                remember(&mut context, file);
+                uploaded_files += 1;
+                report.sent += pending.len();
+                done = last;
+            }
+            if done > after {
+                with_vault(state, &context.vault_id, &membership.head, |vault| {
+                    vault.connection().execute(
+                        "INSERT INTO cloud_sync_reuploads (vault_id, author, reuploaded_at) VALUES (?1, ?2, ?3)
+                         ON CONFLICT(vault_id, author) DO UPDATE SET reuploaded_at = excluded.reuploaded_at",
+                        params![context.vault_id, author, now],
+                    ).map_err(storage_error)?;
+                    Ok(())
+                })?;
+            }
+        }
     }
 
     // 7. Drive cleanup (`compaction.rs` `drive`): once a day, after a complete pass, and only when
@@ -1680,11 +1810,6 @@ pub(crate) mod tests {
         cleanup([a, b]);
     }
 
-    /// C1 (audit A1, A2): history trimmed here while Google Drive was off. The drive must start from
-    /// change 1 of the phone, and no device holds it any more. A refill marker at the trim floor lets
-    /// the upload go on from the first held change, and a device that applied up to the floor counts
-    /// the marker and downloads the rest. Without a floor every member reached, nothing is marked:
-    /// the author is reported, and only this PC's own chain would make the pass incomplete.
     /// L4: the progress report is rewritten hourly while unchanged, as on Android.
     #[test]
     fn the_progress_report_is_rewritten_hourly_while_unchanged() {
@@ -1700,6 +1825,11 @@ pub(crate) mod tests {
         assert!(!heartbeat_due(&file(""), at(600)), "an unreadable time never forces a rewrite");
     }
 
+    /// C1 (audit A1, A2): history trimmed here while Google Drive was off. The drive must start from
+    /// change 1 of the phone, and no device holds it any more. A refill marker at the trim floor lets
+    /// the upload go on from the first held change, and a device that applied up to the floor counts
+    /// the marker and downloads the rest. Without a floor every member reached, nothing is marked:
+    /// the author is reported, and only this PC's own chain would make the pass incomplete.
     #[test]
     fn a_drive_gap_below_the_first_held_change_is_bridged_by_a_refill_marker() {
         let (a, b, _) = group();
@@ -1780,6 +1910,72 @@ pub(crate) mod tests {
         // A later pass on `a` never lowers or rewrites the marker.
         pass(&a, &drive);
         assert_eq!(drive.names().iter().filter(|name| **name == keys.floor_name("phone")).count(), 1);
+        cleanup([a, b]);
+    }
+
+    /// The phone's changes 1 to `count`, each a new login.
+    fn phone_chain(count: u64) -> Vec<ChangeRecord> {
+        let mut previous = GENESIS_HASH.to_owned();
+        (1..=count)
+            .map(|sequence| {
+                let id = format!("login-{sequence}");
+                let change = phone_op(sequence, &previous, "entry", &id, RecordVersion::from_entries([("phone", 1)]), 0,
+                    serde_json::json!({"entry": login_entry(&id, &format!("Login {sequence}")), "groupIds": []}));
+                previous = change.hash.clone();
+                change
+            })
+            .collect()
+    }
+
+    /// M6 (audit A3): the drive holds a file no reader can use (sealed correctly, but 14 changes under
+    /// a name for 15), and writers count it as coverage. The reader names the phone as stuck. The
+    /// writer sees in the reader's signed report that it stays below a file the drive got long ago,
+    /// uploads the range again, and the reader goes on from the new copy. At most once a day.
+    #[test]
+    fn an_unreadable_file_is_uploaded_again_for_the_device_stuck_below_it() {
+        let (a, b, _) = group();
+        let drive = MemoryDrive::default();
+        let keys = CloudKeys::derive(&[5; 32], "vault-a").unwrap();
+        stage(&a, &phone_chain(15));
+        pass(&a, &drive);
+        let good = keys.operations_name("phone", 1, 15);
+        {
+            let mut files = drive.files.lock().unwrap();
+            let (_, sealed) = files.iter_mut().find(|(file, _)| file.name == good).expect("the phone's changes went up");
+            let mut operations: Vec<serde_json::Value> = serde_json::from_slice(&keys.open(&good, sealed).unwrap()).unwrap();
+            operations.pop();
+            *sealed = keys.seal(&good, &serde_json::to_vec(&operations).unwrap()).unwrap();
+        }
+        let phone_files = || drive.names().iter().filter(|name| **name == good).count();
+
+        let stuck = pass(&b, &drive);
+        assert_eq!(stuck.drive_stuck, vec!["phone".to_owned()]);
+        assert_eq!(b.state.lock().unwrap().unlocked.as_mut().unwrap().list_entries().unwrap().len(), 0);
+
+        // `b`'s signed report says it has none of the phone's changes, long after the file went up.
+        let again = pass(&a, &drive);
+        assert_eq!(again.sent, 15);
+        assert_eq!(phone_files(), 2);
+        // At most once a day per author, even while `b` still reports nothing.
+        assert_eq!(pass(&a, &drive).sent, 0);
+        assert_eq!(phone_files(), 2);
+
+        let recovered = pass(&b, &drive);
+        assert!(recovered.drive_stuck.is_empty());
+        assert_eq!(b.state.lock().unwrap().unlocked.as_mut().unwrap().list_entries().unwrap().len(), 15);
+        cleanup([a, b]);
+    }
+
+    /// M6 (audit A6): a file too large to download is skipped, and the pass still uploads this PC's changes.
+    #[test]
+    fn an_oversized_file_is_skipped_and_the_pass_still_uploads() {
+        let (a, b, _) = group();
+        let drive = MemoryDrive::default();
+        let keys = CloudKeys::derive(&[5; 32], "vault-a").unwrap();
+        drive.put(&keys.operations_name("phone", 1, 1), vec![0; DOWNLOAD_BYTES as usize + 1]);
+        let report = pass(&a, &drive);
+        assert!(report.sent >= 1, "this PC's own change still goes up");
+        assert_eq!(report.drive_stuck, vec!["phone".to_owned()]);
         cleanup([a, b]);
     }
 

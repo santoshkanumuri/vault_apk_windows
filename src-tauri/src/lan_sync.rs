@@ -105,6 +105,10 @@ pub struct SyncReport {
     /// Authors whose changes this PC holds above a gap in the drive's copy that it cannot fill (C1).
     #[serde(skip)]
     pub drive_gaps: Vec<String>,
+    /// Authors whose next change Google Drive holds only in files this PC can't use (M6). A device
+    /// that holds the range uploads it again (`drive_refill::reupload`).
+    #[serde(skip)]
+    pub drive_stuck: Vec<String>,
     /// Photos the peer lacked or sent corrupt in this session. They are not asked from it again
     /// for a while, so a session that only skipped photos still made progress (M13).
     #[serde(skip)]

@@ -11,6 +11,7 @@ pub mod change_store;
 pub mod checkpoint;
 pub mod compaction;
 pub mod conflicts;
+pub mod drive_refill;
 mod desktop;
 pub mod dpapi;
 pub mod enrollment;
