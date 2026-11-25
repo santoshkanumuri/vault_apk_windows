@@ -51,7 +51,7 @@ use windows::{
 use crate::{
     ManagedState,
     activity::{self, Category, Level},
-    desktop,
+    desktop, passkey_requests,
     passkeys::VaultPasskey,
 };
 
@@ -676,7 +676,8 @@ impl Provider {
         verified
     }
 
-    fn get_assertion(&self, request: &OperationRequest) -> Result<(u32, *mut u8), HRESULT> {
+    /// `site` is filled in as soon as the request names one, so a refusal can say which site it was.
+    fn get_assertion(&self, request: &OperationRequest, site: &mut String) -> Result<(u32, *mut u8), HRESULT> {
         let api = api().ok_or(NTE_NOT_SUPPORTED)?;
         if request.pb_encoded_request.is_null() || request.cb_encoded_request == 0 {
             return Err(E_INVALIDARG);
@@ -721,6 +722,7 @@ impl Provider {
             copied
         };
         let rp_id = String::from_utf8(rp_id_bytes).map_err(|_| E_INVALIDARG)?;
+        site.push_str(&rp_id);
         if client_data_hash.len() != 32 {
             return Err(E_INVALIDARG);
         }
@@ -817,7 +819,8 @@ impl Provider {
 }
 
 impl Provider {
-    fn make_credential(&self, request: &OperationRequest) -> Result<(u32, *mut u8), HRESULT> {
+    /// `site` is filled in as soon as the request names one, as in `get_assertion`.
+    fn make_credential(&self, request: &OperationRequest, site: &mut String) -> Result<(u32, *mut u8), HRESULT> {
         let api = api().ok_or(NTE_NOT_SUPPORTED)?;
         if request.pb_encoded_request.is_null() || request.cb_encoded_request == 0 {
             return Err(E_INVALIDARG);
@@ -878,6 +881,7 @@ impl Provider {
             return Err(NTE_NOT_SUPPORTED);
         }
         let rp_id = String::from_utf8(rp_id_bytes).map_err(|_| E_INVALIDARG)?;
+        site.push_str(&rp_id);
         let username = if username.trim().is_empty() { display_name.trim().to_owned() } else { username.trim().to_owned() };
         if username.is_empty() || !(1..=64).contains(&user_id.len()) {
             return Err(E_INVALIDARG);
@@ -958,6 +962,37 @@ impl Provider {
     }
 }
 
+/// One line for "Passkey requests": what Windows asked and what Nuvori answered. It goes into the
+/// encrypted vault, and waits in memory when the vault is locked, which is itself one of the
+/// answers worth keeping. Only the site is taken from the request.
+fn log_request(provider: &Provider, create: bool, site: &str, error: Option<HRESULT>) {
+    let reason = error.map(reason_for).unwrap_or_default();
+    let line = passkey_requests::Request::new(activity::now_millis() as i64, create, site, error.is_none(), reason);
+    let Ok(mut app) = provider.state.lock() else {
+        return passkey_requests::hold(line);
+    };
+    match app.unlocked.as_mut() {
+        Some(vault) => {
+            let _ = passkey_requests::record(vault.connection(), line);
+        }
+        None => passkey_requests::hold(line),
+    }
+}
+
+/// Why Nuvori did not offer a passkey, in words a person can act on. Windows gives one code for
+/// more than one cause in places, so a reason says what is certain and no more.
+fn reason_for(error: HRESULT) -> &'static str {
+    match error {
+        NTE_NOT_FOUND => "No passkey for this site is saved on this PC",
+        NTE_EXISTS => "A passkey for this account is already saved here",
+        NTE_USER_CANCELLED => "Nuvori was locked, or the prompt was closed",
+        NTE_BAD_SIGNATURE => "The request did not come from Windows",
+        NTE_NOT_SUPPORTED => "This PC's Windows, or the key the site asked for, is not one Nuvori can use",
+        E_INVALIDARG => "The request was not in a shape Nuvori could read",
+        _ => "Something went wrong on this PC. The activity log has the details",
+    }
+}
+
 #[implement(IPluginAuthenticator)]
 struct Authenticator(Arc<Provider>);
 
@@ -967,7 +1002,10 @@ impl IPluginAuthenticator_Impl for Authenticator_Impl {
             return E_INVALIDARG;
         }
         unsafe { *response = OperationResponse { cb_encoded_response: 0, pb_encoded_response: std::ptr::null_mut() } };
-        match self.0.make_credential(unsafe { &*request }) {
+        let mut site = String::new();
+        let outcome = self.0.make_credential(unsafe { &*request }, &mut site);
+        log_request(&self.0, true, &site, outcome.err());
+        match outcome {
             Ok((length, buffer)) => {
                 unsafe { *response = OperationResponse { cb_encoded_response: length, pb_encoded_response: buffer } };
                 S_OK
@@ -986,7 +1024,10 @@ impl IPluginAuthenticator_Impl for Authenticator_Impl {
             return E_INVALIDARG;
         }
         unsafe { *response = OperationResponse { cb_encoded_response: 0, pb_encoded_response: std::ptr::null_mut() } };
-        match self.0.get_assertion(unsafe { &*request }) {
+        let mut site = String::new();
+        let outcome = self.0.get_assertion(unsafe { &*request }, &mut site);
+        log_request(&self.0, false, &site, outcome.err());
+        match outcome {
             Ok((length, buffer)) => {
                 unsafe { *response = OperationResponse { cb_encoded_response: length, pb_encoded_response: buffer } };
                 S_OK

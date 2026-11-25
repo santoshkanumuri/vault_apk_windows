@@ -34,6 +34,7 @@ pub mod membership_exit;
 pub mod migration_inventory;
 pub mod pairing;
 mod passkey_plugin;
+pub mod passkey_requests;
 pub mod passkeys;
 pub mod payload;
 pub mod photo_blobs;
@@ -2725,6 +2726,26 @@ fn list_passkeys(state: State<'_, ManagedState>) -> Result<Vec<PasskeySummary>, 
         .map_err(public_vault_error)
 }
 
+/// What Windows asked this PC's passkey provider, newest first. Reading also writes the lines
+/// that waited in memory while the vault was locked.
+#[tauri::command]
+fn passkey_requests(state: State<'_, ManagedState>) -> Result<Vec<passkey_requests::Request>, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let vault = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?;
+    passkey_requests::recent(vault.connection()).map_err(|_| "Nuvori could not read the passkey requests".to_owned())
+}
+
+#[tauri::command]
+fn clear_passkey_requests(state: State<'_, ManagedState>) -> Result<(), String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let vault = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?;
+    passkey_requests::clear(vault.connection())
+        .map_err(|_| "Nuvori could not clear the passkey requests".to_owned())?;
+    drop(app);
+    activity::log(Level::Info, Category::Security, "Cleared the passkey request history");
+    Ok(())
+}
+
 /// "passkey_mark": ids of the logins with a passkey for the same account, for the mark in the list.
 #[tauri::command]
 fn passkey_login_ids(state: State<'_, ManagedState>) -> Result<Vec<String>, String> {
@@ -3106,6 +3127,8 @@ pub fn run() {
             list_passkeys,
             passkey_login_ids,
             delete_passkey,
+            passkey_requests,
+            clear_passkey_requests,
             activity_log,
             clear_activity_log,
             browser_status,
