@@ -1,5 +1,36 @@
 // On-screen text for the Windows app, in one place so it can be reviewed and translated.
 // Keys are generated from the English text; the values are exactly what each screen showed before.
+
+/**
+ * Import authenticator codes, with Android's wording (VaultUi.kt "Import authenticator codes").
+ * Kept in its own block to keep merges simple.
+ */
+export const authenticatorImportText = {
+  title: "Import authenticator codes",
+  row: "From Google Authenticator or OneAuth",
+  howTo: "In Google Authenticator, choose Transfer accounts, then Export accounts. Read every QR page with this PC's camera, or save each page as an image, before importing.",
+  useCamera: "Use camera",
+  stopCamera: "Stop camera",
+  chooseQrImage: "Choose QR image",
+  chooseFile: "Choose OneAuth JSON or TOTP text file",
+  cameraPreview: "Camera preview for the transfer QR",
+  openingCamera: "Opening camera…",
+  pointCamera: "Point the camera at a transfer QR.",
+  alsoSupported: "You can also read a standard TOTP setup QR, choose a Zoho OneAuth encrypted JSON export, or import a text file with one otpauth://totp link per line. Microsoft Authenticator does not provide a compatible account export.",
+  plaintextWarning: "Plaintext TOTP files contain readable setup keys. Delete them after checking the imported codes.",
+  unlockOneAuth: "Unlock OneAuth export",
+  exportPassword: "Export password",
+  unlock: "Unlock",
+  scanRemaining: "Scan the remaining QR pages to continue.",
+  reviewNote: "Review these accounts before saving. Imported codes do not remove them from the original app. Check a code on each website before deleting the original.",
+  importCodes: "Import codes",
+  clear: "Clear scanned pages",
+  imageUnreadable: "Couldn't read that QR image.",
+  imageTooLarge: "Choose a QR image smaller than 20 MB.",
+  fileUnreadable: "Couldn't read that authenticator export file.",
+  failed: "Couldn't import the accounts.",
+} as const;
+
 export const strings = {
   skipToContent: "Skip to content",
   primary: "Primary",

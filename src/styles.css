@@ -1179,3 +1179,5 @@ details[open]::details-content { block-size: auto; }
 .rn-field.has-error .rn-editor { border-color: var(--error); }
 .rn-confirm-link { display: block; padding: 8px 10px; border-radius: var(--r-control); background: var(--surface-2); font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
 @media (max-width: 720px) { .rn-tool-text { display: none; } .rn-editor { max-height: none; } }
+/* Import authenticator codes (pages/AuthenticatorImport.tsx) */
+.authenticator-import-heading { margin: 0; font-weight: 600; }

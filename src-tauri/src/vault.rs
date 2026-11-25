@@ -2159,6 +2159,45 @@ impl UnlockedVault {
             .optional()?)
     }
 
+    /// What an authenticator import would do with each account (authenticator_import.rs).
+    pub fn review_authenticator_import(
+        &self,
+        collected: &crate::authenticator_import::Collected,
+    ) -> Result<crate::authenticator_import::Review, VaultError> {
+        let saved = self.list_entries()?.iter().filter_map(crate::authenticator_import::Saved::from_entry).collect();
+        Ok(crate::authenticator_import::review(collected, saved))
+    }
+
+    /// Android `importAuthenticatorAccounts`: each new account becomes a code, an ordinary change
+    /// that syncs. Codes already saved with the same setup key are left alone, and an account whose
+    /// name matches a saved code with another setup key is skipped as a conflict. The statuses are
+    /// worked out again here, against the codes saved now.
+    pub fn import_authenticators(
+        &mut self,
+        collected: &crate::authenticator_import::Collected,
+    ) -> Result<crate::authenticator_import::Summary, VaultError> {
+        use crate::authenticator_import::Status;
+        let saved = self.list_entries()?.iter().filter_map(crate::authenticator_import::Saved::from_entry).collect();
+        let statuses = crate::authenticator_import::statuses(saved, &collected.accounts);
+        let mut summary = crate::authenticator_import::Summary::default();
+        for (account, status) in collected.accounts.iter().zip(statuses) {
+            match status {
+                Status::New => {
+                    let title = if account.issuer.trim().is_empty() { &account.account } else { &account.issuer };
+                    self.save_entry(serde_json::json!({
+                        "type": "AUTHENTICATOR", "title": title, "primaryValue": account.account,
+                        "secondaryValue": account.secret.as_str(), "totpAlgorithm": account.algorithm,
+                        "totpDigits": account.digits, "totpPeriod": account.period,
+                    }))?;
+                    summary.added += 1;
+                }
+                Status::AlreadySaved => summary.already_saved += 1,
+                Status::Conflict => summary.conflicts += 1,
+            }
+        }
+        Ok(summary)
+    }
+
     /// Saves a KeePass import (keepass_import.rs) as ordinary new items, so they sync like items
     /// added by hand. A login that already exists with the same website, username and password is
     /// skipped, also when the file holds it twice. Returns the counts actually saved.
@@ -3323,6 +3362,37 @@ mod tests {
         vault.forget_trashed(&trash[0].id).unwrap();
         assert!(vault.trashed_items().unwrap().is_empty());
         assert!(matches!(vault.forget_trashed("missing"), Err(VaultError::EntryNotFound)));
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Android `importAuthenticatorAccounts`: new accounts become codes, a code already saved with
+    /// the same setup key is left alone, and a saved name with another key is skipped.
+    #[test]
+    fn an_authenticator_import_adds_new_codes_and_skips_saved_and_conflicting_ones() {
+        use crate::authenticator_import::{Source, Status, Summary};
+        let directory = std::env::temp_dir().join(format!("nuvori-codes-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        vault.save_entry(serde_json::json!({
+            "type": "AUTHENTICATOR", "title": "GitHub", "primaryValue": "me", "secondaryValue": "JBSWY3DPEHPK3PXP",
+        })).unwrap();
+        let sources = [Source::Text { text: [
+            "otpauth://totp/GitHub:me?secret=JBSWY3DPEHPK3PXP&issuer=GitHub",
+            "otpauth://totp/GitHub:me?secret=GEZDGNBVGY3TQOJQ&issuer=GitHub",
+            "otpauth://totp/Mail:new%40example.com?secret=MFRGGZDFMZTWQ2LK&issuer=Mail&digits=8&period=60",
+        ].join("\n") }];
+        let collected = crate::authenticator_import::collect(&sources).unwrap();
+        let review = vault.review_authenticator_import(&collected).unwrap();
+        assert_eq!(review.items.iter().map(|item| item.status).collect::<Vec<_>>(), [Status::AlreadySaved, Status::Conflict, Status::New]);
+        assert_eq!(vault.import_authenticators(&collected).unwrap(), Summary { added: 1, already_saved: 1, conflicts: 1 });
+        let codes: Vec<serde_json::Value> = vault.list_entries().unwrap().into_iter().filter(|entry| entry["type"] == "AUTHENTICATOR").collect();
+        assert_eq!(codes.len(), 2);
+        let mail = codes.iter().find(|entry| entry["title"] == "Mail").unwrap();
+        assert_eq!((mail["primaryValue"].as_str(), mail["secondaryValue"].as_str()), (Some("new@example.com"), Some("MFRGGZDFMZTWQ2LK")));
+        assert_eq!((mail["totpDigits"].as_u64(), mail["totpPeriod"].as_u64(), mail["totpAlgorithm"].as_str()), (Some(8), Some(60), Some("SHA1")));
+        // A second run adds nothing.
+        assert_eq!(vault.import_authenticators(&collected).unwrap(), Summary { added: 0, already_saved: 2, conflicts: 1 });
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }

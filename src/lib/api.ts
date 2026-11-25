@@ -21,6 +21,8 @@ export type AppSnapshot = {
   lastUsedAt?: number;
 };
 
+export type { AuthenticatorReview, AuthenticatorSource, AuthenticatorSummary } from "./authenticatorImport";
+import type { AuthenticatorReview, AuthenticatorSource, AuthenticatorSummary } from "./authenticatorImport";
 export type EntryType = "CARD" | "PASSWORD" | "AUTHENTICATOR" | "QUESTION" | "AUTOFILL";
 
 export type VaultEntry = {
@@ -359,6 +361,8 @@ export const api = {
   saveEntry: (entry: EntryDraft) => call<VaultEntry>("save_entry", { entry }),
   deleteEntry: (id: string) => call<void>("delete_entry", { id }),
   /** Opens a KeePass file (base64) in memory and lists what an import would add. */
+  authenticatorsPreview: (sources: AuthenticatorSource[]) => call<AuthenticatorReview>("authenticators_preview", { sources }),
+  authenticatorsImport: (sources: AuthenticatorSource[]) => call<AuthenticatorSummary>("authenticators_import", { sources }),
   keepassPreview: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_preview", { data, password, keyFile }),
   keepassImport: (data: string, password: string, keyFile: string | null) => call<KeepassSummary>("keepass_import", { data, password, keyFile }),
   previousPasswords: (entryId: string) => call<PreviousPassword[]>("previous_passwords", { entryId }),
