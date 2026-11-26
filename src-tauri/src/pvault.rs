@@ -15,8 +15,9 @@
 //! `private-vault-backup-v1`) over a ZIP archive: `vault.json` (the vault as Android's
 //! `VaultBackupManager.serialize` writes it, version 9) and one `photos/<id>` member per photo.
 //!
-//! Only the writer is used outside tests. The tests read the files back and open a backup that
-//! Nuvori for Android made with Tink itself (`tests/fixtures/android-backup.pvault`).
+//! The writer makes backups (Settings, Export encrypted backup); the reader ([`read`]) opens them
+//! for a restore (backup_restore.rs). The tests read the files back and open a backup that Nuvori
+//! for Android made with Tink itself (`fixtures/android-backup-v2.pvault`).
 
 use std::{
     collections::{HashMap, HashSet},
@@ -41,7 +42,6 @@ const MAGIC: &[u8; 8] = b"PVLT0002";
 const ASSOCIATED_DATA: &[u8] = b"private-vault-backup-v1";
 const SALT_BYTES: usize = 16;
 const NONCE_BYTES: usize = 12;
-#[cfg(test)]
 const MAX_WRAPPED_KEY: usize = 128 * 1024;
 /// Magic, settings, salt, nonce and the length of the wrapped keyset: the header before it.
 const HEADER_PREFIX_BYTES: usize = MAGIC.len() + 3 * 4 + SALT_BYTES + NONCE_BYTES + 4;
@@ -85,10 +85,8 @@ pub enum BackupError {
     InvalidItem,
     #[error(transparent)]
     Io(#[from] io::Error),
-    #[cfg(test)]
     #[error("This isn't a Nuvori backup, or a newer Nuvori made it")]
     Unsupported,
-    #[cfg(test)]
     #[error("Wrong password, or the backup is damaged")]
     WrongPasswordOrDamaged,
 }
@@ -372,7 +370,7 @@ const CRC_TABLE: [u32; 256] = {
 };
 
 /// CRC-32 (ISO-HDLC), the checksum of a ZIP member.
-fn crc32(data: &[u8]) -> u32 {
+pub(crate) fn crc32(data: &[u8]) -> u32 {
     !data.iter().fold(!0u32, |crc, &byte| CRC_TABLE[((crc ^ u32::from(byte)) & 0xFF) as usize] ^ crc >> 8)
 }
 
@@ -491,7 +489,7 @@ pub struct Metadata {
 }
 
 /// A photo ID that Android's restore accepts as a member name (`photos/<id>`).
-fn valid_photo_id(id: &str) -> bool {
+pub(crate) fn valid_photo_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
@@ -623,9 +621,10 @@ pub fn write<W: Write, E: From<BackupError>>(
     Ok(zip.finish()?.finish().map_err(BackupError::from)?)
 }
 
-#[cfg(test)]
 pub(crate) mod read {
-    //! Opens a `.pvault`, for the tests: what Android's `BackupCipher.decrypt` does.
+    //! Opens a `.pvault`: what Android's `BackupCipher.decrypt` does. The body comes out as it is
+    //! authenticated, one 1 MiB segment at a time; a reader that stops early has not checked the
+    //! rest, so a restore reads to the end (backup_restore.rs).
 
     use std::io::{self, Read};
 
@@ -840,6 +839,7 @@ pub(crate) mod read {
     }
 
     /// The members of a stored-only ZIP archive that [`ZipWriter`] wrote, by name.
+    #[cfg(test)]
     pub fn stored_members(archive: &[u8]) -> Vec<(String, Vec<u8>)> {
         let mut members = Vec::new();
         let mut at = 0;

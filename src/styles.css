@@ -236,6 +236,8 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .password-import-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .password-import-status { color: var(--primary); font-size: 12px; font-weight: 600; }
 .password-import-item > .segmented { flex-basis: 100%; }
+.restore-save-first { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.restore-save-first .field-hint { min-width: 0; overflow-wrap: anywhere; }
 /* Recently deleted (pages/TrashPage.tsx) */
 .trash-row { display: flex; align-items: center; gap: 12px; padding: 10px var(--s4); }
 .trash-row + .trash-row { border-top: 1px solid var(--hairline); }

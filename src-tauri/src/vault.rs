@@ -1289,6 +1289,33 @@ impl UnlockedVault {
     /// Leaves now and queues a signed `leave1` request for the managing phone (SPEC3 B).
     /// The request is signed with this device's identity before the local vault ID changes.
     pub fn leave_group(&mut self, keep_items: bool) -> Result<(), VaultError> {
+        self.leave_group_checked(keep_items, true)
+    }
+
+    /// What a restore from a backup does to this PC's sync group (backup_restore.rs).
+    pub fn restore_role(&self) -> Result<crate::backup_restore::SyncRole, VaultError> {
+        use crate::backup_restore::SyncRole;
+        if !self.is_enrolled()? {
+            return Ok(SyncRole::None);
+        }
+        let verified = crate::membership::verify(&self.membership_events()?).map_err(|_| VaultError::NotSharing)?;
+        let identity = self.identity_store.get_or_create()?;
+        Ok(if verified.manager_device_id == identity.device_id { SyncRole::Manager } else { SyncRole::Member })
+    }
+
+    /// Before a restore: leaves the sync group as "Leave" does, with a signed leave request for
+    /// the managing phone, so the items the restore replaces can't sync back. The items stay until
+    /// the restore replaces them, so a restore that fails afterward loses nothing. Open conflicts
+    /// don't stop it, as on Android: the restore replaces both sides. Returns whether this PC left.
+    pub fn leave_group_before_restore(&mut self) -> Result<bool, VaultError> {
+        if !self.is_enrolled()? {
+            return Ok(false);
+        }
+        self.leave_group_checked(true, false)?;
+        Ok(true)
+    }
+
+    fn leave_group_checked(&mut self, keep_items: bool, require_resolved: bool) -> Result<(), VaultError> {
         use crate::membership_exit::{self as exit, LeaveRequest, PendingLeave};
         if !self.is_enrolled()? {
             return Err(VaultError::NotSharing);
@@ -1332,7 +1359,7 @@ impl UnlockedVault {
             transport_secret: Zeroizing::new(secret),
             address,
         })?;
-        if let Err(error) = self.leave_locally(true) {
+        if let Err(error) = self.leave_locally(require_resolved) {
             let _ = exit::clear_pending_leave(&self.connection);
             crate::lan_sync::cloud::finish_pending_leave(&self.connection);
             return Err(error);
@@ -1372,6 +1399,50 @@ impl UnlockedVault {
         transaction.commit()?;
         let _ = self.blobs.remove_all();
         Ok(())
+    }
+
+    /// Replaces every item with what a backup holds (backup_restore.rs), as Android's restore does
+    /// (`replaceAll`): items, notes, folders, photos and passkeys, Recently deleted, previous
+    /// passwords and the independent change history all go, in one transaction, so a failure
+    /// changes nothing. The restored items keep their IDs; the vault gets a new vault ID and a new
+    /// history. Only for a vault outside a sync group (`leave_group_before_restore`): other devices
+    /// never see this. The master password, Windows Hello, sign-in methods, website icons and
+    /// what this PC kept of an earlier group (`sync_lineage`) stay.
+    ///
+    /// Returns false when the items were replaced but the new history couldn't be written yet;
+    /// the next unlock writes it, so the caller locks the vault.
+    pub(crate) fn replace_with_backup(&mut self, plan: &crate::backup_restore::Plan) -> Result<bool, VaultError> {
+        if self.is_enrolled()? {
+            return Err(VaultError::StillSharing);
+        }
+        let transaction = self.connection.transaction()?;
+        for table in [
+            "entry_groups",
+            "local_entry_photos",
+            "local_entries",
+            "local_note_details",
+            "local_notes",
+            "local_groups",
+            "local_passkeys",
+            "local_trash",
+            "local_password_history",
+            "sync_conflicts",
+            "sync_attachment_manifests",
+            "sync_tombstones",
+            "sync_device_heads",
+            "sync_operations",
+            "vault_records",
+        ] {
+            transaction.execute(&format!("DELETE FROM {table}"), [])?;
+        }
+        transaction.execute("UPDATE local_sync_settings SET vault_id = ?1 WHERE id = 1", [Uuid::new_v4().to_string()])?;
+        plan.insert(&transaction)?;
+        transaction.commit()?;
+        let _ = self.blobs.remove_all();
+        Ok(self
+            .backfill_independent_history()
+            .map_err(|error| crate::activity::diagnostic(crate::activity::Category::Vault, "History after a restore failed", &error))
+            .is_ok())
     }
 
     /// Applies a verified removal notice: leave locally even with open conflicts, keep items,
@@ -3833,6 +3904,8 @@ pub enum VaultError {
     PendingConflicts,
     #[error("the managing device cannot leave without transferring its role")]
     ManagingDevice,
+    #[error("this PC is still in a sync group")]
+    StillSharing,
     #[error("note has no matching change record")]
     MissingNoteChange,
     #[error("the vault database is open in another program")]
@@ -4212,6 +4285,56 @@ mod tests {
         assert_eq!((mail["totpDigits"].as_u64(), mail["totpPeriod"].as_u64(), mail["totpAlgorithm"].as_str()), (Some(8), Some(60), Some("SHA1")));
         // A second run adds nothing.
         assert_eq!(vault.import_authenticators(&collected).unwrap(), Summary { added: 0, already_saved: 2, conflicts: 1 });
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_restore_replaces_every_item_and_keeps_the_master_password() {
+        let directory = std::env::temp_dir().join(format!("nuvori-restore-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        // The backup: a login in a folder with a photo, and a note, saved from this vault.
+        let folder = vault.save_group(None, "Work", "", "").unwrap();
+        let kept = login(&mut vault, "backed-up", &[&folder.id]);
+        let image = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nphoto");
+        vault.add_entry_photo(&kept, "image/png", &image).unwrap();
+        let note = vault.save_note(None, "Backed up", "synthetic body", None).unwrap();
+        let metadata = crate::pvault::metadata(&vault.backup_contents(None).unwrap()).unwrap();
+        let key = crate::pvault::BackupKey::new("synthetic-test-password", crate::pvault::Kdf::LEGACY).unwrap();
+        let file = crate::pvault::write::<_, VaultError>(Vec::new(), &key, &metadata, |id| vault.backup_photo(id)).unwrap();
+        // After the backup: an edit with a previous password, a new login and a deleted note.
+        vault.save_entry(serde_json::json!({"id": kept, "secondaryValue": "changed"})).unwrap();
+        login(&mut vault, "later", &[]);
+        vault.delete_note(&note.id).unwrap();
+        let vault_id = |vault: &UnlockedVault| -> String {
+            vault.connection.query_row("SELECT vault_id FROM local_sync_settings WHERE id = 1", [], |row| row.get(0)).unwrap()
+        };
+        let before = vault_id(&vault);
+
+        let plan = crate::backup_restore::read(std::io::Cursor::new(file), "synthetic-test-password").unwrap();
+        assert_eq!(vault.restore_role().unwrap(), crate::backup_restore::SyncRole::None);
+        assert!(!vault.leave_group_before_restore().unwrap(), "not in a group: nothing to leave");
+        assert!(vault.replace_with_backup(&plan).unwrap());
+
+        let check = |vault: &UnlockedVault| {
+            let entries = vault.list_entries().unwrap();
+            assert_eq!(entries.len(), 1, "the login added after the backup is gone");
+            assert_eq!((entries[0]["id"].as_str(), entries[0]["secondaryValue"].as_str()), (Some(kept.as_str()), Some("backed-up")));
+            assert_eq!(entries[0]["groupIds"], serde_json::json!([folder.id]));
+            let notes = vault.list_notes().unwrap();
+            assert_eq!((notes.len(), notes[0].id.as_str(), notes[0].body.as_str()), (1, note.id.as_str(), "synthetic body"));
+            assert_eq!(vault.list_entry_photos(&kept).unwrap().len(), 1);
+            assert!(vault.trashed_items().unwrap().is_empty(), "Recently deleted goes too");
+            assert!(passwords(vault, &kept).is_empty(), "and the previous passwords");
+            assert!(ChangeStore::record(&vault.connection, "entry", &kept).unwrap().is_some(), "a new history");
+        };
+        check(&vault);
+        assert_ne!(vault_id(&vault), before, "a new vault ID, as on Android");
+        drop(vault);
+        // The same master password opens it.
+        let vault = store.unlock("synthetic-test-password").unwrap();
+        check(&vault);
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }

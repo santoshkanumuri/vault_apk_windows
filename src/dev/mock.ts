@@ -181,6 +181,8 @@ const setAppearance = (accent: unknown, surface: unknown): Appearance => {
 // Previous passwords and Recently deleted (local_recovery.rs). Sample data: one login has history,
 // and one item was deleted on the phone.
 const mockHistory = new Map<string, Array<{ password: string; replacedAt: number }>>();
+/** The restore dialog's chosen file, and whether its backup was opened. */
+const mockRestore = { file: null as string | null, opened: false };
 const mockTrash: Array<{ id: string; itemId: string; kind: "entry" | "note"; itemType: string; title: string; deletedAt: number; deletedElsewhere: boolean; expiresAt: number; data: unknown; reason?: "" | "join" | "removal" }> = [];
 {
   const now = Date.now();
@@ -335,6 +337,29 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       log("success", "vault", `Encrypted backup saved with ${items} items and 0 photos`);
       return { fileName: `Nuvori backup ${String(args.today)}.pvault`, items, photos: 0 };
     }
+    case "restore_choose_file": requireUnlocked(); mockRestore.file = "Nuvori backup 2026-11-20.pvault"; mockRestore.opened = false; return mockRestore.file;
+    case "restore_open_backup": {
+      requireUnlocked();
+      if (!mockRestore.file) throw "Choose the backup file again.";
+      if (args.password === "wrong") { log("warning", "vault", "A backup couldn't be opened to restore"); throw "Wrong password, or the backup is damaged."; }
+      mockRestore.opened = true;
+      log("info", "vault", "Opened a backup to restore");
+      return { fileName: mockRestore.file, items: 3, codes: 1, folders: 1, photos: 0, passkeys: 0, sync: state.enrolled ? "member" : "none" };
+    }
+    case "restore_replace_vault": {
+      requireUnlocked();
+      if (!mockRestore.opened) throw "Open the backup again before replacing the vault.";
+      if (args.password === "wrong") { log("warning", "security", "Restore blocked: wrong password"); throw "Wrong password or damaged vault key."; }
+      mockRestore.file = null; mockRestore.opened = false;
+      state.entries = state.entries.slice(0, 2);
+      state.revision += 1;
+      state.notes = state.notes.slice(0, 1);
+      mockTrash.splice(0, mockTrash.length);
+      if (state.enrolled) { state.enrolled = false; log("warning", "pairing", "Left the sync group on this PC to restore a backup"); }
+      log("success", "vault", "Restored a backup with 3 items, 1 folders and 0 photos");
+      return snapshot();
+    }
+    case "restore_cancel": mockRestore.file = null; mockRestore.opened = false; return null;
     case "list_trash": requireUnlocked(); return mockTrash.map(({ data: _data, ...item }) => item);
     case "restore_trashed": {
       const item = mockTrash.find((t) => t.id === args.id);
