@@ -14,6 +14,8 @@ import { SignInsPage } from "../pages/signins/SignInsPage";
 import { NoteDetailPage, NoteEditorPage, NotesListPage } from "../pages/notes/Notes";
 import { SyncPage } from "../pages/sync/SyncPage";
 import { ConflictsPage } from "../pages/sync/ConflictsPage";
+import { HelpPage } from "../pages/Help";
+import { helpText } from "../lib/help";
 import { SettingsPage } from "../pages/SettingsPage";
 import { ActivityPage } from "../pages/ActivityPage";
 import { MorePage } from "../pages/MorePage";
@@ -280,6 +282,7 @@ function PageFor({ route }: { route: Route }): ReactNode {
     case "settings": return <SettingsPage section={route.section} />;
     case "activity": return <ActivityPage />;
     case "trash": return <TrashPage />;
+    case "help": return <HelpPage />;
     case "more": return <MorePage />;
   }
 }
@@ -307,6 +310,7 @@ function useRouteTitle(route: Route): string {
     case "settings": return "Settings";
     case "activity": return "Activity";
     case "trash": return "Recently deleted";
+    case "help": return helpText.title;
     case "more": return "More";
   }
 }

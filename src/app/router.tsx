@@ -16,6 +16,7 @@ export type Route =
   | { page: "settings"; section?: string }
   | { page: "activity" }
   | { page: "trash" }
+  | { page: "help" }
   | { page: "more" };
 
 export function routeKey(route: Route): string {

@@ -474,6 +474,17 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .how-list code { font-size: 12.5px; }
 .about-text { display: grid; gap: 8px; padding: var(--s3) var(--s4) var(--s4) 60px; color: var(--muted); font-size: 13px; }
 
+/* Help page: one question per row, opening to its answer. */
+.help-row + .help-row { border-top: 1px solid var(--hairline); }
+.help-row > summary { display: flex; align-items: center; gap: var(--s3); padding: 14px var(--s4); cursor: pointer; font-weight: 600; list-style: none; }
+.help-row > summary::-webkit-details-marker { display: none; }
+.help-row > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--r-control); }
+.help-question { flex: 1 1 auto; min-width: 0; }
+.help-chevron { flex: 0 0 auto; width: 18px; height: 18px; color: var(--muted); transition: transform var(--t-med) var(--ease); }
+.help-row[open] > summary .help-chevron { transform: rotate(180deg); }
+.help-answer { display: grid; justify-items: start; gap: var(--s3); padding: 0 var(--s4) var(--s4); color: var(--muted); line-height: 1.55; }
+@media (prefers-reduced-motion: reduce) { .help-chevron { transition: none; } }
+
 /* ---------- Details ---------- */
 .detail-hero { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
 .detail-hero-text { flex: 1 1 200px; min-width: 0; }

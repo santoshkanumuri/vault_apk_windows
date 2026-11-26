@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Activity, ArrowRight, CornerDownLeft, FileText, House, LockKeyhole, MonitorSmartphone, Plus, Search, Settings, type LucideIcon } from "lucide-react";
+import { Activity, ArrowRight, CircleHelp, CornerDownLeft, FileText, House, LockKeyhole, MonitorSmartphone, Plus, Search, Settings, type LucideIcon } from "lucide-react";
 import { Avatar, Highlighted, Kbd } from "../components/Display";
 import { IconButton } from "../components/Button";
 import { useLock } from "../app/hooks";
@@ -56,6 +56,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
     { id: "sync", title: "Devices & sync", hint: "Phone sync and pairing", icon: MonitorSmartphone, keywords: "sync phone devices pair pairing", run: () => goRoot({ page: "sync" }) },
     { id: "activity", title: "Activity", hint: "Recent events", icon: Activity, keywords: "activity log logs history events", run: () => goRoot({ page: "activity" }) },
     { id: "settings", title: "Settings", hint: "Theme, security, extension", icon: Settings, keywords: "settings preferences theme dark light hello extension browser", run: () => goRoot({ page: "settings" }) },
+    { id: "help", title: "Help", hint: "How this app works", icon: CircleHelp, keywords: "help how faq question guide support", run: () => goRoot({ page: "help" }) },
     { id: "lock", title: "Lock vault", hint: "Ctrl+L", icon: LockKeyhole, keywords: "lock", run: () => { onClose(); void lock(); } }
   ], [router, lock]); // eslint-disable-line react-hooks/exhaustive-deps
 
