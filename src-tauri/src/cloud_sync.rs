@@ -1682,6 +1682,15 @@ pub(crate) mod tests {
         let drive = MemoryDrive::default();
         stage(&a, &[phone_change()]);
         pass(&a, &drive);
+        // This PC's progress report was just written: the fake drive's clock is far behind the real
+        // one, which would make the hourly rewrite (L4) due on every pass.
+        let now = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap();
+        for (file, _) in drive.files.lock().unwrap().iter_mut().filter(|(file, _)| file.name.contains(".p.")) {
+            file.modified = now.clone();
+            let mut app = a.state.lock().unwrap();
+            app.unlocked.as_mut().unwrap().connection()
+                .execute("UPDATE cloud_sync_files SET modified = ?2 WHERE file_id = ?1", params![file.id, now]).unwrap();
+        }
         // Counts every row written to or removed from the saved list (a TEMP trigger on this connection).
         let sql = |device: &Synthetic, statement: &str| -> i64 {
             let mut app = device.state.lock().unwrap();

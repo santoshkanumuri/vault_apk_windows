@@ -2692,8 +2692,9 @@ mod tests {
         let heads = progress(&db, "vault-a").unwrap();
         assert_eq!(heads.received["phone"], (1, operation.hash.clone()));
         assert_eq!(heads.applied["phone"], (0, GENESIS_HASH.into()));
+        // A consistent report of a different chain: the same position, another hash.
         let forged = SyncProgress {
-            received: heads.received.clone(),
+            received: BTreeMap::from([("phone".into(), (1, "a".repeat(64)))]),
             applied: BTreeMap::from([("phone".into(), (1, "a".repeat(64)))]),
         };
         // Live: the forked author is skipped for this peer instead of ending the session (M5).
@@ -4484,8 +4485,11 @@ mod tests {
     #[test]
     fn an_unreadable_change_is_set_aside_and_the_rest_still_apply() {
         let synthetic = synthetic_vault(0);
+        // An item of a type this version can't store (a blank title applies with Android's fallback, L6).
+        let mut unreadable = login_entry("bad", "Broken");
+        unreadable["type"] = "NOT_A_TYPE".into();
         let blank = phone_op(1, GENESIS_HASH, "entry", "bad", RecordVersion::from_entries([("phone", 1)]), 0,
-            serde_json::json!({"entry": login_entry("bad", " "), "groupIds": []}));
+            serde_json::json!({"entry": unreadable, "groupIds": []}));
         let good = phone_op(2, &blank.hash, "entry", "good", RecordVersion::from_entries([("phone", 2)]), 0,
             serde_json::json!({"entry": login_entry("good", "Bank"), "groupIds": []}));
         stage(&synthetic, &[blank, good]);
