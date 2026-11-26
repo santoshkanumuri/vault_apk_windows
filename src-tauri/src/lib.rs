@@ -52,6 +52,7 @@ mod store_build;
 pub mod store_launch;
 pub mod sync;
 mod totp;
+pub mod unlock_throttle;
 pub mod vault;
 pub mod wire;
 
@@ -1868,12 +1869,29 @@ async fn unlock_vault(
     let snapshot = tauri::async_runtime::spawn_blocking(move || -> Result<AppSnapshot, String> {
         let mut password = password;
         let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        // Android's UnlockThrottle: after 5 wrong passwords in a row, each try waits longer.
+        let throttle = app.store.unlock_throttle();
+        let wait = throttle.wait(activity::now_millis() as i64);
+        if wait > 0 {
+            password.zeroize();
+            activity::log(Level::Warning, Category::Security, "Unlock delayed after wrong passwords");
+            return Err(unlock_throttle::message(wait));
+        }
         let result = app.store.unlock(&password);
         password.zeroize();
         let vault = result.map_err(|error| {
             activity::log(Level::Warning, Category::Security, "Unlock failed");
+            // A newer or damaged key file is not a wrong guess: retrying can't help.
+            if matches!(error, VaultError::WrongPasswordOrCorruptKey) {
+                if let Err(failure) = throttle.record_failure(activity::now_millis() as i64) {
+                    activity::diagnostic(Category::Security, "Could not save the wrong-password count", failure);
+                }
+            }
             public_vault_error(error)
         })?;
+        if let Err(failure) = throttle.clear() {
+            activity::diagnostic(Category::Security, "Could not clear the wrong-password count", failure);
+        }
         app.unlocked = Some(vault);
         let snapshot = app.snapshot()?;
         drop(app);

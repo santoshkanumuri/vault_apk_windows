@@ -150,6 +150,11 @@ impl VaultStore {
     }
 
     /// The saved Windows Hello unlock, as `hello::seal` made it (or a legacy DPAPI-only file).
+    /// Wrong master passwords in a row on the unlock screen (`unlock_throttle.rs`).
+    pub fn unlock_throttle(&self) -> crate::unlock_throttle::UnlockThrottle {
+        crate::unlock_throttle::UnlockThrottle::new(&self.directory)
+    }
+
     pub fn hello_file(&self) -> Result<Vec<u8>, VaultError> {
         Ok(fs::read(self.directory.join(HELLO_FILE))?)
     }
@@ -235,6 +240,7 @@ impl VaultStore {
             "device-identity-v1.json",
             HELLO_FILE,
             BOOTSTRAP_FILE,
+            crate::unlock_throttle::FILE_NAME,
         ] {
             let path = self.directory.join(name);
             if path.exists() {
