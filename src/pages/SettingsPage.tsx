@@ -12,6 +12,7 @@ import { PendingLeaveChip, useLeaveGroup } from "./sync/Membership";
 import { useRouter } from "../app/router";
 import { autoLockChoices, clipboardChoices, usePreferences } from "../app/settings";
 import { AccentPicker, AppearancePreview, SurfacePicker } from "../components/AppearancePicker";
+import { capInterval, confirmsFirst, DAY_MS, WEEK_MS } from "../lib/helloWindow";
 import { DEFAULT_ACCENT, DEFAULT_SURFACE, useTheme, type ThemePreference } from "../app/theme";
 import { useToast } from "../app/toast";
 import { useSiteIconsSetting } from "../app/siteIcons";
@@ -166,6 +167,7 @@ function HelloRow() {
     <>
       <SettingsRow icon={ShieldCheck} title={strings.windowsHello} description={description}
         control={<Toggle label={strings.windowsHello} checked={snapshot.helloEnabled} disabled={busy || (!snapshot.helloEnabled && !available)} onChange={(on) => { if (on) { setError(""); setDialog(true); } else void disable(); }} />} />
+      {snapshot.helloEnabled && <MasterPasswordAgainRow />}
       <Dialog open={dialog} onClose={() => { setDialog(false); setPassword(""); }} title={strings.turnOnWindowsHello} locked={busy}
         description={strings.confirmYourMasterPasswordWindowsWill}
         footer={<>
@@ -219,6 +221,41 @@ function AutoTypeRow() {
       {status.enabled && <SettingsRow icon={CornerDownLeft} title={strings.pressEnterAfterTyping} description={strings.signsInRightAwayTurnOff}
         control={<Toggle label={strings.pressEnterAfterTyping} checked={status.pressEnter} disabled={busy} onChange={(on) => void change(true, undefined, on)} />} />}
     </>
+  );
+}
+
+/**
+ * "Require the master password again" (hello_window.rs, Android Settings > Security): how long
+ * Windows Hello may open the vault after the master password. Only while Windows Hello is on.
+ */
+function MasterPasswordAgainRow() {
+  const { snapshot, setSnapshot } = useVault();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const current = capInterval(snapshot.masterPasswordIntervalMs);
+  const choices = [{ value: 0, label: strings.everyUnlock }, { value: DAY_MS, label: strings.after1Day }, { value: WEEK_MS, label: strings.after1Week }];
+
+  const change = async (next: number) => {
+    if (next === current) return;
+    // As on Android, a longer window is confirmed first.
+    if (confirmsFirst(current, next) && !(await confirm({ title: strings.askForTheMasterPasswordLess, message: `${strings.youLlTypeYourMasterPassword} ${strings.forUpTo7DaysAnyone}`, confirmLabel: strings.askAfter1Week }))) return;
+    setBusy(true);
+    try {
+      setSnapshot(await api.setMasterPasswordInterval(next));
+      toast.success(strings.savedYourNextUnlockAsksFor);
+    } catch (failure) {
+      toast.error(failure, "Couldn't save the setting.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsRow icon={KeyRound} title={strings.requireTheMasterPasswordAgain} description={strings.howOftenNuvoriAsksForYour}
+      control={<select className="input select select-compact" aria-label={strings.requireTheMasterPasswordAgain} value={current} disabled={busy} onChange={(event) => void change(Number(event.target.value))}>
+        {choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+      </select>} />
   );
 }
 

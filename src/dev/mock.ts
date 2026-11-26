@@ -128,10 +128,16 @@ log("success", "sync", "Sync finished: sent 2, received 1");
 log("info", "browser", "Filled a login on github.com");
 log("success", "vault", "Vault unlocked");
 
+// Like hello_window.rs: Windows Hello opens the vault only inside the master password window.
+// Preview a closed window (the master password first) with ?passwordagain in the URL.
+const mockHelloWindow = { intervalMs: 86_400_000, open: !window.location.search.includes("passwordagain") };
+const mockHelloUnlock = () => !state.hello ? "off" as const : mockHelloWindow.intervalMs === 0 ? "everyUnlock" as const : mockHelloWindow.open ? "ready" as const : "password" as const;
+
 function snapshot(): AppSnapshot {
   const count = (type: VaultEntry["type"]) => state.entries.filter((e) => e.type === type).length;
   return {
-    vaultState: state.vault, helloEnabled: state.hello,
+    vaultState: state.vault, helloEnabled: state.hello, helloUnlock: mockHelloUnlock(),
+    masterPasswordIntervalMs: state.vault === "unlocked" ? mockHelloWindow.intervalMs : null,
     counts: { cards: count("CARD"), logins: count("PASSWORD"), codes: count("AUTHENTICATOR"), questions: count("QUESTION"), autofill: count("AUTOFILL"), notes: state.notes.length },
     pairedDevices: state.enrolled ? 2 : 0, enrolled: state.enrolled, pendingChanges: 3, revision: state.revision, chainState: "recorded",
     // Like install_marker.rs: only for a locked vault, and only until this install opens it.
@@ -197,10 +203,19 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "hello_available": return true;
     case "unlock_vault": case "create_vault":
       if (args.password === "wrong") { log("error", "security", "Unlock failed"); throw "Wrong password or damaged vault key."; }
-      state.vault = "unlocked"; mockInstall.welcomeBack = false; log("success", "vault", "Vault unlocked"); return snapshot();
-    case "unlock_hello": state.vault = "unlocked"; mockInstall.welcomeBack = false; log("success", "vault", "Vault unlocked with Windows Hello"); return snapshot();
-    case "enable_hello": state.hello = true; log("success", "security", "Windows Hello turned on"); return snapshot();
+      state.vault = "unlocked"; mockInstall.welcomeBack = false; mockHelloWindow.open = true; log("success", "vault", "Vault unlocked"); return snapshot();
+    case "unlock_hello":
+      if (mockHelloUnlock() !== "ready") throw mockHelloWindow.intervalMs === 0 ? "Enter your master password. Nuvori asks for it at every unlock, as set in Settings." : "Enter your master password. Windows Hello works again after that.";
+      state.vault = "unlocked"; mockInstall.welcomeBack = false; log("success", "vault", "Vault unlocked with Windows Hello"); return snapshot();
+    case "enable_hello": state.hello = true; mockHelloWindow.open = true; log("success", "security", "Windows Hello turned on"); return snapshot();
     case "disable_hello": state.hello = false; log("info", "security", "Windows Hello turned off"); return snapshot();
+    case "set_master_password_interval": {
+      requireUnlocked();
+      const next = Number(args.intervalMs);
+      if (![0, 86_400_000, 604_800_000].includes(next)) throw "Choose every unlock, after 1 day or after 1 week.";
+      if (next !== mockHelloWindow.intervalMs) { mockHelloWindow.intervalMs = next; mockHelloWindow.open = false; log("info", "security", "The master password interval changed"); }
+      return snapshot();
+    }
     case "lock_vault": state.vault = "locked"; log("info", "vault", "Vault locked"); return snapshot();
     case "stop_sharing": state.enrolled = false; log("info", "pairing", "Stopped sharing"); return snapshot();
     case "reset_vault": state.vault = "notConfigured"; state.enrolled = false; return snapshot();

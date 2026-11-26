@@ -170,12 +170,77 @@ impl VaultStore {
         if path.exists() {
             fs::remove_file(path)?;
         }
+        crate::hello_window::remove_hint(&self.directory)?;
         Ok(())
     }
 
-    /// Opens the vault with a key that `hello::unseal` (or the legacy reader) returned.
+    /// Opens the vault with a key that `hello::unseal` (or the legacy reader) returned, while the
+    /// Windows Hello window is open (`hello_window.rs`). The window is read from the encrypted
+    /// database before anything else runs; once it has closed, only the master password opens the
+    /// vault.
     pub fn unlock_hello(&self, key: &[u8; 32]) -> Result<UnlockedVault, VaultError> {
-        self.open_with_key(key)
+        let now = now_millis()?;
+        let window = {
+            let connection = open_database(&self.directory.join(DATABASE_FILE), key, false)?;
+            crate::hello_window::read(&connection)?
+        };
+        if !crate::hello_window::allows(&window, now) {
+            let _ = crate::hello_window::remove_hint(&self.directory);
+            return Err(VaultError::Hello(crate::hello_window::refusal(window.interval_ms).to_owned()));
+        }
+        let vault = self.open_with_key(key)?;
+        if let Err(error) = crate::hello_window::record_hello(&vault.connection, now) {
+            crate::activity::diagnostic(crate::activity::Category::Security, "Could not save the Windows Hello unlock time", error);
+        }
+        Ok(vault)
+    }
+
+    /// What the lock screen does about Windows Hello now: `off`, `ready` (offer it), `password`
+    /// (the master password first, then Hello works again) or `everyUnlock`. Only for the screen:
+    /// [VaultStore::unlock_hello] checks the window in the database.
+    pub fn hello_lock_screen(&self) -> &'static str {
+        if !self.hello_enabled() {
+            return "off";
+        }
+        match now_millis().map(|now| crate::hello_window::read_hint(&self.directory, now)) {
+            Ok(crate::hello_window::Hint::Open) => "ready",
+            Ok(crate::hello_window::Hint::EveryUnlock) => "everyUnlock",
+            _ => "password",
+        }
+    }
+
+    /// The master password was just typed for `vault` (`enable_hello` checked it): Windows Hello
+    /// may open the vault again for the chosen time.
+    pub fn note_master_password(&self, vault: &UnlockedVault) {
+        self.start_hello_window(&vault.connection);
+    }
+
+    /// Starts a new Windows Hello window (`hello_window.rs`). A failure only means Windows Hello
+    /// asks for the master password sooner, so it never stops an unlock.
+    fn start_hello_window(&self, connection: &Connection) {
+        let started = now_millis().and_then(|now| Ok(crate::hello_window::record_password(connection, now)?));
+        let saved = started.and_then(|window| Ok(crate::hello_window::write_hint(&self.directory, &window)?));
+        if let Err(error) = saved {
+            crate::activity::diagnostic(crate::activity::Category::Security, "Could not save the master password time", error);
+        }
+    }
+
+    /// How often the master password is asked for again, in milliseconds; 0 is every unlock.
+    pub fn master_password_interval(&self, vault: &UnlockedVault) -> i64 {
+        crate::hello_window::read(&vault.connection).map_or(crate::hello_window::DEFAULT_INTERVAL_MS, |window| crate::hello_window::cap(window.interval_ms))
+    }
+
+    /// Android's "Require the master password again": one of `hello_window::INTERVALS`. A new
+    /// choice ends the current Windows Hello window, so the next unlock asks for the master password.
+    pub fn set_master_password_interval(&self, vault: &UnlockedVault, interval_ms: i64) -> Result<bool, VaultError> {
+        if !crate::hello_window::INTERVALS.contains(&interval_ms) {
+            return Err(VaultError::InvalidEntry);
+        }
+        let changed = crate::hello_window::set_interval(&vault.connection, interval_ms)?;
+        if changed {
+            crate::hello_window::write_hint(&self.directory, &crate::hello_window::read(&vault.connection)?)?;
+        }
+        Ok(changed)
     }
 
     /// Checks the master password without opening a second `UnlockedVault`: one more instance would
@@ -241,6 +306,7 @@ impl VaultStore {
                 fs::remove_file(path)?;
             }
         }
+        crate::hello_window::remove_hint(&self.directory)?;
         {
             let blobs = self.directory.join(PHOTO_BLOB_DIRECTORY);
             if blobs.exists() {
@@ -291,6 +357,7 @@ impl VaultStore {
             let _ = fs::remove_file(&database_path);
             return Err(error);
         }
+        self.start_hello_window(&connection);
         Ok(UnlockedVault {
             connection,
             key: *vault_key,
@@ -316,6 +383,7 @@ impl VaultStore {
                 crate::activity::diagnostic(crate::activity::Category::Vault, "Could not strengthen the vault key file", error);
             }
         }
+        self.start_hello_window(&vault.connection);
         Ok(vault)
     }
 
@@ -3880,6 +3948,57 @@ mod tests {
         drop(vault);
         store.reset_files().unwrap();
         assert!(!store.hello_enabled());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn hello_opens_the_vault_only_inside_the_master_password_window() {
+        let directory = std::env::temp_dir().join(format!("nuvori-hello-window-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let vault = store.create("twelve-character-password").unwrap();
+        let sealed = hello::seal(vault.key_for_hello(), hello::test_signer(1)).unwrap();
+        store.enable_hello(&sealed).unwrap();
+        // Creating the vault typed the master password: 1 day of Windows Hello.
+        assert_eq!(store.master_password_interval(&vault), crate::hello_window::DAY_MS);
+        assert_eq!(store.hello_lock_screen(), "ready");
+        drop(vault);
+        let key = hello::open(&store.hello_file().unwrap(), hello::test_signer(1)).unwrap();
+        let vault = store.unlock_hello(&key).unwrap();
+
+        // A new choice ends the window: Hello refuses until the master password is typed.
+        assert!(store.set_master_password_interval(&vault, crate::hello_window::WEEK_MS).unwrap());
+        assert!(!store.set_master_password_interval(&vault, crate::hello_window::WEEK_MS).unwrap());
+        assert!(store.set_master_password_interval(&vault, 3_600_000).is_err());
+        assert_eq!(store.hello_lock_screen(), "password");
+        drop(vault);
+        let refused = store.unlock_hello(&key).err().unwrap();
+        assert_eq!(refused.to_string(), format!("Windows Hello unlock failed: {}", crate::hello_window::CLOSED));
+        let mut vault = store.unlock("twelve-character-password").unwrap();
+        assert_eq!(store.hello_lock_screen(), "ready");
+
+        // Past the window, or with the clock set back, Hello refuses again.
+        let now = now_millis().unwrap();
+        vault.connection().execute("UPDATE hello_window SET password_at = ?1, last_seen_at = ?1", [now - crate::hello_window::WEEK_MS]).unwrap();
+        drop(vault);
+        assert!(store.unlock_hello(&key).is_err());
+        let mut vault = store.unlock("twelve-character-password").unwrap();
+        vault.connection().execute("UPDATE hello_window SET last_seen_at = ?1", [now + 3_600_000]).unwrap();
+        drop(vault);
+        assert!(store.unlock_hello(&key).is_err());
+
+        // Every unlock: the button never shows and Hello never opens the vault.
+        let vault = store.unlock("twelve-character-password").unwrap();
+        assert!(store.set_master_password_interval(&vault, 0).unwrap());
+        drop(vault);
+        assert_eq!(store.hello_lock_screen(), "everyUnlock");
+        let _ = store.unlock("twelve-character-password").unwrap();
+        assert_eq!(store.hello_lock_screen(), "everyUnlock");
+        let refused = store.unlock_hello(&key).err().unwrap();
+        assert_eq!(refused.to_string(), format!("Windows Hello unlock failed: {}", crate::hello_window::EVERY_UNLOCK));
+
+        store.disable_hello().unwrap();
+        assert!(!directory.join(crate::hello_window::HINT_FILE).exists());
+        store.reset_files().unwrap();
         fs::remove_dir_all(directory).unwrap();
     }
 

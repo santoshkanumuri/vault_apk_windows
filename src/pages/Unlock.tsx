@@ -11,6 +11,7 @@ import { useVault } from "../app/vault";
 import { api, usingDevMock, type AppSnapshot } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { cx } from "../lib/format";
+import { helloLockScreen } from "../lib/helloWindow";
 import { lastUsedText, lockedView, startFreshConfirmed, type LockedChoice } from "../lib/startFresh";
 import { passwordStrength } from "../lib/strength";
 import { strings } from "../strings";
@@ -40,7 +41,9 @@ export function UnlockPage() {
   const confirmRef = useRef<HTMLInputElement>(null);
   const helloRef = useRef<HTMLButtonElement>(null);
   const strength = passwordStrength(password);
-  const helloReady = configured && snapshot.helloEnabled && helloAvailable;
+  // Windows Hello shows only inside the master password window (lib/helloWindow.ts).
+  const hello = helloLockScreen(snapshot, configured && helloAvailable);
+  const helloReady = hello.button;
 
   useEffect(() => {
     if (!configured || !snapshot.helloEnabled) { setHelloAvailable(false); return; }
@@ -76,6 +79,8 @@ export function UnlockPage() {
       setSnapshot(next);
     } catch (failure) {
       setError(humanError(failure, "Windows Hello didn't unlock the vault."));
+      // Past the master password window the button goes away (hello_window.rs).
+      api.snapshot().then(setSnapshot).catch(() => {});
     } finally {
       setBusy("");
     }
@@ -138,6 +143,7 @@ export function UnlockPage() {
 
         {!configured && startedFresh && <StatusBanner kind="info">{strings.createANewVaultThenPair}</StatusBanner>}
         {error && <StatusBanner kind="error">{error}</StatusBanner>}
+        {!error && hello.notice && <StatusBanner kind="info">{hello.notice === "password" ? strings.enterYourMasterPasswordWindowsHello : strings.nuvoriAsksForYourMasterPassword}</StatusBanner>}
 
         {helloReady && (
           <>
