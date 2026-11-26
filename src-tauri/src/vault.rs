@@ -2617,11 +2617,6 @@ impl UnlockedVault {
         for photo_id in published {
             self.delete_entry_photo(&photo_id)?;
         }
-        // A login that pointed at this code loses its link, as on Android
-        // (`deleteEntryAndLinks`). The login itself is unchanged otherwise, and like Android this
-        // is not a change of its own: a paired device clears its own links when it applies the
-        // delete.
-        let unlinked = self.logins_unlinked_from(id)?;
         self.write_change(
             "entry",
             id,
@@ -2629,9 +2624,8 @@ impl UnlockedVault {
             serde_json::json!({"deleted": true}),
             |transaction| {
                 crate::local_recovery::keep_deleted(transaction, id, now_millis().unwrap_or_default(), false)?;
-                for (login_id, json) in &unlinked {
-                    transaction.execute("UPDATE local_entries SET data_json = ?2 WHERE id = ?1", params![login_id, json])?;
-                }
+                // L6: logins linked to a deleted authenticator lose the link, as on Android.
+                crate::incoming_apply::clear_authenticator_links(transaction, id)?;
                 transaction.execute("DELETE FROM local_entries WHERE id = ?1", [id])?;
                 transaction.execute("DELETE FROM local_entry_photos WHERE entry_id = ?1", [id])?;
                 transaction.execute("DELETE FROM sync_attachment_manifests WHERE owner_entity_id = ?1", [id])?;
@@ -2640,28 +2634,6 @@ impl UnlockedVault {
             },
         )?;
         Ok(())
-    }
-
-    /// Every login whose linked code is `code_id`, with its stored JSON carrying no link any more:
-    /// the id and the JSON to write back. Nothing else in the login changes, not even its
-    /// `updatedAt`, so clearing the link is not an edit of the login.
-    fn logins_unlinked_from(&self, code_id: &str) -> Result<Vec<(String, String)>, VaultError> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT id, data_json FROM local_entries WHERE type = 'PASSWORD' ORDER BY id")?;
-        let stored: Vec<(String, String)> = statement
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<Result<_, _>>()?;
-        let mut unlinked = Vec::new();
-        for (id, json) in stored {
-            let mut entry: serde_json::Value = serde_json::from_str(&json)?;
-            if entry["linkedAuthenticatorId"].as_str() != Some(code_id) {
-                continue;
-            }
-            entry["linkedAuthenticatorId"] = serde_json::Value::String(String::new());
-            unlinked.push((id, serde_json::to_string(&entry)?));
-        }
-        Ok(unlinked)
     }
 
     fn backfill_independent_history(&mut self) -> Result<(), VaultError> {
@@ -3862,6 +3834,13 @@ mod tests {
         // The same file again adds nothing new.
         let again = vault.import_keepass(&plan).unwrap();
         assert_eq!((again.logins, again.duplicates), (0, 4));
+
+        // L6: deleting the code on this PC clears the login's link to it, as on Android.
+        let (bank_id, code_id) = (bank["id"].as_str().unwrap().to_owned(), code["id"].as_str().unwrap().to_owned());
+        vault.delete_entry(&code_id).unwrap();
+        let entries = vault.list_entries().unwrap();
+        let bank = entries.iter().find(|entry| entry["id"] == bank_id.as_str()).unwrap();
+        assert_eq!(bank["linkedAuthenticatorId"], "");
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }
