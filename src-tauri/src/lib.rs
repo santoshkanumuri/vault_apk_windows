@@ -15,6 +15,7 @@ mod desktop;
 pub mod dpapi;
 pub mod enrollment;
 pub mod epoch_keys;
+pub mod duplicates;
 pub mod hello;
 pub mod identity;
 pub mod incoming;
@@ -2642,6 +2643,25 @@ fn clear_previous_passwords(entry_id: String, state: State<'_, ManagedState>) ->
 }
 
 #[tauri::command]
+fn duplicate_passwords(state: State<'_, ManagedState>) -> Result<Vec<duplicates::DuplicateSet>, String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?
+        .exact_password_duplicates().map_err(public_vault_error)
+}
+
+#[tauri::command]
+fn delete_duplicate_passwords(ids: Vec<String>, state: State<'_, ManagedState>) -> Result<usize, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let deleted = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?
+        .delete_exact_password_duplicates(&ids).map_err(public_vault_error)?;
+    if deleted > 0 {
+        activity::log(Level::Success, Category::Items,
+            format!("Deleted {deleted} exact duplicate {}", if deleted == 1 { "login" } else { "logins" }));
+    }
+    Ok(deleted)
+}
+
+#[tauri::command]
 fn list_trash(state: State<'_, ManagedState>) -> Result<Vec<local_recovery::TrashedItem>, String> {
     let app = state.lock().map_err(|_| "Vault state is unavailable")?;
     app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?
@@ -2840,6 +2860,9 @@ fn public_vault_error(error: VaultError) -> String {
         VaultError::Passkey(_) => "That passkey has invalid key material.".to_owned(),
         VaultError::PasskeyAlreadyExists => "That passkey already exists.".to_owned(),
         VaultError::PasskeyNotFound => "That passkey no longer exists.".to_owned(),
+        VaultError::DuplicatesChanged => {
+            "Your logins changed after the review. Check for duplicates again.".to_owned()
+        }
         VaultError::MissingDeviceIdentity => {
             "This device's signing identity is missing. Restore it before editing the vault."
                 .to_owned()
@@ -3143,6 +3166,8 @@ pub fn run() {
             start_reverse_pairing,
             approve_pairing,
             cancel_pairing,
+            duplicate_passwords,
+            delete_duplicate_passwords,
             create_vault,
             unlock_vault,
             hello_available,

@@ -255,6 +255,13 @@ export type CardCodeRequest = { id: string; title: string; card: string; site: s
  */
 export type Appearance = { accent: string; surface: string; pendingSync: boolean };
 
+/**
+ * One set of logins whose saved fields and folders match exactly ("duplicate_passwords").
+ * `keep` is the oldest copy, which stays; `remove` holds the others, oldest first. Only IDs
+ * cross over: the review draws each copy from the item list this window already holds.
+ */
+export type DuplicateSet = { keep: string; remove: string[] };
+
 /** The Tauri event sent to every window when the stored appearance changes (here or by sync). */
 export const APPEARANCE_CHANGED_EVENT = "appearance-changed";
 /** The dev mock's stand-in for the Tauri event, sent on `window`. */
@@ -404,6 +411,10 @@ export const api = {
   /** Ids of the logins with a passkey for the same site and username ("passkey_mark"). */
   passkeyLoginIds: () => call<string[]>("passkey_login_ids"),
   deletePasskey: (id: string) => call<void>("delete_passkey", { id }),
+
+  duplicatePasswords: () => call<DuplicateSet[]>("duplicate_passwords"),
+  /** Deletes the chosen copies. The vault works the sets out again, so a stale review is refused. */
+  deleteDuplicatePasswords: (ids: string[]) => call<number>("delete_duplicate_passwords", { ids }),
 
   syncStatus: () => call<SyncStatus>("sync_status"),
   configureSync: (address: string, automatic: boolean) => call<void>("configure_sync", { address, automatic }),

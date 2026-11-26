@@ -2312,6 +2312,56 @@ impl UnlockedVault {
         Ok(crate::local_recovery::clear_previous_passwords(&self.connection, entry_id)?)
     }
 
+    /// Sets of logins whose saved fields and folders match exactly, as on Android
+    /// (`exactPasswordDuplicateGroups`). Only ids leave the vault: the review in the app draws
+    /// each copy from the item list it already holds.
+    pub fn exact_password_duplicates(
+        &self,
+    ) -> Result<Vec<crate::duplicates::DuplicateSet>, VaultError> {
+        let entries = self.list_entries()?;
+        Ok(crate::duplicates::duplicate_sets(
+            &entries,
+            &self.entries_with_photos()?,
+        ))
+    }
+
+    /// Every entry with a photo, counting one whose picture has not arrived from a paired device
+    /// yet, so a login with an attachment is never offered for deletion.
+    fn entries_with_photos(&self) -> Result<BTreeSet<String>, VaultError> {
+        let mut statement = self.connection.prepare(
+            "SELECT entry_id FROM local_entry_photos
+             UNION SELECT owner_entity_id FROM sync_attachment_manifests WHERE owner_entity_type = 'entry'",
+        )?;
+        let ids = statement.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(ids.collect::<Result<_, _>>()?)
+    }
+
+    /// Deletes the copies the user picked. The sets are worked out again here, so a review made
+    /// before an edit or a sync arrived can only delete a copy that is still an exact duplicate;
+    /// anything else refuses the whole request. Each copy goes through the usual delete, so it
+    /// lands in Recently deleted and the paired devices are told.
+    pub fn delete_exact_password_duplicates(
+        &mut self,
+        ids: &[String],
+    ) -> Result<usize, VaultError> {
+        let chosen: BTreeSet<&String> = ids.iter().collect();
+        if chosen.is_empty() {
+            return Ok(0);
+        }
+        let removable: BTreeSet<String> = self
+            .exact_password_duplicates()?
+            .into_iter()
+            .flat_map(|set| set.remove)
+            .collect();
+        if !chosen.iter().all(|id| removable.contains(*id)) {
+            return Err(VaultError::DuplicatesChanged);
+        }
+        for id in &chosen {
+            self.delete_entry(id)?;
+        }
+        Ok(chosen.len())
+    }
+
     pub fn trashed_items(&self) -> Result<Vec<crate::local_recovery::TrashedItem>, VaultError> {
         Ok(crate::local_recovery::trashed_items(&self.connection)?)
     }
@@ -3183,6 +3233,8 @@ pub enum VaultError {
     InvalidGroup,
     #[error("group was not found")]
     GroupNotFound,
+    #[error("the duplicates changed after they were listed")]
+    DuplicatesChanged,
     #[error("passkey ID already exists")]
     PasskeyAlreadyExists,
     #[error("passkey was not found")]
@@ -3295,6 +3347,58 @@ mod tests {
 
     fn passwords(vault: &UnlockedVault, id: &str) -> Vec<String> {
         vault.previous_passwords(id).unwrap().into_iter().map(|old| old.password).collect()
+    }
+
+    #[test]
+    fn exact_duplicate_logins_are_found_and_only_a_chosen_copy_goes() {
+        let directory = std::env::temp_dir().join(format!("nuvori-duplicate-logins-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let copies = ["a", "b", "c"].map(|_| login(&mut vault, "synthetic-same-password", &[]));
+        let [oldest, middle, newest] = copies.clone();
+        let other = login(&mut vault, "synthetic-other-password", &[]);
+        let with_photo = login(&mut vault, "synthetic-same-password", &[]);
+        // Saves in the same millisecond would otherwise be ordered by ID alone.
+        for (age, id) in copies.iter().enumerate() {
+            let json: String = vault.connection
+                .query_row("SELECT data_json FROM local_entries WHERE id = ?1", [id], |row| row.get(0)).unwrap();
+            let mut entry: serde_json::Value = serde_json::from_str(&json).unwrap();
+            entry["createdAt"] = (10 + age as i64).into();
+            vault.connection.execute("UPDATE local_entries SET data_json = ?2 WHERE id = ?1",
+                params![id, serde_json::to_string(&entry).unwrap()]).unwrap();
+        }
+        vault.add_entry_photo(&with_photo, "image/png", &base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nphoto")).unwrap();
+
+        // One set: the oldest copy stays, a login with different fields and one with a photo are left out.
+        let sets = vault.exact_password_duplicates().unwrap();
+        assert_eq!(sets.len(), 1, "{sets:?}");
+        assert_eq!(sets[0].keep, oldest);
+        assert_eq!(sets[0].remove, vec![middle.clone(), newest.clone()]);
+
+        // The copy the user picked goes to Recently deleted; the kept copy and the others stay.
+        assert_eq!(vault.delete_exact_password_duplicates(&[middle.clone()]).unwrap(), 1);
+        let left: Vec<String> = vault.list_entries().unwrap().iter()
+            .map(|entry| entry["id"].as_str().unwrap().to_owned()).collect();
+        assert!(!left.contains(&middle));
+        for id in [&oldest, &newest, &other, &with_photo] {
+            assert!(left.contains(id), "{id} stays");
+        }
+        assert!(vault.trashed_items().unwrap().iter().any(|item| item.item_id == middle));
+
+        // Only a copy that is still an exact duplicate can go: not the kept one, not another login,
+        // and not one deleted a moment ago.
+        for id in [&oldest, &other, &middle, &with_photo] {
+            assert!(matches!(vault.delete_exact_password_duplicates(std::slice::from_ref(id)),
+                Err(VaultError::DuplicatesChanged)), "{id} is not removable");
+        }
+        // Asking for a copy together with something else deletes nothing at all.
+        assert!(matches!(vault.delete_exact_password_duplicates(&[newest.clone(), other.clone()]),
+            Err(VaultError::DuplicatesChanged)));
+        assert!(vault.list_entries().unwrap().iter().any(|entry| entry["id"].as_str() == Some(newest.as_str())));
+
+        assert_eq!(vault.delete_exact_password_duplicates(&[]).unwrap(), 0);
+        assert_eq!(vault.delete_exact_password_duplicates(&[newest.clone(), newest]).unwrap(), 1, "asked for twice, deleted once");
+        assert!(vault.exact_password_duplicates().unwrap().is_empty());
     }
 
     #[test]
