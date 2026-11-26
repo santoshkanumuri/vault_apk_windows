@@ -20,7 +20,7 @@ import { totpAt } from "../../lib/totp";
 import { useTotpCodes } from "../codes/useTotp";
 import { markUsed } from "../../app/recent";
 import { LoginSignIns } from "../signins/SignInsPage";
-import { strings } from "../../strings";
+import { codeText, strings } from "../../strings";
 import { StatusBanner } from "../../components/Status";
 import { cardExpiryKind } from "../../lib/cardExpiry";
 
@@ -34,7 +34,7 @@ export function ItemDetailPage({ id }: { id: string }) {
   useEffect(() => { if (entry) markUsed(entry.id); }, [entry?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!entry) {
-    return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title={strings.thisItemIsnTHereAnymore} body="It may have been deleted on another device." action={<Button onClick={() => void router.back()}>{strings.goBack}</Button>} /></div> : <div className="card card-padded center"><Spinner label={strings.loading} /></div>}</div>;
+    return <div className="page page-narrow">{loaded ? <div className="card"><EmptyState icon={X} title={strings.thisItemIsnTHereAnymore} body={strings.itMayHaveBeenDeletedOn} action={<Button onClick={() => void router.back()}>{strings.goBack}</Button>} /></div> : <div className="card card-padded center"><Spinner label={strings.loading} /></div>}</div>;
   }
 
   const category = categoryForType(entry.type);
@@ -45,10 +45,10 @@ export function ItemDetailPage({ id }: { id: string }) {
     try {
       const saved = await api.saveEntry({ ...entry, favorite: !entry.favorite });
       upsertEntry(saved);
-      toast.success(saved.favorite ? "Added to favorites" : "Removed from favorites");
+      toast.success(saved.favorite ? codeText.addedToFavorites : codeText.removedFromFavorites);
       void refresh();
     } catch (failure) {
-      toast.error(failure, "Couldn't update favorites.");
+      toast.error(failure, codeText.couldnTUpdateFavorites);
     } finally {
       setBusy(false);
     }
@@ -75,9 +75,9 @@ export function ItemDetailPage({ id }: { id: string }) {
     // Recently deleted keeps the item's fields, folders and previous passwords, not its photos.
     const photoCount = await api.listEntryPhotos(entry.id).then((list) => list.length).catch(() => -1);
     const ok = await confirm({
-      title: `Delete "${entry.title}"?`,
+      title: codeText.delete2(entry.title),
       message: `${deleteMessage}${photoCount > 0 ? ` Its ${photoCount === 1 ? "photo is" : `${photoCount} photos are`} deleted for good.` : ""}`,
-      confirmLabel: "Delete", danger: true
+      confirmLabel: strings.delete, danger: true
     });
     if (!ok) return;
     setBusy(true);
@@ -86,22 +86,22 @@ export function ItemDetailPage({ id }: { id: string }) {
       await api.deleteEntry(entry.id);
       removeEntry(entry.id);
       const undo = {
-        label: "Undo",
+        label: codeText.undo,
         run: async () => {
           try {
             await restoreDeleted(copy.id);
-            toast.success(`${typeLabel(copy.type)} restored`);
+            toast.success(codeText.restored2(typeLabel(copy.type)));
             void refresh();
           } catch (failure) {
-            toast.error(failure, "Couldn't restore the item. Open Recently deleted.");
+            toast.error(failure, codeText.couldnTRestoreTheItemOpen);
           }
         }
       };
-      toast.success(`${typeLabel(entry.type)} deleted`, { action: undo });
+      toast.success(codeText.deleted(typeLabel(entry.type)), { action: undo });
       await router.back();
       void refresh();
     } catch (failure) {
-      toast.error(failure, "Couldn't delete this item.");
+      toast.error(failure, codeText.couldnTDeleteThisItem);
       setBusy(false);
     }
   };
@@ -113,11 +113,11 @@ export function ItemDetailPage({ id }: { id: string }) {
       <section className="detail-hero">
         {entry.type !== "CARD" && <Avatar title={entry.title} size="lg" {...iconHints(entry, entries)} />}
         <div className="detail-hero-text">
-          <h2>{entry.title || "Untitled"}</h2>
+          <h2>{entry.title || codeText.untitled}</h2>
           <p>{typeLabel(entry.type)}{entry.type === "CARD" && entry.network ? ` · ${entry.network}` : ""}{entry.type === "PASSWORD" && entry.tertiaryValue ? ` · ${hostFromUrl(entry.tertiaryValue)}` : ""}</p>
         </div>
         <div className="detail-hero-actions">
-          <IconButton label={entry.favorite ? "Remove from favorites" : "Add to favorites"} icon={Star} className={entry.favorite ? "is-favorite" : undefined} aria-pressed={entry.favorite} onClick={() => void toggleFavorite()} disabled={busy} />
+          <IconButton label={entry.favorite ? codeText.removeFromFavorites : codeText.addToFavorites} icon={Star} className={entry.favorite ? "is-favorite" : undefined} aria-pressed={entry.favorite} onClick={() => void toggleFavorite()} disabled={busy} />
           <Button icon={Pencil} onClick={() => void router.navigate({ page: "edit", id: entry.id, category })}>{strings.edit}</Button>
           {entry.type !== "AUTHENTICATOR" && <IconButton label={strings.duplicate} icon={CopyPlus} variant="ghost" onClick={() => void duplicate()} disabled={busy} />}
           <IconButton label={strings.delete} icon={Trash2} variant="ghost" className="btn-danger-text" onClick={() => void remove()} disabled={busy} />
@@ -153,7 +153,7 @@ export function ItemDetailPage({ id }: { id: string }) {
 
       <Photos entryId={entry.id} entryType={entry.type} />
 
-      <p className="detail-meta">Updated {formatDateTime(entry.updatedAt)} · Created {formatDateTime(entry.createdAt)}</p>
+      <p className="detail-meta">{codeText.updatedCreated(formatDateTime(entry.updatedAt), formatDateTime(entry.createdAt))}</p>
     </div>
   );
 }
@@ -176,13 +176,13 @@ function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt:
   if (list.length === 0) return null;
 
   const clear = async () => {
-    if (!(await confirm({ title: "Clear previous passwords?", message: "This PC forgets the earlier passwords of this login. The current password stays.", confirmLabel: "Clear", danger: true }))) return;
+    if (!(await confirm({ title: codeText.clearPreviousPasswords, message: codeText.thisPcForgetsTheEarlierPasswords, confirmLabel: strings.clear, danger: true }))) return;
     try {
       await api.clearPreviousPasswords(entryId);
       setList([]);
-      toast.success("Previous passwords cleared");
+      toast.success(codeText.previousPasswordsCleared);
     } catch (failure) {
-      toast.error(failure, "Couldn't clear the previous passwords.");
+      toast.error(failure, codeText.couldnTClearThePreviousPasswords);
     }
   };
 
@@ -195,7 +195,7 @@ function PreviousPasswords({ entryId, updatedAt }: { entryId: string; updatedAt:
       </button>
       {open && <>
         {list.map((item, index) => (
-          <DetailField key={`${item.replacedAt}-${index}`} label={`Replaced ${relativeTime(item.replacedAt, now)}`} value={item.password} secret mono />
+          <DetailField key={`${item.replacedAt}-${index}`} label={codeText.replaced(relativeTime(item.replacedAt, now))} value={item.password} secret mono />
         ))}
         <div className="previous-passwords-footer">
           <span className="detail-meta">{strings.keptOnThisPcOnlyUp}</span>
@@ -257,7 +257,7 @@ function LiveCodeField({ entry, label, note }: { entry: VaultEntry; label?: stri
       <div className="detail-field-text">
         <span className="detail-label">{label ?? strings.code}{note ? ` · ${note}` : ""}</span>
         <span className="code-value">{code?.value ? groupCode(code.value) : "••• •••"}</span>
-        {code?.next && code.seconds <= 5 && <span className="code-next">Next {groupCode(code.next)}</span>}
+        {code?.next && code.seconds <= 5 && <span className="code-next">{codeText.next(groupCode(code.next))}</span>}
       </div>
       <div className="detail-actions">
         {code && <CountdownRing seconds={code.seconds} period={code.period} />}
@@ -284,9 +284,9 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
 
   const add = async (file?: File) => {
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) { toast.warning("Choose an image under 10 MB."); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.warning(codeText.chooseAnImageUnder10Mb); return; }
     setBusy(true);
-    const progress = toast.progress("Adding photo…");
+    const progress = toast.progress(codeText.addingPhoto);
     try {
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -298,9 +298,9 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
       const mimeType = dataUrl.slice(5, dataUrl.indexOf(";"));
       await api.addEntryPhoto(entryId, mimeType, dataUrl.slice(separator + 1));
       setPhotos(await api.listEntryPhotos(entryId));
-      progress.success("Photo added");
+      progress.success(codeText.photoAdded);
     } catch (failure) {
-      progress.error(failure, "Couldn't add the photo.");
+      progress.error(failure, codeText.couldnTAddThePhoto);
     } finally {
       setBusy(false);
       if (input.current) input.current.value = "";
@@ -314,24 +314,24 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
     try {
       await api.setCoverPhoto(photo.id);
       setPhotos(await api.listEntryPhotos(entryId));
-      toast.success("Cover photo set");
+      toast.success(codeText.coverPhotoSet);
     } catch (failure) {
-      toast.error(failure, "Couldn't set the cover photo.");
+      toast.error(failure, codeText.couldnTSetTheCoverPhoto);
     } finally {
       setBusy(false);
     }
   };
 
   const remove = async (photo: EntryPhoto) => {
-    if (!(await confirm({ title: "Delete this photo?", confirmLabel: "Delete photo", danger: true }))) return;
+    if (!(await confirm({ title: codeText.deleteThisPhoto, confirmLabel: strings.deletePhoto, danger: true }))) return;
     setBusy(true);
     try {
       await api.deleteEntryPhoto(photo.id);
       setPhotos((current) => current?.filter((item) => item.id !== photo.id) ?? null);
       setViewing(null);
-      toast.success("Photo deleted");
+      toast.success(codeText.photoDeleted);
     } catch (failure) {
-      toast.error(failure, "Couldn't delete the photo.");
+      toast.error(failure, codeText.couldnTDeleteThePhoto);
     } finally {
       setBusy(false);
     }
@@ -346,11 +346,11 @@ function Photos({ entryId, entryType }: { entryId: string; entryType: string }) 
           <Button size="sm" icon={ImagePlus} busy={busy} disabled={photos === null || photos.length >= 20} onClick={() => input.current?.click()}>{strings.addPhoto}</Button>
         </div>
       </header>
-      {photos === null ? <Spinner label={strings.loadingPhotos} /> : photos.length === 0 ? <p className="muted small">No photos. {entryType === "CARD" ? "Add a card scan or receipt" : "Add a photo or screenshot"}, up to 10 MB each.</p> : (
+      {photos === null ? <Spinner label={strings.loadingPhotos} /> : photos.length === 0 ? <p className="muted small">No photos. {entryType === "CARD" ? codeText.addACardScanOrReceipt : codeText.addAPhotoOrScreenshot}, up to 10 MB each.</p> : (
         <div className="photo-grid">
           {photos.map((photo) => (
             <figure key={photo.id} className="photo">
-              <button type="button" className="photo-open" onClick={() => setViewing(photo)} aria-label={photo.isCover ? "View cover photo" : "View photo"}><img src={photo.dataUrl} alt="" /></button>
+              <button type="button" className="photo-open" onClick={() => setViewing(photo)} aria-label={photo.isCover ? codeText.viewCoverPhoto : codeText.viewPhoto}><img src={photo.dataUrl} alt="" /></button>
               {photo.isCover
                 ? <span className="photo-badge">{strings.cover}</span>
                 : <button type="button" className="photo-badge photo-cover-set" onClick={() => void chooseCover(photo)} disabled={busy}>{strings.setAsCover}</button>}

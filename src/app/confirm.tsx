@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
+import { codeText, strings } from "../strings";
 
 export type ConfirmOptions = {
   title: string;
@@ -35,8 +36,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       {children}
       <Dialog open={options !== null} title={options?.title ?? ""} description={options?.message} onClose={() => finish(false)} initialFocus="[data-confirm-default]"
         footer={<>
-          <Button variant="ghost" onClick={() => finish(false)} data-confirm-default={options?.danger ? "" : undefined}>{options?.cancelLabel ?? "Cancel"}</Button>
-          <Button variant={options?.danger ? "danger" : "primary"} onClick={() => finish(true)} data-confirm-default={options?.danger ? undefined : ""}>{options?.confirmLabel ?? "Confirm"}</Button>
+          <Button variant="ghost" onClick={() => finish(false)} data-confirm-default={options?.danger ? "" : undefined}>{options?.cancelLabel ?? strings.cancel}</Button>
+          <Button variant={options?.danger ? "danger" : "primary"} onClick={() => finish(true)} data-confirm-default={options?.danger ? undefined : ""}>{options?.confirmLabel ?? codeText.confirm}</Button>
         </>} />
     </ConfirmContext.Provider>
   );

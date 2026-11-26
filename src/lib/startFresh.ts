@@ -3,6 +3,7 @@
 // page so the rules can be tested without a browser.
 
 import { relativeTime } from "./format.ts";
+import { codeText } from "../strings.ts";
 
 /** The word the person types to confirm "Start fresh on this PC" (START_FRESH_WORD in lib.rs). */
 export const START_FRESH_WORD = "RESET";
@@ -26,7 +27,7 @@ export function lockedView(snapshot: { vaultState: string; welcomeBack?: boolean
 export function lastUsedText(lastUsedAt: number | undefined, now = Date.now()): string {
   if (!lastUsedAt || lastUsedAt <= 0) return "";
   const relative = relativeTime(lastUsedAt, now);
-  if (relative === "Just now" || relative === "Yesterday") return `Last used ${relative.toLowerCase()}`;
-  if (/ago$/.test(relative)) return `Last used ${relative}`;
-  return `Last used on ${relative}`;
+  if (relative === "Just now" || relative === "Yesterday") return codeText.lastUsed(relative.toLowerCase());
+  if (/ago$/.test(relative)) return codeText.lastUsed(relative);
+  return codeText.lastUsedOn(relative);
 }

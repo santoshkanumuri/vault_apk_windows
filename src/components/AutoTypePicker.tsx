@@ -9,7 +9,7 @@ import { useVault } from "../app/vault";
 import { api, onAutoType, type AutoTypeTarget } from "../lib/api";
 import { rankForWindow } from "../lib/autoType";
 import { hostFromUrl } from "../lib/format";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 /**
  * The auto-type picker. The shortcut in another app records that window (auto_type.rs) and
@@ -49,7 +49,7 @@ export function AutoTypePicker() {
       toast.success(`Typed into ${target?.app ?? "the app"}`);
     } catch (failure) {
       setTarget(null);
-      toast.error(failure, "Couldn't type the login.");
+      toast.error(failure, codeText.couldnTTypeTheLogin);
     } finally {
       setBusy("");
     }
@@ -58,11 +58,11 @@ export function AutoTypePicker() {
   const matches = ranked.filter((item) => item.score > 0).length;
   return (
     <Dialog open={target !== null} onClose={close} locked={busy !== ""} size="md" title={strings.autoTypeALogin}
-      description={target ? <>Into <strong>{target.app}</strong>: {target.title || "untitled window"}. Nuvori switches to that window, then types the username, Tab and the password.</> : null}
+      description={target ? <>Into <strong>{target.app}</strong>: {target.title || codeText.untitledWindow}. Nuvori switches to that window, then types the username, Tab and the password.</> : null}
       footer={<Button variant="ghost" onClick={close} disabled={busy !== ""}>{strings.cancel}</Button>}>
       <div className="form-stack">
         <TextField label={strings.searchLogins} value={filter} onValue={setFilter} placeholder={strings.nameUsernameOrWebsite} autoComplete="off" spellCheck={false} data-autofocus />
-        <p className="field-hint">{matches ? `${matches === 1 ? "1 login fits" : `${matches} logins fit`} this window.` : "No login matches this window by name or website. Pick one below."}</p>
+        <p className="field-hint">{matches ? `${matches === 1 ? "1 login fits" : `${matches} logins fit`} this window.` : codeText.noLoginMatchesThisWindowBy}</p>
         <ul className="card list autotype-list">
           {ranked.slice(0, 50).map(({ entry, score }) => (
             <li key={entry.id} className="autotype-row">

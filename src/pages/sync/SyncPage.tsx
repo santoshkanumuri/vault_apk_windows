@@ -21,7 +21,7 @@ import { useSyncNow } from "../Home";
 import { PairedNotice, PairingCard } from "./Pairing";
 import { CloudCard } from "./Cloud";
 import { MasterPasswordSwitchBanner } from "./MasterPasswordSwitch";
-import { strings, syncStatusText } from "../../strings";
+import { codeText, driveBackupText, strings, syncStatusText } from "../../strings";
 
 export function SyncPage() {
   const { snapshot } = useVault();
@@ -63,7 +63,7 @@ export function SyncPage() {
       {snapshot.enrolled && conflictCount > 0 && (
         <StatusBanner kind="warning" title={`${plural(conflictCount, "change")} need${conflictCount === 1 ? "s" : ""} review`}
           action={conflicts.data ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>{strings.review}</Button> : undefined}>
-          {conflicts.data ? "The same item changed on both devices. Both versions are kept until you choose." : "The same item changed on both devices. Both versions are kept; choose one on your phone under Devices & sync."}
+          {conflicts.data ? codeText.theSameItemChangedOnBoth : codeText.theSameItemChangedOnBoth2}
         </StatusBanner>
       )}
       {snapshot.enrolled && sync.data?.waitingForKeys && (
@@ -74,12 +74,12 @@ export function SyncPage() {
       )}
       {snapshot.enrolled && updateCount > 0 && (
         <StatusBanner kind="warning" title={`${plural(updateCount, "change")} from ${updateFrom.length === 1 ? updateFrom[0].name : `${updateFrom.length} devices`} ${updateCount === 1 ? "needs" : "need"} a newer Nuvori`}>
-          Update Nuvori on this PC to apply {updateCount === 1 ? "it" : "them"}. Other changes still sync.
+          Update Nuvori on this PC to apply {updateCount === 1 ? codeText.it : codeText.them}. Other changes still sync.
         </StatusBanner>
       )}
       {snapshot.enrolled && sync.data && (sync.data.setAside ?? 0) > 0 && (
         <StatusBanner kind="warning" title={`${plural(sync.data.setAside ?? 0, "change")} couldn't be read`}>
-          Nuvori set {sync.data.setAside === 1 ? "it" : "them"} aside and tries again on each sync. Other changes still sync. Update Nuvori on this PC and on your phone.
+          Nuvori set {sync.data.setAside === 1 ? codeText.it : codeText.them} aside and tries again on each sync. Other changes still sync. Update Nuvori on this PC and on your phone.
         </StatusBanner>
       )}
       {snapshot.enrolled && <PhotoTransfer />}
@@ -113,8 +113,8 @@ export function SyncPage() {
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024) return codeText.kb2((bytes / 1024).toFixed(0));
+  return codeText.mb((bytes / (1024 * 1024)).toFixed(1));
 }
 
 /** Photo transfer progress, shown only when the backend reports it and something is moving. */
@@ -128,8 +128,8 @@ function PhotoTransfer() {
       <div className="photo-transfer-head">
         <span className="row-icon" aria-hidden="true"><Image /></span>
         <span className="row-text">
-          <span className="row-title">{data.waiting > 0 ? `${plural(data.waiting, "photo")} to transfer` : "Finishing photo transfer"}</span>
-          <span className="row-description">{known ? `${formatBytes(data.transferredBytes)} of ${formatBytes(data.totalBytes)}` : "Photos move during the next sync."}</span>
+          <span className="row-title">{data.waiting > 0 ? `${plural(data.waiting, "photo")} to transfer` : codeText.finishingPhotoTransfer}</span>
+          <span className="row-description">{known ? codeText.of2(formatBytes(data.transferredBytes), formatBytes(data.totalBytes)) : codeText.photosMoveDuringTheNextSync}</span>
         </span>
       </div>
       {known && <ProgressBar label={strings.photoTransfer} value={data.transferredBytes} max={data.totalBytes} />}
@@ -160,14 +160,14 @@ function ConnectionCard({ status, error, reload, overview }: { status: SyncStatu
         <span className="connection-icon" aria-hidden="true"><Smartphone /></span>
         <div className="connection-text">
           <h2 id="connection-title">{strings.yourDevices}</h2>
-          <p className="muted small">{text?.lastSynced ?? (status?.phoneAddress ? status.phoneAddress : "Find paired devices automatically on this network")}</p>
+          <p className="muted small">{text?.lastSynced ?? (status?.phoneAddress ? status.phoneAddress : codeText.findPairedDevicesAutomaticallyOnThis)}</p>
         </div>
         {text ? <StatusChip kind={text.kind} label={text.title} /> : <StatusChip kind="neutral" label={strings.syncStatusIsUnavailableRightNow} />}
       </div>
 
       {running && status && (
         <div className="connection-progress" aria-live="polite">
-          <div className="connection-progress-label"><span>{phaseLabel(status)}</span>{total > 0 && <span className="muted">{done} of {total}</span>}</div>
+          <div className="connection-progress-label"><span>{phaseLabel(status)}</span>{total > 0 && <span className="muted">{codeText.of3(done, total)}</span>}</div>
           <ProgressBar label={strings.syncProgress} value={done} max={total} indeterminate={total === 0} />
         </div>
       )}
@@ -175,7 +175,7 @@ function ConnectionCard({ status, error, reload, overview }: { status: SyncStatu
       {!running && text && problem && (
         <StatusBanner kind={text.kind} title={text.title}>
           {text.detail}
-          {overview?.overview.cause === "localProblem" && failures > 1 && ` Failed ${failures} times in a row.`}
+          {overview?.overview.cause === "localProblem" && failures > 1 && codeText.failedTimesInARow(failures)}
           {overview?.overview.cause === "localProblem" && retry > 0 && status?.automatic && ` Retrying in ${retry < 60 ? `${retry}s` : `${Math.round(retry / 60)} min`}.`}
         </StatusBanner>
       )}
@@ -188,18 +188,18 @@ function ConnectionCard({ status, error, reload, overview }: { status: SyncStatu
         <div><dt>{syncStatusText.factLastSynced}</dt><dd title={overview?.overview.lastSynced ? formatDateTime(overview.overview.lastSynced) : undefined}>{relativeTime(overview?.overview.lastSynced || status?.lastSync)}</dd></div>
         <div><dt>{syncStatusText.factWifi}</dt><dd title={status?.lastSync ? formatDateTime(status.lastSync) : undefined}>{wifiFact}</dd></div>
         <div><dt>{syncStatusText.factDrive}</dt><dd title={facts?.lastDriveSync ? formatDateTime(facts.lastDriveSync) : undefined}>{driveFact}</dd></div>
-        <div><dt>{strings.autoSync}</dt><dd>{status?.automatic ? "On" : "Off"}</dd></div>
+        <div><dt>{strings.autoSync}</dt><dd>{status?.automatic ? driveBackupText.chipOn : driveBackupText.chipOff}</dd></div>
       </dl>
 
       <div className="button-row">
-        <Button variant="primary" icon={RefreshCw} busy={running} disabled={!status} onClick={() => void syncNow.run()}>{running ? "Syncing changes" : "Sync now"}</Button>
+        <Button variant="primary" icon={RefreshCw} busy={running} disabled={!status} onClick={() => void syncNow.run()}>{running ? syncStatusText.syncing : codeText.syncNow}</Button>
       </div>
     </section>
   );
 }
 
 const WIFI_CHECK_LABELS: Record<string, string> = { "30": "30 seconds", "60": "minute", "300": "5 minutes", "900": "15 minutes" };
-const WIFI_CHECK_OPTIONS = [{ value: "30", label: "30 s" }, { value: "60", label: "1 min" }, { value: "300", label: "5 min" }, { value: "900", label: "15 min" }];
+const WIFI_CHECK_OPTIONS = [{ value: "30", label: "30 s" }, { value: "60", label: codeText.t1Min }, { value: "300", label: codeText.t5Min }, { value: "900", label: codeText.t15Min }];
 
 function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () => Promise<void> }) {
   const toast = useToast();
@@ -217,11 +217,11 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
     setBusy(true);
     try {
       await api.configureSync(value, status.automatic);
-      toast.success("Connection saved");
+      toast.success(codeText.connectionSaved);
       setEditing(false);
       await reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't save the address.");
+      toast.error(failure, codeText.couldnTSaveTheAddress);
     } finally {
       setBusy(false);
     }
@@ -236,10 +236,10 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
     setBusy(true);
     try {
       await api.setSyncSchedule({ wifiSeconds: Number(value) });
-      toast.success(`Checks devices on this Wi-Fi every ${WIFI_CHECK_LABELS[value] ?? value}`);
+      toast.success(codeText.checksDevicesOnThisWiFi(WIFI_CHECK_LABELS[value] ?? value));
       await reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't change the check interval.");
+      toast.error(failure, codeText.couldnTChangeTheCheckInterval);
     } finally {
       setBusy(false);
     }
@@ -249,10 +249,10 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
     setBusy(true);
     try {
       await api.setSyncOnOpen(enabled);
-      toast.success(enabled ? "Nuvori syncs each time you open it" : "Opening Nuvori no longer starts a sync");
+      toast.success(enabled ? codeText.nuvoriSyncsEachTimeYouOpen : codeText.openingNuvoriNoLongerStartsA);
       await reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't change this setting.");
+      toast.error(failure, codeText.couldnTChangeThisSetting);
     } finally {
       setBusy(false);
     }
@@ -262,10 +262,10 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
     setBusy(true);
     try {
       await api.configureSync(status.phoneAddress, automatic);
-      toast.success(automatic ? "Auto-sync on" : "Auto-sync off");
+      toast.success(automatic ? codeText.autoSyncOn : codeText.autoSyncOff);
       await reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't change auto-sync.");
+      toast.error(failure, codeText.couldnTChangeAutoSync);
     } finally {
       setBusy(false);
     }
@@ -273,7 +273,7 @@ function PhoneConnection({ status, reload }: { status: SyncStatus; reload: () =>
 
   return (
     <SettingsGroup title={strings.connection}>
-      <SettingsRow icon={Wifi} title={strings.optionalDeviceAddress} description={editing ? "Leave blank for discovery. If needed, enter a paired device's local IP address and optional :port." : status.phoneAddress || "Find paired devices automatically"}
+      <SettingsRow icon={Wifi} title={strings.optionalDeviceAddress} description={editing ? codeText.leaveBlankForDiscoveryIfNeeded : status.phoneAddress || codeText.findPairedDevicesAutomatically}
         control={!editing && <IconButton label={strings.editOptionalDeviceAddress} icon={Pencil} onClick={() => setEditing(true)} disabled={running} />}>
         {editing && (
           <form className="inline-form" onSubmit={(event) => void save(event)}>

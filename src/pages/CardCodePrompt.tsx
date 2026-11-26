@@ -6,7 +6,7 @@ import { StatusBanner } from "../components/Status";
 import { api, type CardCodeRequest } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { BrandMark } from "./Unlock";
-import { strings } from "../strings";
+import { codeText, driveBackupText, strings } from "../strings";
 
 /**
  * Approves releasing one card's security code to the browser. Opened by the extension after a
@@ -27,7 +27,7 @@ export function CardCodePrompt() {
     try {
       await api.approveCardCode(current.id);
     } catch (failure) {
-      setError(humanError(failure, "Windows Hello didn't approve it. Use your master password."));
+      setError(humanError(failure, codeText.windowsHelloDidnTApproveIt));
       passwordRef.current?.focus();
     } finally {
       setBusy("");
@@ -51,14 +51,14 @@ export function CardCodePrompt() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!request) return;
-    if (!password) { setError("Enter your master password."); passwordRef.current?.focus(); return; }
+    if (!password) { setError(driveBackupText.enterPassword); passwordRef.current?.focus(); return; }
     setBusy("password"); setError("");
     try {
       await api.approveCardCode(request.id, password);
       setPassword("");
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, "That password didn't work."));
+      setError(humanError(failure, codeText.thatPasswordDidnTWork));
       window.setTimeout(() => passwordRef.current?.focus(), 0);
     } finally {
       setBusy("");
@@ -82,7 +82,7 @@ export function CardCodePrompt() {
           <div className="prompt-summary">
             <span className="prompt-summary-icon" aria-hidden="true"><CreditCard /></span>
             <span>
-              <strong>{request.title || "Card"}</strong>
+              <strong>{request.title || codeText.card}</strong>
               <span>{request.card}</span>
             </span>
           </div>
@@ -112,7 +112,7 @@ export function CardCodePrompt() {
       )}
 
       <div className="prompt-actions">
-        <Button variant="ghost" size="sm" disabled={busy !== ""} onClick={decline}>{request === null ? "Close" : "Don't fill"}</Button>
+        <Button variant="ghost" size="sm" disabled={busy !== ""} onClick={decline}>{request === null ? strings.close : codeText.donTFill}</Button>
       </div>
       <p className="auth-footnote">{strings.onlyThisCodeIsSentAnd}</p>
     </main>

@@ -15,7 +15,7 @@ import {
 } from "../../lib/richNoteEdit";
 import { fromNodes, fromPastedText, toHtml, type HtmlNode } from "../../lib/richNoteHtml";
 import { useOpenNoteLink } from "./RichNoteView";
-import { strings } from "../../strings";
+import { codeText, strings } from "../../strings";
 
 export const COLOR_NAMES: Record<NoteColor, string> = {
   gray: "Gray", red: "Red", orange: "Orange", yellow: "Yellow", green: "Green", teal: "Teal", blue: "Blue", purple: "Purple", pink: "Pink",
@@ -473,31 +473,31 @@ export function RichNoteEditor({ initial, onChange, label, autoFocus, error }: P
     <div className={cx("field rn-field", error && "has-error")}>
       <div className="field-label-row"><label id={labelId} onClick={() => root.current?.focus()}>{label}</label></div>
       <div className="rn-toolbar" role="toolbar" aria-label={strings.formatting}>
-        {tool({ label: "Undo", shortcut: "Ctrl+Z", icon: Undo2, onClick: doUndo, disabled: !history.undo })}
-        {tool({ label: "Redo", shortcut: "Ctrl+Y", icon: Redo2, onClick: doRedo, disabled: !history.redo })}
+        {tool({ label: codeText.undo, shortcut: "Ctrl+Z", icon: Undo2, onClick: doUndo, disabled: !history.undo })}
+        {tool({ label: codeText.redo, shortcut: "Ctrl+Y", icon: Redo2, onClick: doRedo, disabled: !history.redo })}
         <span className="rn-sep" />
         <HeadingPicker kind={toolbar.kind} level={toolbar.level} keep={keep} onPick={(kind, level) => lineCommand(kind, level)} />
         <span className="rn-sep" />
-        {tool({ label: "Bold", shortcut: "Ctrl+B", icon: Bold, active: !!marks.bold, onClick: () => toggle("bold") })}
-        {tool({ label: "Italic", shortcut: "Ctrl+I", icon: Italic, active: !!marks.italic, onClick: () => toggle("italic") })}
-        {tool({ label: "Underline", shortcut: "Ctrl+U", icon: Underline, active: !!marks.underline, onClick: () => toggle("underline") })}
-        {tool({ label: "Strikethrough", shortcut: "Ctrl+Shift+X", icon: Strikethrough, active: !!marks.strike, onClick: () => toggle("strike") })}
-        {tool({ label: "Inline code", shortcut: "Ctrl+E", icon: Code, active: !!marks.code, onClick: () => toggle("code") })}
+        {tool({ label: codeText.bold, shortcut: "Ctrl+B", icon: Bold, active: !!marks.bold, onClick: () => toggle("bold") })}
+        {tool({ label: codeText.italic, shortcut: "Ctrl+I", icon: Italic, active: !!marks.italic, onClick: () => toggle("italic") })}
+        {tool({ label: codeText.underline, shortcut: "Ctrl+U", icon: Underline, active: !!marks.underline, onClick: () => toggle("underline") })}
+        {tool({ label: codeText.strikethrough, shortcut: "Ctrl+Shift+X", icon: Strikethrough, active: !!marks.strike, onClick: () => toggle("strike") })}
+        {tool({ label: codeText.inlineCode, shortcut: "Ctrl+E", icon: Code, active: !!marks.code, onClick: () => toggle("code") })}
         <ColorPicker label={strings.textColor} icon={Baseline} value={marks.color} keep={keep} onPick={(color) => markCommand((m) => ({ ...m, color }))} kind="color" />
         <ColorPicker label={strings.highlight} icon={Highlighter} value={marks.bg} keep={keep} onPick={(bg) => markCommand((m) => ({ ...m, bg }))} kind="bg" />
-        {tool({ label: toolbar.link ? "Edit link" : "Add link", shortcut: "Ctrl+K", icon: Link2, active: !!toolbar.link, onClick: openLinkDialog })}
-        {tool({ label: "Clear formatting", shortcut: "Ctrl+\\", icon: Eraser, onClick: clearCommand })}
+        {tool({ label: toolbar.link ? codeText.editLink : codeText.addLink, shortcut: "Ctrl+K", icon: Link2, active: !!toolbar.link, onClick: openLinkDialog })}
+        {tool({ label: codeText.clearFormatting, shortcut: "Ctrl+\\", icon: Eraser, onClick: clearCommand })}
         <span className="rn-sep" />
-        {tool({ label: "Bulleted list", shortcut: "Ctrl+Shift+8", icon: List, active: toolbar.kind === "bullet", onClick: () => lineCommand("bullet") })}
-        {tool({ label: "Numbered list", shortcut: "Ctrl+Shift+7", icon: ListOrdered, active: toolbar.kind === "numbered", onClick: () => lineCommand("numbered") })}
-        {tool({ label: "Checklist", shortcut: "Ctrl+Shift+9", icon: CheckSquare, active: toolbar.kind === "check", onClick: () => lineCommand("check") })}
-        {tool({ label: "Decrease indent", shortcut: "Shift+Tab", icon: Outdent, onClick: () => indentCommand(-1), disabled: !toolbar.inList })}
-        {tool({ label: "Increase indent", shortcut: "Tab", icon: Indent, onClick: () => indentCommand(1), disabled: !toolbar.inList })}
-        {tool({ label: "Quote", icon: Quote, active: toolbar.kind === "quote", onClick: () => lineCommand("quote") })}
-        {tool({ label: "Code block", icon: SquareCode, active: toolbar.kind === "code", onClick: () => lineCommand("code") })}
+        {tool({ label: codeText.bulletedList, shortcut: "Ctrl+Shift+8", icon: List, active: toolbar.kind === "bullet", onClick: () => lineCommand("bullet") })}
+        {tool({ label: codeText.numberedList, shortcut: "Ctrl+Shift+7", icon: ListOrdered, active: toolbar.kind === "numbered", onClick: () => lineCommand("numbered") })}
+        {tool({ label: codeText.checklist, shortcut: "Ctrl+Shift+9", icon: CheckSquare, active: toolbar.kind === "check", onClick: () => lineCommand("check") })}
+        {tool({ label: codeText.decreaseIndent, shortcut: "Shift+Tab", icon: Outdent, onClick: () => indentCommand(-1), disabled: !toolbar.inList })}
+        {tool({ label: codeText.increaseIndent, shortcut: "Tab", icon: Indent, onClick: () => indentCommand(1), disabled: !toolbar.inList })}
+        {tool({ label: codeText.quote, icon: Quote, active: toolbar.kind === "quote", onClick: () => lineCommand("quote") })}
+        {tool({ label: codeText.codeBlock, icon: SquareCode, active: toolbar.kind === "code", onClick: () => lineCommand("code") })}
         <span className="rn-sep" />
         <TablePicker keep={keep} onPick={insertTable} />
-        {tool({ label: "Divider", icon: Minus, onClick: insertDivider })}
+        {tool({ label: codeText.divider, icon: Minus, onClick: insertDivider })}
       </div>
       {toolbar.inTable && (
         <div className="rn-subbar" role="toolbar" aria-label={strings.table}>
@@ -565,10 +565,10 @@ function Popover({ label, button, children, keep, active }: { label: string; but
 }
 
 const HEADINGS: { label: string; kind: TextKind; level: number; shortcut: string }[] = [
-  { label: "Normal text", kind: "paragraph", level: 1, shortcut: "Ctrl+Alt+0" },
-  { label: "Heading 1", kind: "heading", level: 1, shortcut: "Ctrl+Alt+1" },
-  { label: "Heading 2", kind: "heading", level: 2, shortcut: "Ctrl+Alt+2" },
-  { label: "Heading 3", kind: "heading", level: 3, shortcut: "Ctrl+Alt+3" },
+  { label: codeText.normalText, kind: "paragraph", level: 1, shortcut: "Ctrl+Alt+0" },
+  { label: codeText.heading1, kind: "heading", level: 1, shortcut: "Ctrl+Alt+1" },
+  { label: codeText.heading2, kind: "heading", level: 2, shortcut: "Ctrl+Alt+2" },
+  { label: codeText.heading3, kind: "heading", level: 3, shortcut: "Ctrl+Alt+3" },
 ];
 
 function HeadingPicker({ kind, level, keep, onPick }: { kind: TextKind; level: number; keep: (event: ReactMouseEvent) => void; onPick: (kind: TextKind, level: number) => void }) {
@@ -615,12 +615,12 @@ function TablePicker({ keep, onPick }: { keep: (event: ReactMouseEvent) => void;
         <div className="rn-grid-picker">
           <div className="rn-grid" onMouseLeave={() => setSize({ rows: 0, columns: 0 })}>
             {Array.from({ length: 6 }, (_, r) => Array.from({ length: 6 }, (_, c) => (
-              <button key={`${r}-${c}`} type="button" aria-label={`${r + 1} by ${c + 1} table`} className={cx("rn-grid-cell", r < size.rows && c < size.columns && "is-active")}
+              <button key={`${r}-${c}`} type="button" aria-label={codeText.byTable(r + 1, c + 1)} className={cx("rn-grid-cell", r < size.rows && c < size.columns && "is-active")}
                 onMouseEnter={() => setSize({ rows: r + 1, columns: c + 1 })} onFocus={() => setSize({ rows: r + 1, columns: c + 1 })}
                 onMouseDown={keep} onClick={() => { close(); onPick(r + 1, c + 1); }} />
             )))}
           </div>
-          <span className="rn-grid-label">{size.rows ? `${size.rows} × ${size.columns}, first row as header` : "Pick a size"}</span>
+          <span className="rn-grid-label">{size.rows ? codeText.firstRowAsHeader(size.rows, size.columns) : codeText.pickASize}</span>
         </div>
       )}
     </Popover>
@@ -641,7 +641,7 @@ function LinkDialog({ state, onClose, onSave, onRemove }: {
     onSave(safe, label.trim());
   };
   return (
-    <Dialog open={state !== null} title={state?.existing ? "Edit link" : "Add link"} onClose={onClose}
+    <Dialog open={state !== null} title={state?.existing ? codeText.editLink : codeText.addLink} onClose={onClose}
       footer={<>
         {state?.existing && <Button variant="ghost" icon={Unlink} onClick={onRemove}>{strings.removeLink}</Button>}
         <Button variant="ghost" onClick={onClose}>{strings.cancel}</Button>

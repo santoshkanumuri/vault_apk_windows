@@ -12,7 +12,7 @@ import { useVault } from "../../app/vault";
 import { api, type PairingStatus } from "../../lib/api";
 import { humanError } from "../../lib/errors";
 import { cx } from "../../lib/format";
-import { strings } from "../../strings";
+import { authenticatorImportText, codeText, strings } from "../../strings";
 
 const idle: PairingStatus = { stage: "", confirmation: "", message: "", invitation: "" };
 
@@ -41,18 +41,18 @@ export function usePairingStatus(enabled: boolean) {
           if (status.stage === "paired") setSnapshot(await api.snapshot());
         } else if (status.stage !== lastStage.current) {
           if (status.stage === "paired") {
-            toast.success("Paired with your phone", status.conflicts ? { action: { label: "Review", run: () => void router.navigate({ page: "conflicts" }) } }
-              : status.needsReview ? { action: { label: "Review", run: () => void router.navigate({ page: "trash" }) } } : undefined);
+            toast.success(strings.pairedWithYourPhone, status.conflicts ? { action: { label: strings.review, run: () => void router.navigate({ page: "conflicts" }) } }
+              : status.needsReview ? { action: { label: strings.review, run: () => void router.navigate({ page: "trash" }) } } : undefined);
             setSnapshot(await api.snapshot());
           } else if (status.stage === "failed") {
-            toast.error(status.message || "Pairing didn't finish.");
+            toast.error(status.message || codeText.pairingDidnTFinish);
           } else if (status.stage === "confirm") {
-            toast.info("Compare the code on both devices");
+            toast.info(codeText.compareTheCodeOnBothDevices);
           }
           lastStage.current = status.stage;
         }
       } catch (failure) {
-        if (active) setError(humanError(failure, "Pairing status is unavailable."));
+        if (active) setError(humanError(failure, codeText.pairingStatusIsUnavailable));
       }
     };
     void refresh();
@@ -88,7 +88,7 @@ export function PairedNotice() {
   return (
     <StatusBanner kind={review ? "info" : "success"} title={strings.pairedWithYourPhone}
       action={<div className="button-row">
-        {review > 0 && <Button size="sm" variant="primary" onClick={() => void router.navigate({ page: "trash" })}>Review {review === 1 ? "1 item" : `${review} items`}</Button>}
+        {review > 0 && <Button size="sm" variant="primary" onClick={() => void router.navigate({ page: "trash" })}>Review {review === 1 ? codeText.t1Item : codeText.items(review)}</Button>}
         <Button size="sm" variant="ghost" onClick={dismiss}>{strings.dismiss}</Button>
       </div>}>
       {status.message}
@@ -104,7 +104,7 @@ function stepFor(stage: string): number {
 }
 
 function Stepper({ step }: { step: number }) {
-  const steps = ["Connect", "Confirm code", "Import vault"];
+  const steps = ["Connect", codeText.confirmCode, codeText.importVault];
   return (
     <ol className="stepper" aria-label={strings.pairingSteps}>
       {steps.map((label, index) => {
@@ -145,15 +145,15 @@ export function PairingCard() {
   const acceptQr = (link: string): boolean => {
     if (!link.startsWith("nuvori-pair://v3/") || link.length > 2048) {
       setScanNotice("");
-      setError("This QR isn't a Nuvori pairing invitation.");
+      setError(codeText.thisQrIsnTANuvori);
       return false;
     }
     setError("");
     setFieldError({});
     setSetupLink(link);
-    setScanNotice("QR read. Enter your phone's master password to continue.");
+    setScanNotice(codeText.qrReadEnterYourPhoneS);
     setScanning(false);
-    toast.success("Pairing QR read");
+    toast.success(codeText.pairingQrRead);
     window.setTimeout(() => passwordInput.current?.focus(), 0);
     return true;
   };
@@ -161,13 +161,13 @@ export function PairingCard() {
   const readQrImage = async (file?: File) => {
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) {
-      setError("Choose a QR image smaller than 20 MB.");
+      setError(authenticatorImportText.imageTooLarge);
       if (qrImageInput.current) qrImageInput.current.value = "";
       return;
     }
     setScanning(false);
     setError("");
-    setScanNotice("Reading QR image…");
+    setScanNotice(codeText.readingQrImage);
     try {
       const url = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -179,7 +179,7 @@ export function PairingCard() {
       acceptQr((await new BrowserQRCodeReader().decodeFromImageUrl(url)).getText());
     } catch {
       setScanNotice("");
-      setError("Couldn't read a QR from this image. Paste the setup link instead.");
+      setError(codeText.couldnTReadAQrFrom);
     } finally {
       if (qrImageInput.current) qrImageInput.current.value = "";
     }
@@ -190,7 +190,7 @@ export function PairingCard() {
     let closed = false;
     let completed = false;
     setError("");
-    setScanNotice("Opening camera…");
+    setScanNotice(authenticatorImportText.openingCamera);
     import("@zxing/browser").then(async ({ BrowserQRCodeReader }) => {
       if (!camera.current) return;
       const reader = new BrowserQRCodeReader();
@@ -201,15 +201,15 @@ export function PairingCard() {
         liveControls.stop();
       });
       if (closed || completed) controls.stop();
-      else { scanner.current = controls; setScanNotice("Point the camera at the QR on your phone."); }
+      else { scanner.current = controls; setScanNotice(codeText.pointTheCameraAtTheQr); }
     }).catch((failure: unknown) => {
       if (closed) return;
       const name = failure instanceof Error ? failure.name : "";
-      const reason = name === "NotAllowedError" ? "Camera access was denied."
-        : name === "NotFoundError" ? "No camera was found."
-        : name === "NotReadableError" ? "The camera is busy or unavailable."
-        : "The camera couldn't start.";
-      setError(`${reason} Paste the setup link from your phone instead.`);
+      const reason = name === "NotAllowedError" ? codeText.cameraAccessWasDenied
+        : name === "NotFoundError" ? codeText.noCameraWasFound
+        : name === "NotReadableError" ? codeText.theCameraIsBusyOrUnavailable
+        : codeText.theCameraCouldnTStart;
+      setError(codeText.pasteTheSetupLinkFromYour(reason));
       setScanNotice("");
       setScanning(false);
     });
@@ -218,19 +218,19 @@ export function PairingCard() {
 
   const start = async (event: FormEvent) => {
     event.preventDefault();
-    if (!setupLink.trim()) { setFieldError({ link: "Scan the QR or paste the setup link from your phone." }); linkInput.current?.focus(); return; }
-    if (masterPassword.length < 12) { setFieldError({ password: "Enter your phone vault's master password." }); passwordInput.current?.focus(); return; }
+    if (!setupLink.trim()) { setFieldError({ link: codeText.scanTheQrOrPasteThe }); linkInput.current?.focus(); return; }
+    if (masterPassword.length < 12) { setFieldError({ password: codeText.enterYourPhoneVaultSMaster }); passwordInput.current?.focus(); return; }
     setScanning(false);
     setBusy(true);
     setError("");
     setFieldError({});
     try {
       await api.startPairing(setupLink.trim(), masterPassword);
-      toast.info("Connecting to your phone…");
+      toast.info(codeText.connectingToYourPhone);
       setSetupLink("");
       setMasterPassword("");
     } catch (failure) {
-      setError(humanError(failure, "Pairing couldn't start."));
+      setError(humanError(failure, codeText.pairingCouldnTStart));
     } finally {
       setBusy(false);
     }
@@ -239,7 +239,7 @@ export function PairingCard() {
   const startReverse = async (event: FormEvent) => {
     event.preventDefault();
     if (masterPassword.length < 12) {
-      setFieldError({ password: "Enter your phone vault's master password first." });
+      setFieldError({ password: codeText.enterYourPhoneVaultSMaster2 });
       passwordInput.current?.focus();
       return;
     }
@@ -249,11 +249,11 @@ export function PairingCard() {
     setError("");
     try {
       await api.startReversePairing(masterPassword);
-      toast.info("Scan the QR with your phone");
+      toast.info(codeText.scanTheQrWithYourPhone);
       setMasterPassword("");
       setSetupLink("");
     } catch (failure) {
-      setError(humanError(failure, "Couldn't create a pairing QR."));
+      setError(humanError(failure, codeText.couldnTCreateAPairingQr));
     } finally {
       setBusy(false);
     }
@@ -262,8 +262,8 @@ export function PairingCard() {
   const action = async (command: "approve" | "cancel") => {
     try {
       setError("");
-      if (command === "approve") { await api.approvePairing(); toast.info("Code confirmed. Waiting for your phone…"); }
-      else { await api.cancelPairing(); toast.info("Pairing canceled"); }
+      if (command === "approve") { await api.approvePairing(); toast.info(codeText.codeConfirmedWaitingForYourPhone); }
+      else { await api.cancelPairing(); toast.info(codeText.pairingCanceled); }
     } catch (failure) {
       toast.error(failure);
     }
@@ -280,12 +280,12 @@ export function PairingCard() {
       <Stepper step={step} />
 
       {statusError && <StatusBanner kind="warning">{statusError}</StatusBanner>}
-      {stage === "failed" && <StatusBanner kind="error" title={strings.pairingDidnTFinish}>{pairing.message || "Start again from your phone."}</StatusBanner>}
+      {stage === "failed" && <StatusBanner kind="error" title={strings.pairingDidnTFinish}>{pairing.message || codeText.startAgainFromYourPhone}</StatusBanner>}
       {error && <StatusBanner kind="error">{error}</StatusBanner>}
 
       {stage === "confirm" ? (
         <div className="pairing-confirm">
-          <p>{pairing.message || "Compare this code with the one on your phone. Confirm on both devices."}</p>
+          <p>{pairing.message || codeText.compareThisCodeWithTheOne}</p>
           <output className="pairing-code" aria-label={`Pairing code ${pairing.confirmation.split("").join(" ")}`}>{pairing.confirmation}</output>
           <div className="button-row">
             <Button variant="primary" size="lg" icon={Check} onClick={() => void action("approve")}>{strings.codesMatch}</Button>
@@ -303,25 +303,25 @@ export function PairingCard() {
         </div>
       ) : stage === "connecting" || stage === "transferring" || stage === "canceling" ? (
         <div className="pairing-progress">
-          <div className="pairing-progress-row"><Spinner /><span>{pairing.message || (stage === "transferring" ? "Receiving the encrypted vault copy…" : "Connecting…")}</span></div>
+          <div className="pairing-progress-row"><Spinner /><span>{pairing.message || (stage === "transferring" ? codeText.receivingTheEncryptedVaultCopy : codeText.connecting)}</span></div>
           <ProgressBar label={strings.pairingProgress} indeterminate />
           <Button disabled={stage === "canceling"} onClick={() => void action("cancel")} icon={X}>{strings.cancel}</Button>
         </div>
       ) : stage === "paired" ? (
         <StatusBanner kind="success" title={strings.paired}
-          action={pairing.conflicts ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>Review {pairing.conflicts === 1 ? "1 conflict" : `${pairing.conflicts} conflicts`}</Button>
-            : pairing.needsReview ? <Button size="sm" onClick={() => void router.navigate({ page: "trash" })}>Review {pairing.needsReview === 1 ? "1 item" : `${pairing.needsReview} items`}</Button> : undefined}>
-          {pairing.message || "This PC and your phone now keep their own copies in sync."}
+          action={pairing.conflicts ? <Button size="sm" onClick={() => void router.navigate({ page: "conflicts" })}>Review {pairing.conflicts === 1 ? codeText.t1Conflict : codeText.conflicts(pairing.conflicts)}</Button>
+            : pairing.needsReview ? <Button size="sm" onClick={() => void router.navigate({ page: "trash" })}>Review {pairing.needsReview === 1 ? codeText.t1Item : codeText.items2(pairing.needsReview)}</Button> : undefined}>
+          {pairing.message || codeText.thisPcAndYourPhoneNow}
         </StatusBanner>
       ) : (
         <>
           <Segmented label={strings.pairingMethod} value={mode} onChange={(value) => { setMode(value); setError(""); setFieldError({}); setScanning(false); }}
-            options={[{ value: "scan", label: "Scan phone's QR", icon: ScanLine }, { value: "show", label: "Show QR to phone", icon: QrCode }]} />
+            options={[{ value: "scan", label: codeText.scanPhoneSQr, icon: ScanLine }, { value: "show", label: codeText.showQrToPhone, icon: QrCode }]} />
           {mode === "scan" ? (
             <form className="form-stack" onSubmit={(event) => void start(event)} noValidate>
               <p className="muted small">On your phone, open <strong>Devices &amp; sync</strong> and choose <strong>{strings.createQr}</strong>. Scan it with this PC's camera, or copy the link and paste it below.</p>
               <div className="button-row">
-                <Button icon={scanning ? CameraOff : Camera} onClick={() => { setScanNotice(""); setScanning((value) => !value); }}>{scanning ? "Stop camera" : "Use camera"}</Button>
+                <Button icon={scanning ? CameraOff : Camera} onClick={() => { setScanNotice(""); setScanning((value) => !value); }}>{scanning ? authenticatorImportText.stopCamera : authenticatorImportText.useCamera}</Button>
                 <Button icon={ImageUp} onClick={() => qrImageInput.current?.click()}>{strings.readQrImage}</Button>
                 <input ref={qrImageInput} type="file" accept="image/*" className="sr-only" tabIndex={-1} aria-label={strings.choosePairingQrImage} onChange={(event) => void readQrImage(event.target.files?.[0])} />
               </div>

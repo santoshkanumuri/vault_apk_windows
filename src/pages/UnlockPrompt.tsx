@@ -7,7 +7,7 @@ import { api, type AppSnapshot } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { helloLockScreen } from "../lib/helloWindow";
 import { BrandMark } from "./Unlock";
-import { strings } from "../strings";
+import { codeText, driveBackupText, strings } from "../strings";
 
 /**
  * The small window the browser extension asks for when the vault is locked. Nuvori closes it
@@ -54,7 +54,7 @@ export function UnlockPrompt() {
       await api.unlockHello();
       done();
     } catch (failure) {
-      setError(humanError(failure, "Windows Hello didn't unlock the vault."));
+      setError(humanError(failure, codeText.windowsHelloDidnTUnlockThe));
       // Past the master password window the button goes away (hello_window.rs).
       api.snapshot().then(setSnapshot).catch(() => {});
       passwordRef.current?.focus();
@@ -65,14 +65,14 @@ export function UnlockPrompt() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!password) { setError("Enter your master password."); passwordRef.current?.focus(); return; }
+    if (!password) { setError(driveBackupText.enterPassword); passwordRef.current?.focus(); return; }
     setBusy("password"); setError("");
     try {
       await api.unlockVault(password);
       done();
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, "That password didn't work."));
+      setError(humanError(failure, codeText.thatPasswordDidnTWork));
       window.setTimeout(() => passwordRef.current?.focus(), 0);
     } finally {
       setBusy("");

@@ -14,7 +14,7 @@ import { cx } from "../lib/format";
 import { helloLockScreen } from "../lib/helloWindow";
 import { lastUsedText, lockedView, startFreshConfirmed, type LockedChoice } from "../lib/startFresh";
 import { passwordStrength } from "../lib/strength";
-import { strings } from "../strings";
+import { authenticatorImportText, codeText, driveBackupText, strings } from "../strings";
 
 export function BrandMark({ size = "md" }: { size?: "md" | "lg" }) {
   return <span className={cx("brand-mark", size === "lg" && "brand-mark-lg")} aria-hidden="true"><ShieldCheck /></span>;
@@ -75,10 +75,10 @@ export function UnlockPage() {
     setBusy("hello"); setError("");
     try {
       const next = await api.unlockHello();
-      finish("Vault unlocked");
+      finish(codeText.vaultUnlocked);
       setSnapshot(next);
     } catch (failure) {
-      setError(humanError(failure, "Windows Hello didn't unlock the vault."));
+      setError(humanError(failure, codeText.windowsHelloDidnTUnlockThe));
       // Past the master password window the button goes away (hello_window.rs).
       api.snapshot().then(setSnapshot).catch(() => {});
     } finally {
@@ -88,21 +88,21 @@ export function UnlockPage() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!password) { setError("Enter your master password."); passwordRef.current?.focus(); return; }
+    if (!password) { setError(driveBackupText.enterPassword); passwordRef.current?.focus(); return; }
     if (!configured) {
-      if (password.length < 12) { setError("Use at least 12 characters."); passwordRef.current?.focus(); return; }
-      if (password !== confirm) { setError("The passwords don't match."); confirmRef.current?.focus(); return; }
+      if (password.length < 12) { setError(codeText.useAtLeast12Characters); passwordRef.current?.focus(); return; }
+      if (password !== confirm) { setError(codeText.thePasswordsDonTMatch); confirmRef.current?.focus(); return; }
     }
     setBusy("password"); setError("");
     try {
       const next = configured ? await api.unlockVault(password) : await api.createVault(password);
-      finish(configured ? "Vault unlocked" : "Vault created");
+      finish(configured ? codeText.vaultUnlocked : codeText.vaultCreated);
       // After "Start fresh" the next step is pairing with the phone.
       if (!configured && startedFresh) await router.root({ page: "sync" });
       setSnapshot(next);
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, configured ? "That password didn't work." : "Couldn't create the vault."));
+      setError(humanError(failure, configured ? codeText.thatPasswordDidnTWork : codeText.couldnTCreateTheVault));
       window.setTimeout(() => passwordRef.current?.focus(), 0);
     } finally {
       setBusy("");
@@ -123,7 +123,7 @@ export function UnlockPage() {
   return (
     <div className="auth-screen">
       <div className="auth-corner">
-        <IconButton label={resolved === "dark" ? "Switch to light theme" : "Switch to dark theme"} icon={resolved === "dark" ? Sun : Moon} onClick={() => toggle()} />
+        <IconButton label={resolved === "dark" ? codeText.switchToLightTheme : codeText.switchToDarkTheme} icon={resolved === "dark" ? Sun : Moon} onClick={() => toggle()} />
       </div>
       <main className="auth-card" aria-labelledby="auth-title">
         <div className="auth-brand">
@@ -137,8 +137,8 @@ export function UnlockPage() {
           <LockedChoices welcome={view === "welcome"} lastUsedAt={snapshot.lastUsedAt} onUnlock={() => setChosen("unlock")} onStartFresh={() => setFreshOpen(true)} />
         ) : <>
         <div className="auth-heading">
-          <h1 id="auth-title">{configured ? "Welcome back" : "Create your vault"}</h1>
-          <p>{configured ? "Unlock to use your saved items and browser filling." : "Your vault is encrypted on this PC. Pick a master password you'll remember. It can differ from your phone's."}</p>
+          <h1 id="auth-title">{configured ? strings.welcomeBack : codeText.createYourVault}</h1>
+          <p>{configured ? codeText.unlockToUseYourSavedItems : codeText.yourVaultIsEncryptedOnThis}</p>
         </div>
 
         {!configured && startedFresh && <StatusBanner kind="info">{strings.createANewVaultThenPair}</StatusBanner>}
@@ -181,18 +181,18 @@ export function UnlockPage() {
               value={confirm}
               onValue={(value) => { setConfirm(value); if (error) setError(""); }}
               disabled={busy !== ""}
-              error={confirm && confirm !== password && confirm.length >= password.length ? "Doesn't match yet" : undefined}
-              hint={confirm && confirm === password ? "Passwords match" : undefined}
+              error={confirm && confirm !== password && confirm.length >= password.length ? codeText.doesnTMatchYet : undefined}
+              hint={confirm && confirm === password ? codeText.passwordsMatch : undefined}
               required
             />
           )}
           <Button type="submit" variant={helloReady ? "secondary" : "primary"} size="lg" block icon={LockKeyhole} busy={busy === "password"} disabled={busy !== ""}>
-            {configured ? "Unlock" : "Create vault"}
+            {configured ? authenticatorImportText.unlock : codeText.createVault}
           </Button>
         </form>
         {configured && <button type="button" className="link-button auth-link" disabled={busy !== ""} onClick={() => { setError(""); setPassword(""); setChosen("choices"); }}>{strings.forgotThePasswordOrStartingOver}</button>}
         <p className="auth-footnote">
-          {configured ? "Nuvori can't recover a forgotten master password. Your phone keeps its own copy of the vault." : "There's no password recovery. If you forget it, you'll need to set up this PC again from your phone."}
+          {configured ? codeText.nuvoriCanTRecoverAForgotten : codeText.thereSNoPasswordRecoveryIf}
         </p>
         </>}
         {usingDevMock && <p className="auth-footnote">{strings.previewModeWithSampleDataAny}</p>}
@@ -240,14 +240,14 @@ function StartFreshDialog({ open, onClose, onDone }: { open: boolean; onClose: (
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!startFreshConfirmed(typed)) { setError("Type RESET exactly to confirm."); return; }
+    if (!startFreshConfirmed(typed)) { setError(codeText.typeResetExactlyToConfirm); return; }
     setBusy(true); setError("");
     try {
       const next = await api.startFresh(typed);
       setTyped("");
       onDone(next);
     } catch (failure) {
-      setError(humanError(failure, "Couldn't delete this PC's vault."));
+      setError(humanError(failure, codeText.couldnTDeleteThisPcS));
     } finally {
       setBusy(false);
     }

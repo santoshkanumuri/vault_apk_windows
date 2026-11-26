@@ -1,3 +1,4 @@
+import { codeText } from "../strings.ts";
 // Sign-in methods ("Continue with GitHub" and the account) that the browser extension remembered.
 // No imports, so `node --test` loads it directly (src/lib/signIns.test.mjs). The provider ids are the
 // same in sign_ins.rs and extension/signins.js; the Rust tests check all three lists.
@@ -99,7 +100,7 @@ export function forLogin(state: SignInsState | null, loginId: string): SignIn[] 
 /** An account the user types: at most 256 characters, no line breaks or invisible characters. */
 export function accountProblem(text: string): string | null {
   const value = text.trim();
-  if (value.length > 256) return "Use at most 256 characters.";
-  if (/[\p{Cc}\p{Cf}]/u.test(value)) return "Remove line breaks and invisible characters.";
+  if (value.length > 256) return codeText.useAtMost256Characters;
+  if (/[\p{Cc}\p{Cf}]/u.test(value)) return codeText.removeLineBreaksAndInvisibleCharacters;
   return null;
 }

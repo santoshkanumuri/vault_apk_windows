@@ -13,7 +13,7 @@ import { api, type MemberDevice, type MembershipStatus } from "../../lib/api";
 import { humanError, isUnavailable } from "../../lib/errors";
 import { cx, formatDateTime, plural, relativeTime } from "../../lib/format";
 import { deviceNameProblem, isStale, removeHelp, splitDevices, staleHint } from "../../lib/deviceList";
-import { accountText, strings } from "../../strings";
+import { accountText, codeText, strings } from "../../strings";
 import { peerAckText } from "../../lib/syncOverview";
 import type { SyncOverviewState } from "../../app/useSyncOverview";
 
@@ -51,16 +51,16 @@ export function useLeaveGroup(managerName?: string) {
   const leave = useCallback(async () => {
     if (choice === "empty") {
       const sure = await confirm({
-        title: "Remove every item from this PC?",
-        message: "Passwords, cards, codes, notes, passkeys, and photos are deleted from this PC. Your phone and other devices keep their copies. This can't be undone on this PC.",
-        confirmLabel: "Leave and empty this PC",
+        title: codeText.removeEveryItemFromThisPc,
+        message: codeText.passwordsCardsCodesNotesPasskeysAnd,
+        confirmLabel: codeText.leaveAndEmptyThisPc,
         danger: true
       });
       if (!sure) return;
     }
     setOpen(false);
     setBusy(true);
-    const progress = toast.progress("Leaving the sync group…");
+    const progress = toast.progress(codeText.leavingTheSyncGroup);
     try {
       let next;
       try {
@@ -70,10 +70,10 @@ export function useLeaveGroup(managerName?: string) {
         next = await api.stopSharing();
       }
       setSnapshot(next);
-      progress.success(choice === "keep" ? "Left the sync group. This PC keeps its items." : "Left the sync group. This PC's vault is empty and ready to pair again.");
+      progress.success(choice === "keep" ? codeText.leftTheSyncGroupThisPc : codeText.leftTheSyncGroupThisPc2);
       await after.current?.();
     } catch (failure) {
-      progress.error(failure, "Couldn't leave the sync group.");
+      progress.error(failure, codeText.couldnTLeaveTheSyncGroup);
     } finally {
       setBusy(false);
     }
@@ -82,14 +82,14 @@ export function useLeaveGroup(managerName?: string) {
   const told = phoneAddress === null ? null
     : phoneAddress
       ? `${phone === "your phone" ? "Your phone" : phone} is told at ${phoneAddress}, now or the next time this PC reaches it.`
-      : `This PC has no saved route to ${phone}, so it can't tell it. After leaving, remove this PC on your phone too (Devices & sync).`;
+      : codeText.thisPcHasNoSavedRoute(phone);
 
   const dialog = (
     <Dialog open={open} title={strings.leaveTheSyncGroup} onClose={() => setOpen(false)} size="md"
       description={strings.thisPcStopsSyncingYourPhone}
       footer={<>
         <Button variant="ghost" onClick={() => setOpen(false)} data-confirm-default="">{strings.cancel}</Button>
-        <Button variant="danger" onClick={() => void leave()}>{choice === "keep" ? "Leave group" : "Leave and empty this PC"}</Button>
+        <Button variant="danger" onClick={() => void leave()}>{choice === "keep" ? strings.leaveGroup : codeText.leaveAndEmptyThisPc}</Button>
       </>}>
       <div className="leave-choices" role="radiogroup" aria-label={strings.whatHappensToThisPcS}>
         <label className={cx("leave-choice", choice === "keep" && "is-selected")}>
@@ -117,10 +117,10 @@ export function RemovedNoticeBanner({ membership, reload }: { membership: Member
     setBusy(true);
     try {
       await api.dismissRemovedNotice();
-      toast.info("Notice dismissed");
+      toast.info(codeText.noticeDismissed);
       await reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't dismiss the notice.");
+      toast.error(failure, codeText.couldnTDismissTheNotice);
     } finally {
       setBusy(false);
     }
@@ -128,7 +128,7 @@ export function RemovedNoticeBanner({ membership, reload }: { membership: Member
   return (
     <StatusBanner kind="warning" title={strings.thisPcWasRemovedFromThe2}
       action={<Button size="sm" onClick={() => void dismiss()} busy={busy}>{strings.dismiss}</Button>}>
-      Removed by {notice.by || "the managing device"}{notice.at ? ` on ${formatDateTime(notice.at)}` : ""}. Your items stay on this PC. To sync again, pair from your phone: this PC joins as a new device, and its items are added to the group as new copies.
+      Removed by {notice.by || codeText.theManagingDevice}{notice.at ? codeText.on2(formatDateTime(notice.at)) : ""}. Your items stay on this PC. To sync again, pair from your phone: this PC joins as a new device, and its items are added to the group as new copies.
       {notice.kept ? ` ${plural(notice.kept, "item")} from your other devices had not finished syncing. ${notice.kept === 1 ? "It is" : "They are"} in Recently deleted; restore ${notice.kept === 1 ? "it" : "them"} there within 30 days.` : ""}
     </StatusBanner>
   );
@@ -172,21 +172,21 @@ function deviceChip(device: MemberDevice, membership: MembershipStatus, overview
 
 /** One line about what still has to move, as on the phone. */
 function deviceDetail(device: MemberDevice, managerName?: string, overview?: SyncOverviewState | null): string {
-  const platform = device.platform === "android" ? "Android" : device.platform === "windows" ? "Windows" : "Unknown device";
-  if (device.status === "removed") return `${platform} · Can't sync with your devices. It keeps its own copy, and can pair again as a new device.`;
+  const platform = device.platform === "android" ? "Android" : device.platform === "windows" ? "Windows" : codeText.unknownDevice;
+  if (device.status === "removed") return codeText.canTSyncWithYourDevices(platform);
   if (device.isThisDevice) return platform;
   const ack = deviceAck(device, overview);
   if (isStale(device) && (!ack || ack.kind === "success")) return `${platform} · ${staleHint(device, managerName)}`;
   const counts = device.counts;
-  const seen = device.lastSeen ? `Last seen ${relativeTime(device.lastSeen)}` : "Not seen yet";
+  const seen = device.lastSeen ? codeText.lastSeen(relativeTime(device.lastSeen)) : codeText.notSeenYet;
   const detail = ack?.kind === "error" ? ack.detail
-    : counts?.toApplyHere ? `${changes(counts.toApplyHere)} received from it still need to apply here.`
+    : counts?.toApplyHere ? codeText.receivedFromItStillNeedTo(changes(counts.toApplyHere))
     : ack ? ack.detail
-    : !counts?.checked ? "Waiting for the first check."
-    : counts.toSend ? `${changes(counts.toSend)} from this PC still need to reach it.`
-    : counts.toReceiveHere ? "Changes from this device are waiting to arrive here."
-    : counts.receivedThere ? "It received changes and still needs to apply them."
-    : "The last check finished with no known changes waiting.";
+    : !counts?.checked ? codeText.waitingForTheFirstCheck
+    : counts.toSend ? codeText.fromThisPcStillNeedTo(changes(counts.toSend))
+    : counts.toReceiveHere ? codeText.changesFromThisDeviceAreWaiting
+    : counts.receivedThere ? codeText.itReceivedChangesAndStillNeeds
+    : codeText.theLastCheckFinishedWithNo;
   return `${platform} · ${seen}. ${detail}`;
 }
 
@@ -201,19 +201,19 @@ export function useMarkLost(membership: MembershipStatus, reload?: () => Promise
   const phone = membership.managerName || "the managing phone";
   const run = async (lost: boolean) => {
     if (lost && !(await confirm({
-      title: `Mark ${phone} as lost?`,
-      message: `This PC stops taking changes from ${phone}. Your items stay. You can undo this.`,
-      confirmLabel: "Mark as lost",
+      title: codeText.markAsLost(phone),
+      message: codeText.thisPcStopsTakingChangesFrom(phone),
+      confirmLabel: strings.markAsLost,
       danger: true,
     }))) return;
     setBusy(true);
     try {
       await api.markManagerLost(lost);
-      if (lost) toast.success("Marked as lost. Pair this PC with your new managing phone to move.");
-      else toast.info("The managing phone is trusted again.");
+      if (lost) toast.success(codeText.markedAsLostPairThisPc);
+      else toast.info(codeText.theManagingPhoneIsTrustedAgain);
       await reload?.();
     } catch (failure) {
-      toast.error(failure, "Couldn't change that.");
+      toast.error(failure, codeText.couldnTChangeThat);
     } finally {
       setBusy(false);
     }
@@ -283,7 +283,7 @@ export function DevicesGroup({ membership, reload, overview }: { membership: Mem
     const Icon = platformIcon[device.platform] ?? CircleHelp;
     return (
       <SettingsRow key={device.deviceId} icon={Icon}
-        title={<span className="device-name">{device.isThisDevice ? (!device.name || /^this pc$/i.test(device.name) ? "This PC" : `${device.name} (this PC)`) : device.name || "Unnamed device"}{device.isManager && <span className="badge"><Crown aria-hidden="true" />Managing device</span>}</span>}
+        title={<span className="device-name">{device.isThisDevice ? (!device.name || /^this pc$/i.test(device.name) ? strings.thisPc : codeText.thisPc(device.name)) : device.name || codeText.unnamedDevice}{device.isManager && <span className="badge"><Crown aria-hidden="true" />Managing device</span>}</span>}
         description={deviceDetail(device, membership.managerName, overview)}
         control={device.isThisDevice && device.status === "active"
           ? <>{deviceChip(device, membership, overview)}<Button size="sm" variant="ghost" icon={Pencil} aria-label={accountText.renameThisPc(device.name || "this PC")} onClick={rename.start}>{accountText.rename}</Button></>
@@ -299,11 +299,11 @@ export function DevicesGroup({ membership, reload, overview }: { membership: Mem
         </StatusBanner>
       )}
       {membership.managerLost && (
-        <StatusBanner kind="warning" title={`${phone} is marked as lost`}
+        <StatusBanner kind="warning" title={codeText.isMarkedAsLost(phone)}
           action={<Button size="sm" variant="ghost" busy={lost.busy} onClick={() => void lost.run(false)}>{strings.itSBack}</Button>}>{strings.thisPcNoLongerTakesChanges}</StatusBanner>
       )}
       {target && (
-        <StatusBanner kind="info" title={`Managing role is moving to ${target.name}`}>
+        <StatusBanner kind="info" title={codeText.managingRoleIsMovingTo(target.name)}>
           {membership.transferAccepted
             ? `${target.name} accepted. Waiting for ${membership.managerName || "the managing device"} to complete the transfer.`
             : `Waiting for ${target.name} to accept on that device. ${membership.managerName || "The managing device"} can cancel at any time.`}
@@ -312,10 +312,10 @@ export function DevicesGroup({ membership, reload, overview }: { membership: Mem
       <SettingsGroup title={strings.devices} description={`Only the managing device adds and removes devices; this PC can't. ${removeHelp(membership.managerName)}`}>
         {active.map(row)}
         <SettingsRow icon={LogOut} danger title={strings.leaveGroup}
-          description={self?.isManager ? "This device manages the group. Transfer the managing role on your phone first." : "Stop syncing. Keep this PC's items or start with an empty vault."}
+          description={self?.isManager ? codeText.thisDeviceManagesTheGroupTransfer : strings.stopSyncingKeepThisPcS}
           control={<Button size="sm" variant="ghost" className="btn-danger-text" disabled={self?.isManager} busy={leave.busy} onClick={() => void leave.run()}>{strings.leaveGroup}</Button>} />
         {!self?.isManager && !membership.managerLost && (
-          <SettingsRow icon={ShieldAlert} title={`Lost ${phone}?`}
+          <SettingsRow icon={ShieldAlert} title={codeText.lost(phone)}
             description={strings.markItAsLostThisPc}
             control={<Button size="sm" variant="ghost" busy={lost.busy} onClick={() => void lost.run(true)}>{strings.markAsLost}</Button>} />
         )}

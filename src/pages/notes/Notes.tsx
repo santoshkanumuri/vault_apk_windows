@@ -23,14 +23,14 @@ import { load, NoteTooLargeError, plainText, sameDocument, storageFields, type L
 import { toggleChecked } from "../../lib/richNoteEdit";
 import { RichNoteEditor } from "./RichNoteEditor";
 import { RichNoteView } from "./RichNoteView";
-import { strings } from "../../strings";
+import { codeText, strings } from "../../strings";
 
 const loadNote = (note: LocalNote): Loaded => load(note.body, note.rich ?? "");
 
 /** Why a note shows as plain text, when it has formatting this app can't use. */
 function FormattingNotice({ source, editing }: { source: Loaded["source"]; editing?: boolean }) {
   if (source === "diverged") return <StatusBanner kind="info">{strings.thisNoteSTextWasChanged}</StatusBanner>;
-  if (source === "newer") return <StatusBanner kind="warning">{editing ? "This note has formatting from a newer version of Nuvori. Saving it here keeps the text but removes that formatting." : "This note has formatting from a newer version of Nuvori, so it shows as plain text here."}</StatusBanner>;
+  if (source === "newer") return <StatusBanner kind="warning">{editing ? codeText.thisNoteHasFormattingFromA : codeText.thisNoteHasFormattingFromA2}</StatusBanner>;
   return null;
 }
 
@@ -55,25 +55,25 @@ export function NotesListPage() {
       <div className="toolbar">
         <FilterInput value={filter} onChange={setFilter} placeholder={strings.filterNotes} />
         <div className="toolbar-group">
-          <FolderPicker folders={folders} value={folderId} onChange={setFolderId} allLabel="All folders" onNew={() => setFolderDialog({ folder: null })} onEdit={() => setFolderDialog({ folder: folders.find((folder) => folder.id === folderId) ?? null })} />
+          <FolderPicker folders={folders} value={folderId} onChange={setFolderId} allLabel={codeText.allFolders} onNew={() => setFolderDialog({ folder: null })} onEdit={() => setFolderDialog({ folder: folders.find((folder) => folder.id === folderId) ?? null })} />
           <SortPicker value={sort} onChange={setSort} withFavorites={false} />
           <Button variant="primary" icon={Plus} onClick={add} className="toolbar-add">{strings.addNote}</Button>
         </div>
       </div>
       {!loaded ? <div className="card card-padded center"><Spinner label={strings.loading} /></div>
-        : notes.length === 0 ? <div className="card"><EmptyState icon={FileText} title={strings.noNotesYet} body="Keep private notes like Wi-Fi details or recovery steps here." action={<Button variant="primary" icon={Plus} onClick={add}>{strings.addNote}</Button>} /></div>
+        : notes.length === 0 ? <div className="card"><EmptyState icon={FileText} title={strings.noNotesYet} body={codeText.keepPrivateNotesLikeWiFi} action={<Button variant="primary" icon={Plus} onClick={add}>{strings.addNote}</Button>} /></div>
         : visible.length === 0 ? <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} action={<Button onClick={() => { setFilter(""); setFolderId(""); }}>{strings.clearFilters}</Button>} /></div>
         : <>
           <p className="list-count">{plural(visible.length, "note")}</p>
           <ul className="card list" aria-label={strings.notes}>
             {visible.map((note) => (
-              <ListRow key={note.id} id={note.id} title={note.title || "Untitled"} subtitle={`${relativeTime(note.updatedAt)} · ${firstLine(note.body)}`}
-                leading={<Avatar title={note.title || "Note"} icon={FileText} />} highlighted={router.highlight === note.id} entering={fresh.has(note.id)}
-                onOpen={() => void router.navigate({ page: "note", id: note.id })} openLabel={`Open ${note.title}`} />
+              <ListRow key={note.id} id={note.id} title={note.title || codeText.untitled} subtitle={`${relativeTime(note.updatedAt)} · ${firstLine(note.body)}`}
+                leading={<Avatar title={note.title || strings.note} icon={FileText} />} highlighted={router.highlight === note.id} entering={fresh.has(note.id)}
+                onOpen={() => void router.navigate({ page: "note", id: note.id })} openLabel={codeText.open2(note.title)} />
             ))}
           </ul>
         </>}
-      <FolderDialog open={folderDialog !== null} folder={folderDialog?.folder} onClose={() => setFolderDialog(null)} scope="NOTE" scopeLabel="Notes"
+      <FolderDialog open={folderDialog !== null} folder={folderDialog?.folder} onClose={() => setFolderDialog(null)} scope="NOTE" scopeLabel={strings.notes}
         onSaved={(folder) => { if (!folderDialog?.folder) setFolderId(folder.id); }} onDeleted={(id) => { if (folderId === id) setFolderId(""); }} />
     </div>
   );
@@ -99,7 +99,7 @@ export function NoteDetailPage({ id }: { id: string }) {
       const [body, rich] = storageFields(toggleChecked(shown.document, index));
       upsertNote(await api.saveNote({ id: note.id, title: note.title, body, groupIds: note.groupIds ?? [], rich }));
     } catch (failure) {
-      toast.error(failure, "Couldn't update the checklist.");
+      toast.error(failure, codeText.couldnTUpdateTheChecklist);
     }
   };
 
@@ -119,22 +119,22 @@ export function NoteDetailPage({ id }: { id: string }) {
   };
 
   const remove = async () => {
-    if (!(await confirm({ title: `Delete "${note.title}"?`, message: deleteMessage, confirmLabel: "Delete", danger: true }))) return;
+    if (!(await confirm({ title: codeText.delete2(note.title), message: deleteMessage, confirmLabel: strings.delete, danger: true }))) return;
     setBusy(true);
     const copy = { ...note };
     try {
       await api.deleteNote(note.id);
       removeNote(note.id);
-      toast.success("Note deleted", {
+      toast.success(codeText.noteDeleted, {
         action: {
-          label: "Undo",
+          label: codeText.undo,
           run: async () => {
             try {
               await restoreDeleted(copy.id);
-              toast.success("Note restored");
+              toast.success(codeText.noteRestored);
               void refresh();
             } catch (failure) {
-              toast.error(failure, "Couldn't restore the note.");
+              toast.error(failure, codeText.couldnTRestoreTheNote);
             }
           }
         }
@@ -142,7 +142,7 @@ export function NoteDetailPage({ id }: { id: string }) {
       await router.back();
       void refresh();
     } catch (failure) {
-      toast.error(failure, "Couldn't delete the note.");
+      toast.error(failure, codeText.couldnTDeleteTheNote);
       setBusy(false);
     }
   };
@@ -152,8 +152,8 @@ export function NoteDetailPage({ id }: { id: string }) {
       <section className="detail-hero">
         <Avatar title={note.title} icon={FileText} size="lg" />
         <div className="detail-hero-text">
-          <h2>{note.title || "Untitled"}</h2>
-          <p>Note · updated {relativeTime(note.updatedAt)}</p>
+          <h2>{note.title || codeText.untitled}</h2>
+          <p>{codeText.noteUpdated(relativeTime(note.updatedAt))}</p>
         </div>
         <div className="detail-hero-actions">
           <CopyButton value={note.body} label={strings.note} />
@@ -165,7 +165,7 @@ export function NoteDetailPage({ id }: { id: string }) {
       <FormattingNotice source={shown.source} />
       <article className="card card-padded note-body"><RichNoteView document={shown.document} onToggleCheck={shown.source === "rich" || shown.source === "plain" ? (index) => void toggle(index) : undefined} /></article>
       {folderNames.length > 0 && <div className="tag-list">{folderNames.map((name) => <span className="tag" key={name}><Folder aria-hidden="true" />{name}</span>)}</div>}
-      <p className="detail-meta">Updated {formatDateTime(note.updatedAt)} · Created {formatDateTime(note.createdAt)}</p>
+      <p className="detail-meta">{codeText.updatedCreated(formatDateTime(note.updatedAt), formatDateTime(note.createdAt))}</p>
     </div>
   );
 }
@@ -200,22 +200,22 @@ export function NoteEditorPage({ id }: { id?: string }) {
     try {
       fields = storageFields(noteDoc);
     } catch (failure) {
-      setError(failure instanceof NoteTooLargeError ? failure.message : "This note can't be saved.");
+      setError(failure instanceof NoteTooLargeError ? failure.message : codeText.thisNoteCanTBeSaved);
       return;
     }
     const [body, rich] = fields;
-    if (!draft.title.trim() || !plainText(noteDoc).trim()) { setError("Add a title and some text."); return; }
+    if (!draft.title.trim() || !plainText(noteDoc).trim()) { setError(codeText.addATitleAndSomeText); return; }
     setBusy(true); setError("");
     try {
       const saved = await api.saveNote({ id: existing?.id, title: draft.title.trim(), body, groupIds: draft.groupIds, rich });
       upsertNote(saved);
-      toast.success("Note saved");
+      toast.success(codeText.noteSaved);
       router.setGuard(null);
       if (existing) await router.back();
       else await router.navigate({ page: "note", id: saved.id }, { replace: true });
       void refresh();
     } catch (failure) {
-      toast.error(failure, "Couldn't save the note.");
+      toast.error(failure, codeText.couldnTSaveTheNote);
       setBusy(false);
     }
   };

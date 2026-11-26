@@ -5,7 +5,7 @@ import { useRouter } from "../app/router";
 import { useVault } from "../app/vault";
 import { helpText } from "../lib/help";
 import { plural } from "../lib/format";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 export function MorePage() {
   const router = useRouter();
@@ -20,7 +20,7 @@ export function MorePage() {
         <SettingsRow icon={UserRound} title={strings.autofillDetails} description={plural(snapshot.counts.autofill, "saved profile")} onClick={() => void router.navigate({ page: "list", category: "autofill" })} />
       </SettingsGroup>
       <SettingsGroup title={strings.manageNuvori}>
-        <SettingsRow icon={MonitorSmartphone} title="Devices & sync" description={snapshot.enrolled ? "Phone sync and status" : "Pair with your phone"} onClick={() => void router.navigate({ page: "sync" })} />
+        <SettingsRow icon={MonitorSmartphone} title="Devices & sync" description={snapshot.enrolled ? codeText.phoneSyncAndStatus : strings.pairWithYourPhone} onClick={() => void router.navigate({ page: "sync" })} />
         <SettingsRow icon={Activity} title={strings.activity} description={strings.recentUnlocksSavesAndSyncs} onClick={() => void router.navigate({ page: "activity" })} />
         <SettingsRow icon={ArchiveRestore} title={strings.recentlyDeleted} description={strings.restoreItemsDeletedInTheLast} onClick={() => void router.navigate({ page: "trash" })} />
         <SettingsRow icon={Settings} title={strings.settings} description={strings.themeSecurityBrowserExtension} onClick={() => void router.navigate({ page: "settings" })} />

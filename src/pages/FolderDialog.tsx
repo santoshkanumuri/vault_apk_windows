@@ -7,7 +7,7 @@ import { useConfirm } from "../app/confirm";
 import { useToast } from "../app/toast";
 import { useVault } from "../app/vault";
 import { api, type VaultGroup } from "../lib/api";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 type Props = {
   open: boolean;
@@ -40,16 +40,16 @@ export function FolderDialog({ open, onClose, scope, scopeLabel, folder, onDelet
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim()) { setError("Give the folder a name."); return; }
+    if (!name.trim()) { setError(codeText.giveTheFolderAName); return; }
     setBusy(true);
     try {
       const saved = await api.saveGroup({ id: folder?.id, name: name.trim(), notes, folderType });
-      toast.success(folder ? "Folder updated" : "Folder created");
+      toast.success(folder ? codeText.folderUpdated : codeText.folderCreated);
       await refresh();
       onSaved?.(saved);
       onClose();
     } catch (failure) {
-      toast.error(failure, "Couldn't save the folder.");
+      toast.error(failure, codeText.couldnTSaveTheFolder);
     } finally {
       setBusy(false);
     }
@@ -57,24 +57,24 @@ export function FolderDialog({ open, onClose, scope, scopeLabel, folder, onDelet
 
   const remove = async () => {
     if (!folder) return;
-    const ok = await confirm({ title: `Delete "${folder.name}"?`, message: "Items in this folder stay in your vault.", confirmLabel: "Delete folder", danger: true });
+    const ok = await confirm({ title: codeText.delete(folder.name), message: codeText.itemsInThisFolderStayIn, confirmLabel: codeText.deleteFolder, danger: true });
     if (!ok) return;
     setBusy(true);
     try {
       await api.deleteGroup(folder.id);
-      toast.success("Folder deleted");
+      toast.success(codeText.folderDeleted);
       onDeleted?.(folder.id);
       await refresh();
       onClose();
     } catch (failure) {
-      toast.error(failure, "Couldn't delete the folder.");
+      toast.error(failure, codeText.couldnTDeleteTheFolder);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title={folder ? "Edit folder" : "New folder"} locked={busy}
+    <Dialog open={open} onClose={onClose} title={folder ? strings.editFolder : strings.newFolder} locked={busy}
       footer={<>
         {folder && <Button variant="ghost" className="btn-danger-text push-start" icon={Trash2} onClick={() => void remove()} disabled={busy}>{strings.delete}</Button>}
         <Button variant="ghost" onClick={onClose} disabled={busy}>{strings.cancel}</Button>
@@ -82,7 +82,7 @@ export function FolderDialog({ open, onClose, scope, scopeLabel, folder, onDelet
       </>}>
       <form id="folder-form" className="form-stack" onSubmit={(event) => void save(event)}>
         <TextField label={strings.name} value={name} onValue={(value) => { setName(value); setError(""); }} error={error} maxLength={120} required data-autofocus />
-        <SelectField label={strings.availableIn} value={folderType} onValue={setFolderType} options={[{ value: scope, label: scopeLabel }, { value: "", label: "All categories" }, ...(folder && folder.folderType !== scope && folder.folderType !== "" ? [{ value: folder.folderType, label: "Its original category" }] : [])]} />
+        <SelectField label={strings.availableIn} value={folderType} onValue={setFolderType} options={[{ value: scope, label: scopeLabel }, { value: "", label: codeText.allCategories }, ...(folder && folder.folderType !== scope && folder.folderType !== "" ? [{ value: folder.folderType, label: codeText.itsOriginalCategory }] : [])]} />
         <TextArea label={strings.notes} value={notes} onValue={setNotes} rows={3} hint={strings.optional} />
       </form>
     </Dialog>

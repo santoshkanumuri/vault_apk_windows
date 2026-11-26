@@ -11,14 +11,14 @@ import { useToast } from "../../app/toast";
 import { useVault } from "../../app/vault";
 import { api, type SyncConflict } from "../../lib/api";
 import { formatDateTime, plural, relativeTime, toMillis } from "../../lib/format";
-import { strings } from "../../strings";
+import { codeText, strings } from "../../strings";
 
 const typeInfo: Record<SyncConflict["entityType"], { label: string; icon: LucideIcon }> = {
-  entry: { label: "Item", icon: KeyRound },
-  note: { label: "Note", icon: FileText },
-  folder: { label: "Folder", icon: Folder },
-  passkey: { label: "Passkey", icon: Fingerprint },
-  photo: { label: "Photo", icon: Image }
+  entry: { label: codeText.item, icon: KeyRound },
+  note: { label: strings.note, icon: FileText },
+  folder: { label: strings.folder, icon: Folder },
+  passkey: { label: codeText.passkey, icon: Fingerprint },
+  photo: { label: strings.photo, icon: Image }
 };
 
 export function ConflictsPage() {
@@ -34,20 +34,20 @@ export function ConflictsPage() {
   const resolve = async (conflict: SyncConflict, keep: "local" | "remote") => {
     const device = conflict.remoteDevice || "your phone";
     const ok = await confirm({
-      title: keep === "local" ? "Keep this PC's version?" : `Keep the version from ${device}?`,
+      title: keep === "local" ? codeText.keepThisPcSVersion : codeText.keepTheVersionFrom(device),
       message: `"${conflict.title || typeInfo[conflict.entityType]?.label || "This item"}" will match this choice on every device after the next sync.`,
-      confirmLabel: keep === "local" ? "Keep this PC's version" : "Keep phone version"
+      confirmLabel: keep === "local" ? strings.keepThisPcSVersion : strings.keepPhoneVersion
     });
     if (!ok) return;
     setBusy(conflict.id);
     try {
       setSnapshot(await api.resolveConflict(conflict.id, keep));
       setResolved((current) => [...current, conflict.id]);
-      toast.success(keep === "local" ? "Kept this PC's version" : `Kept the version from ${device}`);
+      toast.success(keep === "local" ? codeText.keptThisPcSVersion : codeText.keptTheVersionFrom(device));
       void refresh();
       await conflicts.reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't resolve this conflict.");
+      toast.error(failure, codeText.couldnTResolveThisConflict);
     } finally {
       setBusy("");
     }
@@ -59,7 +59,7 @@ export function ConflictsPage() {
         : conflicts.error && !conflicts.data ? (
           <StatusBanner kind="warning" title={strings.conflictReviewIsnTAvailable}>{strings.thisVersionOfNuvoriCanT}</StatusBanner>
         ) : list.length === 0 ? (
-          <div className="card"><EmptyState icon={CircleCheck} title={strings.nothingToReview} body="Changes made on both devices will appear here." action={<Button onClick={() => void router.back()}>{strings.back}</Button>} /></div>
+          <div className="card"><EmptyState icon={CircleCheck} title={strings.nothingToReview} body={codeText.changesMadeOnBothDevicesWill} action={<Button onClick={() => void router.back()}>{strings.back}</Button>} /></div>
         ) : (
           <>
             <StatusBanner kind="warning" title={`${plural(list.length, "change")} edited on both devices`}>{strings.bothVersionsAreKeptUntilYou}</StatusBanner>
@@ -80,12 +80,12 @@ export function ConflictsPage() {
                     <div className="conflict-sides">
                       <div className="conflict-side">
                         <span className="conflict-side-label"><Laptop aria-hidden="true" />This PC{localNewer && <span className="newer">{strings.newer}</span>}</span>
-                        <span title={formatDateTime(conflict.localUpdatedAt)}>Updated {relativeTime(conflict.localUpdatedAt).toLowerCase()}</span>
+                        <span title={formatDateTime(conflict.localUpdatedAt)}>{codeText.updated(relativeTime(conflict.localUpdatedAt).toLowerCase())}</span>
                         <Button variant={localNewer ? "primary" : "secondary"} block busy={busy === conflict.id} disabled={busy !== ""} onClick={() => void resolve(conflict, "local")}>{strings.keepThisPcSVersion}</Button>
                       </div>
                       <div className="conflict-side">
-                        <span className="conflict-side-label"><Smartphone aria-hidden="true" />{conflict.remoteDevice || "Phone"}{!localNewer && <span className="newer">{strings.newer}</span>}</span>
-                        <span title={formatDateTime(conflict.remoteUpdatedAt)}>Updated {relativeTime(conflict.remoteUpdatedAt).toLowerCase()}</span>
+                        <span className="conflict-side-label"><Smartphone aria-hidden="true" />{conflict.remoteDevice || codeText.phone}{!localNewer && <span className="newer">{strings.newer}</span>}</span>
+                        <span title={formatDateTime(conflict.remoteUpdatedAt)}>{codeText.updated(relativeTime(conflict.remoteUpdatedAt).toLowerCase())}</span>
                         <Button variant={!localNewer ? "primary" : "secondary"} block busy={busy === conflict.id} disabled={busy !== ""} onClick={() => void resolve(conflict, "remote")}>{strings.keepPhoneVersion}</Button>
                       </div>
                     </div>

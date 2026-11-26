@@ -1,3 +1,4 @@
+import { codeText } from "../strings.ts";
 // Password and passphrase generator. The Android app has the same rules and limits
 // (security/PasswordGenerator.kt): keep the two in step.
 //
@@ -156,5 +157,5 @@ export function entropyBits(input: GeneratorSettings, wordCount: number): number
 
 /** A label for `bits`: below 50 is weak for a website password, 80 and above resists any offline attack. */
 export function strengthLabel(bits: number): "Weak" | "Fair" | "Strong" | "Very strong" {
-  return bits < 50 ? "Weak" : bits < 65 ? "Fair" : bits < 80 ? "Strong" : "Very strong";
+  return bits < 50 ? "Weak" : bits < 65 ? "Fair" : bits < 80 ? "Strong" : codeText.veryStrong;
 }

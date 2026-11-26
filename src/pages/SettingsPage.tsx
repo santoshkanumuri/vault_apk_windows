@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, FileUp, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
 import { KeepassImportDialog } from "./KeepassImport";
 import { PasswordImportDialog } from "./PasswordImport";
-import { passwordImportText } from "../strings";
+import { codeText, passwordImportText } from "../strings";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
@@ -56,11 +56,11 @@ export function SettingsPage({ section }: { section?: string }) {
 
   const changeTheme = (value: ThemePreference) => {
     setPreference(value);
-    toast.success(value === "system" ? "Theme follows Windows" : `${value === "dark" ? "Dark" : "Light"} theme on`);
+    toast.success(value === "system" ? codeText.themeFollowsWindows : `${value === "dark" ? "Dark" : "Light"} theme on`);
   };
 
   const changeAppearance = (nextAccent: string, nextSurface: string) => {
-    setAppearance(nextAccent, nextSurface).catch((failure) => toast.error(failure, "Couldn't save the colors."));
+    setAppearance(nextAccent, nextSurface).catch((failure) => toast.error(failure, codeText.couldnTSaveTheColors));
   };
 
   return (
@@ -73,25 +73,25 @@ export function SettingsPage({ section }: { section?: string }) {
         <AutoTypeRow />
         {build && <PasskeyProviderRow state={build.passkeyProvider} />}
         <SettingsRow icon={Timer} title={strings.autoLock} description={strings.lockAfterThisLongWithoutMouse}
-          control={<select className="input select select-compact" aria-label={strings.autoLock} value={autoLockMinutes} onChange={(event) => { const value = Number(event.target.value); setAutoLockMinutes(value); toast.success(value ? `Auto-lock after ${value} min` : "Auto-lock off"); }}>
-            {autoLockChoices.map((value) => <option key={value} value={value}>{value === 0 ? "Never" : `${value} min`}</option>)}
+          control={<select className="input select select-compact" aria-label={strings.autoLock} value={autoLockMinutes} onChange={(event) => { const value = Number(event.target.value); setAutoLockMinutes(value); toast.success(value ? codeText.autoLockAfterMin(value) : codeText.autoLockOff); }}>
+            {autoLockChoices.map((value) => <option key={value} value={value}>{value === 0 ? codeText.never : codeText.min(value)}</option>)}
           </select>} />
         <SettingsRow icon={Clipboard} title={strings.clearCopiedSecrets}
-          description={clipboardSeconds ? `Clear the clipboard ${clipboardSeconds}s after copying a password, code, or card number, while Nuvori is open.` : "Copied secrets stay on the clipboard until you copy something else."}
-          control={<select className="input select select-compact" aria-label={strings.clearCopiedSecrets} value={clipboardSeconds} onChange={(event) => { const value = Number(event.target.value); setClipboardSeconds(value); toast.success(value ? `Clipboard clears after ${value}s while Nuvori is open` : "Clipboard clearing off"); }}>
-            {clipboardChoices.map((value) => <option key={value} value={value}>{value === 0 ? "Never" : `${value} s`}</option>)}
+          description={clipboardSeconds ? codeText.clearTheClipboardSAfterCopying(clipboardSeconds) : codeText.copiedSecretsStayOnTheClipboard}
+          control={<select className="input select select-compact" aria-label={strings.clearCopiedSecrets} value={clipboardSeconds} onChange={(event) => { const value = Number(event.target.value); setClipboardSeconds(value); toast.success(value ? codeText.clipboardClearsAfterSWhileNuvori(value) : codeText.clipboardClearingOff); }}>
+            {clipboardChoices.map((value) => <option key={value} value={value}>{value === 0 ? codeText.never : `${value} s`}</option>)}
           </select>} />
       </SettingsGroup>
 
       <BrowserSection />
 
       <SettingsGroup title={strings.sync} id="settings-devices">
-        <SettingsRow icon={MonitorSmartphone} title="Devices & sync" description={<span className="row-inline"><StatusChip kind={phone.kind} label={phone.label} />{lastSync ? <span className="muted">Last sync {relativeTime(lastSync).toLowerCase()}</span> : null}</span>} onClick={() => void router.navigate({ page: "sync" })} />
+        <SettingsRow icon={MonitorSmartphone} title="Devices & sync" description={<span className="row-inline"><StatusChip kind={phone.kind} label={phone.label} />{lastSync ? <span className="muted">{codeText.lastSync(relativeTime(lastSync).toLowerCase())}</span> : null}</span>} onClick={() => void router.navigate({ page: "sync" })} />
       </SettingsGroup>
 
       <SettingsGroup title={strings.app} id="settings-appearance">
         <SettingsRow icon={Palette} title={strings.theme} description={strings.followWindowsOrPickLightOr}
-          control={<Segmented label={strings.theme} size="sm" value={preference} onChange={changeTheme} options={[{ value: "system", label: "System", icon: Monitor }, { value: "light", label: "Light", icon: Sun }, { value: "dark", label: "Dark", icon: Moon }]} />} />
+          control={<Segmented label={strings.theme} size="sm" value={preference} onChange={changeTheme} options={[{ value: "system", label: codeText.system, icon: Monitor }, { value: "light", label: codeText.light, icon: Sun }, { value: "dark", label: codeText.dark, icon: Moon }]} />} />
         <div className="appearance-picker" id="settings-colors">
           <div>
             <div className="appearance-label">{strings.accentColor}</div>
@@ -124,7 +124,7 @@ export function SettingsPage({ section }: { section?: string }) {
       <PasswordImportDialog open={passwordImport} onClose={() => setPasswordImport(false)} />
 
       <SettingsGroup title={strings.about} id="settings-about">
-        <SettingsRow icon={Info} title={strings.nuvoriForWindows} description={build ? `Version ${build.version} · ${build.storeBuild ? "Microsoft Store build" : "Installer build"}` : "Nuvori for Windows"} />
+        <SettingsRow icon={Info} title={strings.nuvoriForWindows} description={build ? `Version ${build.version} · ${build.storeBuild ? "Microsoft Store build" : "Installer build"}` : strings.nuvoriForWindows} />
         {build?.storeBuild && build.installerBuildInstalled && <InstallerBuildRow />}
         <div className="about-text">
           <p>{strings.yourVaultIsEncryptedWithA}</p>
@@ -157,17 +157,17 @@ function BackupRow() {
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!password) { setError("Enter your master password."); return; }
+    if (!password) { setError(driveBackupText.enterPassword); return; }
     setBusy(true); setError("");
     try {
       const saved = await api.exportBackup(password, localDate());
       setPassword("");
       if (!saved) return;
       setDialog(false);
-      toast.success(`Backup saved as ${saved.fileName}`);
+      toast.success(codeText.backupSavedAs(saved.fileName));
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, "Couldn't create the backup."));
+      setError(humanError(failure, codeText.couldnTCreateTheBackup));
     } finally {
       setBusy(false);
     }
@@ -207,9 +207,9 @@ function HelloRow() {
     setBusy(true);
     try {
       setSnapshot(await api.disableHello());
-      toast.success("Windows Hello unlock off");
+      toast.success(codeText.windowsHelloUnlockOff);
     } catch (failure) {
-      toast.error(failure, "Couldn't turn off Windows Hello.");
+      toast.error(failure, codeText.couldnTTurnOffWindowsHello);
     } finally {
       setBusy(false);
     }
@@ -217,23 +217,23 @@ function HelloRow() {
 
   const enable = async (event: FormEvent) => {
     event.preventDefault();
-    if (!password) { setError("Enter your master password."); return; }
+    if (!password) { setError(driveBackupText.enterPassword); return; }
     setBusy(true); setError("");
     try {
       const next = await api.enableHello(password);
       setPassword("");
       setDialog(false);
       setSnapshot(next);
-      toast.success("Windows Hello is ready for your next unlock");
+      toast.success(codeText.windowsHelloIsReadyForYour);
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, "Windows Hello couldn't be set up."));
+      setError(humanError(failure, codeText.windowsHelloCouldnTBeSet));
     } finally {
       setBusy(false);
     }
   };
 
-  const description = available === false && !snapshot.helloEnabled ? "Set up a PIN, face, or fingerprint in Windows Settings first." : "Unlock with your PIN, face, or fingerprint. Your master password still works.";
+  const description = available === false && !snapshot.helloEnabled ? codeText.setUpAPinFaceOr : codeText.unlockWithYourPinFaceOr;
 
   return (
     <>
@@ -345,8 +345,8 @@ function AutoTypeRow() {
     try {
       const next = await api.setAutoType(enabled, preset, pressEnter);
       setStatus(next);
-      if (next.state === "inUse") toast.error(`${next.shortcut} is in use by another app`);
-      else if (pressEnter === undefined) toast.success(next.enabled ? `Auto-type: ${next.shortcut}` : "Auto-type off");
+      if (next.state === "inUse") toast.error(codeText.isInUseByAnotherApp(next.shortcut));
+      else if (pressEnter === undefined) toast.success(next.enabled ? `Auto-type: ${next.shortcut}` : codeText.autoTypeOff);
     } catch (error) {
       toast.error(humanError(error));
     } finally {
@@ -355,9 +355,9 @@ function AutoTypeRow() {
   };
 
   const description = status.state === "inUse"
-    ? <span className="row-inline"><StatusChip kind="warning" label={strings.inUseByAnotherApp} /><span className="muted">Pick another shortcut, or close the app that owns {status.shortcut}.</span></span>
+    ? <span className="row-inline"><StatusChip kind="warning" label={strings.inUseByAnotherApp} /><span className="muted">{codeText.pickAnotherShortcutOrCloseThe(status.shortcut)}</span></span>
     : status.enabled ? <span>In an app's sign-in window, press <Kbd>{status.shortcut}</Kbd> and pick a login. Nuvori types it into that window only.</span>
-    : "Off. Turn on to fill logins into desktop apps, not only the browser.";
+    : codeText.offTurnOnToFillLogins;
   return (
     <>
       <SettingsRow icon={Keyboard} title={strings.autoType} description={description}
@@ -394,7 +394,7 @@ function MasterPasswordAgainRow() {
       setSnapshot(await api.setMasterPasswordInterval(next));
       toast.success(strings.savedYourNextUnlockAsksFor);
     } catch (failure) {
-      toast.error(failure, "Couldn't save the setting.");
+      toast.error(failure, codeText.couldnTSaveTheSetting);
     } finally {
       setBusy(false);
     }
@@ -414,13 +414,13 @@ function SiteIconsRow() {
   const [busy, setBusy] = useState(false);
   const run = async (task: () => Promise<Parameters<typeof apply>[0]>, done: string) => {
     setBusy(true);
-    try { apply(await task()); toast.success(done); } catch (failure) { toast.error(failure, "Couldn't change website icons."); } finally { setBusy(false); }
+    try { apply(await task()); toast.success(done); } catch (failure) { toast.error(failure, codeText.couldnTChangeWebsiteIcons); } finally { setBusy(false); }
   };
   return (
     <SettingsRow icon={Globe} title={strings.websiteIcons}
-      description={enabled ? "Logos for popular sites are built in. The browser extension adds the icon of a site you sign in to, fetched from that site without cookies, and sync shares it with your other devices." : "Off. Items show their first letter."}
-      control={<Toggle label={strings.websiteIcons} checked={enabled} disabled={busy} onChange={(value) => void run(() => api.setSiteIcons(value), value ? "Website icons on" : "Website icons off")} />}>
-      {enabled && <div className="site-icons-extra"><Button size="sm" disabled={busy} onClick={() => void run(() => api.clearSiteIcons(), "Saved icons removed")}>{strings.removeSavedIcons}</Button></div>}
+      description={enabled ? codeText.logosForPopularSitesAreBuilt : codeText.offItemsShowTheirFirstLetter}
+      control={<Toggle label={strings.websiteIcons} checked={enabled} disabled={busy} onChange={(value) => void run(() => api.setSiteIcons(value), value ? codeText.websiteIconsOn : codeText.websiteIconsOff)} />}>
+      {enabled && <div className="site-icons-extra"><Button size="sm" disabled={busy} onClick={() => void run(() => api.clearSiteIcons(), codeText.savedIconsRemoved)}>{strings.removeSavedIcons}</Button></div>}
     </SettingsRow>
   );
 }
@@ -437,8 +437,8 @@ function QuickSearchRow() {
     try {
       const next = await api.setQuickSearch(enabled, preset);
       setStatus(next);
-      if (next.state === "inUse") toast.error(`${next.shortcut} is in use by another app`);
-      else toast.success(next.enabled ? `Quick search: ${next.shortcut}` : "Quick search shortcut off");
+      if (next.state === "inUse") toast.error(codeText.isInUseByAnotherApp(next.shortcut));
+      else toast.success(next.enabled ? codeText.quickSearch(next.shortcut) : codeText.quickSearchShortcutOff);
     } catch (error) {
       toast.error(humanError(error));
     } finally {
@@ -447,9 +447,9 @@ function QuickSearchRow() {
   };
 
   const description = status.state === "inUse"
-    ? <span className="row-inline"><StatusChip kind="warning" label={strings.inUseByAnotherApp} /><span className="muted">Pick another shortcut, or close the app that owns {status.shortcut}.</span></span>
+    ? <span className="row-inline"><StatusChip kind="warning" label={strings.inUseByAnotherApp} /><span className="muted">{codeText.pickAnotherShortcutOrCloseThe(status.shortcut)}</span></span>
     : status.enabled ? <span>Press <Kbd>{status.shortcut}</Kbd> in any app to open Nuvori's search. A locked vault asks for your password first.</span>
-    : "Off. Nuvori's search opens only from inside the app (Ctrl+K).";
+    : codeText.offNuvoriSSearchOpensOnly;
   return (
     <SettingsRow icon={Keyboard} title={strings.quickSearchShortcut} description={description}
       control={<span className="row-inline">
@@ -462,11 +462,11 @@ function QuickSearchRow() {
 }
 
 const PROVIDER_TEXT: Record<PasskeyProviderState, { description: string; chip?: [StatusKind, string] }> = {
-  on: { description: "Windows offers your Nuvori passkeys in every browser and app on this PC.", chip: ["success", "On"] },
-  off: { description: "Turn on Nuvori under Passkey managers in Windows Settings. Windows asks for this once." },
-  notRegistered: { description: "Windows didn't accept Nuvori as a passkey manager. Restart Nuvori, or see the activity log.", chip: ["error", "Not available"] },
-  unsupported: { description: "This version of Windows can't use passkey managers. Update Windows 11 to use your passkeys here.", chip: ["neutral", "Not available"] },
-  installerBuild: { description: "Signing in with passkeys on this PC needs the Microsoft Store build of Nuvori. Your passkeys still sync.", chip: ["neutral", "Store build only"] },
+  on: { description: codeText.windowsOffersYourNuvoriPasskeysIn, chip: ["success", "On"] },
+  off: { description: codeText.turnOnNuvoriUnderPasskeyManagers },
+  notRegistered: { description: codeText.windowsDidnTAcceptNuvoriAs, chip: ["error", codeText.notAvailable] },
+  unsupported: { description: codeText.thisVersionOfWindowsCanT, chip: ["neutral", codeText.notAvailable] },
+  installerBuild: { description: codeText.signingInWithPasskeysOnThis, chip: ["neutral", codeText.storeBuildOnly] },
 };
 
 function PasskeyProviderRow({ state }: { state: PasskeyProviderState }) {
@@ -475,9 +475,9 @@ function PasskeyProviderRow({ state }: { state: PasskeyProviderState }) {
   const open = async () => {
     try {
       await api.openWindowsSettings("passkeys");
-      toast.info("Turn on Nuvori under Passkey managers, then come back here.");
+      toast.info(codeText.turnOnNuvoriUnderPasskeyManagers2);
     } catch (failure) {
-      toast.error(failure, "Couldn't open Windows Settings.");
+      toast.error(failure, codeText.couldnTOpenWindowsSettings);
     }
   };
   const control = state === "off"
@@ -493,7 +493,7 @@ function InstallerBuildRow() {
     try {
       await api.openWindowsSettings("apps");
     } catch (failure) {
-      toast.error(failure, "Couldn't open Windows Settings.");
+      toast.error(failure, codeText.couldnTOpenWindowsSettings);
     }
   };
   return (
@@ -522,10 +522,10 @@ function BrowsersList({ reloadKey, onAvailable }: { reloadKey: number; onAvailab
     setBrowsers(before.map((item) => item.id === browser.id ? { ...item, ...patch } : item)); // optimistic
     try {
       setBrowsers(await api.setBrowser(browser.id, patch));
-      if (patch.connected !== undefined) toast.success(patch.connected ? `${browser.name} connected. Restart it to use the extension.` : `${browser.name} disconnected.`);
+      if (patch.connected !== undefined) toast.success(patch.connected ? codeText.connectedRestartItToUseThe(browser.name) : codeText.disconnected(browser.name));
     } catch (failure) {
       setBrowsers(before);
-      toast.error(failure, `Couldn't change ${browser.name}.`);
+      toast.error(failure, codeText.couldnTChange(browser.name));
     } finally {
       setBusy(null);
     }
@@ -536,22 +536,22 @@ function BrowsersList({ reloadKey, onAvailable }: { reloadKey: number; onAvailab
       <div className="browser-list-title">{strings.browsers}</div>
       {browsers.map((browser) => {
         const unknown = browser.family === "unknown";
-        const status = !browser.connected ? "Not connected" : browser.lastSeen ? `Used ${relativeTime(browser.lastSeen).toLowerCase()}` : "Connected · not used yet";
+        const status = !browser.connected ? codeText.notConnected : browser.lastSeen ? `Used ${relativeTime(browser.lastSeen).toLowerCase()}` : codeText.connectedNotUsedYet;
         const off = busy === browser.id;
         return (
           <SettingsRow key={browser.id} icon={Globe} title={browser.name} description={status}
             control={<span className="row-inline">
-              {unknown && <select className="input select select-compact" aria-label={`${browser.name} is built on`} value="" disabled={off}
+              {unknown && <select className="input select select-compact" aria-label={codeText.isBuiltOn(browser.name)} value="" disabled={off}
                 onChange={(event) => { if (event.target.value) void change(browser, { family: event.target.value as BrowserFamily }); }}>
                 <option value="">{strings.builtOn}</option>
                 <option value="chromium">{strings.builtOnChromium}</option>
                 <option value="firefox">{strings.builtOnFirefox}</option>
               </select>}
-              <Toggle label={`Connect ${browser.name}`} checked={browser.connected} disabled={off || unknown} onChange={(on) => void change(browser, { connected: on })} />
+              <Toggle label={codeText.connect(browser.name)} checked={browser.connected} disabled={off || unknown} onChange={(on) => void change(browser, { connected: on })} />
             </span>}>
             {browser.connected && <div className="browser-ask">
               <span id={`ask-${browser.id}`}>{strings.askForThePasswordWhenIt}</span>
-              <Toggle label={`Ask in ${browser.name} when it starts`} checked={browser.askAtStart} disabled={off} onChange={(on) => void change(browser, { askAtStart: on })} />
+              <Toggle label={codeText.askInWhenItStarts(browser.name)} checked={browser.askAtStart} disabled={off} onChange={(on) => void change(browser, { askAtStart: on })} />
             </div>}
           </SettingsRow>
         );
@@ -579,13 +579,13 @@ function BrowserSection() {
     try {
       const report = await api.connectBrowsers();
       const names = report.browsers.map((name) => BROWSER_NAMES[name] ?? name).join(", ");
-      if (!report.browsers.length) toast.info("No Chrome, Edge or Brave was found on this PC.");
-      else if (report.changed) toast.success(`Connected ${names}. Restart the browser to use the extension.`);
-      else toast.success(`${names} already connected.`);
+      if (!report.browsers.length) toast.info(codeText.noChromeEdgeOrBraveWas);
+      else if (report.changed) toast.success(codeText.connectedRestartTheBrowserToUse(names));
+      else toast.success(codeText.alreadyConnected(names));
       await browser.reload?.();
       setReloadKey((key) => key + 1);
     } catch (failure) {
-      toast.error(failure, "Couldn't connect the browsers.");
+      toast.error(failure, codeText.couldnTConnectTheBrowsers);
     } finally {
       setConnecting(false);
     }
@@ -593,7 +593,7 @@ function BrowserSection() {
 
   return (
     <SettingsGroup title={strings.browserExtension} id="settings-browser">
-      <SettingsRow icon={Puzzle} title={strings.connection} description={browser.error ? "Status is unavailable in this version." : status?.listening ? "Nuvori is listening for the extension." : "Nuvori isn't listening for the extension."}
+      <SettingsRow icon={Puzzle} title={strings.connection} description={browser.error ? codeText.statusIsUnavailableInThisVersion : status?.listening ? codeText.nuvoriIsListeningForTheExtension : codeText.nuvoriIsnTListeningForThe2}
         control={<StatusChip kind={indicator.kind} label={indicator.label} />} />
       <SettingsRow icon={PlugZap} title={strings.connectBrowsers} description={strings.letsTheNuvoriExtensionReachThis}
         control={<Button size="sm" busy={connecting} onClick={() => void connect()}>{strings.reconnectAll}</Button>} />
@@ -605,7 +605,7 @@ function BrowserSection() {
             {hosts.map(([key, label]) => <StatusChip key={key} kind={status.hosts[key] ? "success" : "neutral"} label={`${label}${status.hosts[key] ? "" : " · not set up"}`} />)}
           </div>}
           <dl className="facts">
-            <div><dt>{strings.lastContact}</dt><dd>{status.lastRequestAt ? relativeTime(status.lastRequestAt) : "Never"}</dd></div>
+            <div><dt>{strings.lastContact}</dt><dd>{status.lastRequestAt ? relativeTime(status.lastRequestAt) : codeText.never}</dd></div>
             {status.lastAction && <div><dt>{strings.lastAction}</dt><dd>{status.lastAction}</dd></div>}
             <div><dt>{strings.requestsSinceUnlock}</dt><dd>{status.requestsSinceUnlock}</dd></div>
           </dl>
@@ -640,18 +640,18 @@ export function DangerZone({ resetOnly, stopOnly }: { resetOnly?: boolean; stopO
 
   const reset = async (event: FormEvent) => {
     event.preventDefault();
-    if (typed !== "RESET") { setError("Type RESET exactly to confirm."); return; }
-    if (!password) { setError("Enter your master password."); return; }
+    if (typed !== "RESET") { setError(codeText.typeResetExactlyToConfirm); return; }
+    if (!password) { setError(driveBackupText.enterPassword); return; }
     setBusy(true); setError("");
     try {
       const next = await api.resetVault(password);
       closeReset();
       router.reset();
       setSnapshot(next);
-      toast.success("This PC's vault was deleted");
+      toast.success(strings.thisPcSVaultWasDeleted);
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, "Couldn't reset the vault."));
+      setError(humanError(failure, codeText.couldnTResetTheVault));
     } finally {
       setBusy(false);
     }

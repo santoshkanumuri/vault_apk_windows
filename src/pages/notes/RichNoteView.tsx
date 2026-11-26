@@ -5,6 +5,7 @@ import { api } from "../../lib/api";
 import { cx } from "../../lib/format";
 import type { RichDocument, Span, TextBlock } from "../../lib/richNote";
 import { listNumbers } from "../../lib/richNoteHtml";
+import { codeText, strings } from "../../strings";
 
 /** Opens a note's link only after the person sees the full address and confirms. */
 export function useOpenNoteLink() {
@@ -12,12 +13,12 @@ export function useOpenNoteLink() {
   const toast = useToast();
   return useCallback(async (link: string) => {
     const ok = await confirm({
-      title: link.toLowerCase().startsWith("mailto:") ? "Write an email?" : "Open this link?",
+      title: link.toLowerCase().startsWith("mailto:") ? codeText.writeAnEmail : codeText.openThisLink,
       message: <span className="rn-confirm-link">{link}</span>,
-      confirmLabel: "Open",
+      confirmLabel: strings.open,
     });
     if (!ok) return;
-    try { await api.openNoteLink(link); } catch (failure) { toast.error(failure, "Couldn't open the link."); }
+    try { await api.openNoteLink(link); } catch (failure) { toast.error(failure, codeText.couldnTOpenTheLink); }
   }, [confirm, toast]);
 }
 
@@ -72,7 +73,7 @@ export function RichNoteView({ document, onToggleCheck, className }: { document:
         return (
           <div key={index} className="rn-li rn-li-check" data-kind="check" data-indent={block.indent} data-checked={block.checked}>
             <button type="button" role="checkbox" aria-checked={block.checked} className="rn-checkbox" disabled={!onToggleCheck}
-              aria-label={block.checked ? "Done. Mark as not done" : "Not done. Mark as done"} onClick={() => onToggleCheck?.(index)} />
+              aria-label={block.checked ? codeText.doneMarkAsNotDone : codeText.notDoneMarkAsDone} onClick={() => onToggleCheck?.(index)} />
             {inner}
           </div>
         );

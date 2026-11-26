@@ -4,7 +4,7 @@ import type { VaultEntry } from "../lib/api";
 import { DEFAULT_CARD_COLOR, css, inkFor, needsOutline } from "../lib/cardColors";
 import { cardNetwork, maskedCardNumber, networkMark } from "../lib/cardFace";
 import { cardLast4, cx } from "../lib/format";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 type Props = {
   entry: VaultEntry;
@@ -78,7 +78,7 @@ export function CardFace({ entry, size = "md", onOpen, className }: Props) {
   const label = `${title}, ${kind.toLowerCase()} card${last4 ? ` ending in ${last4}` : ""}`;
   return onOpen ? (
     <button type="button" ref={(el) => { face.current = el; }} className={classes} style={style} onClick={onOpen}
-      onPointerMove={lean} onPointerLeave={settle} aria-label={`Open ${label}`}>
+      onPointerMove={lean} onPointerLeave={settle} aria-label={codeText.open(label)}>
       {body}
     </button>
   ) : (

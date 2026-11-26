@@ -2,6 +2,7 @@
 // dialog keeps what it has read and sends all of it each time, so the review and the import match.
 
 import { plural } from "./format.ts";
+import { codeText, passwordImportText } from "../strings.ts";
 
 /** One QR page or file the dialog read. Setup keys stay in these until the dialog closes. */
 export type AuthenticatorSource =
@@ -37,11 +38,11 @@ export function isOneAuthExport(text: string): boolean {
 
 /** Android's heading: a file or a single QR is one complete batch, so it never says "1 of 1". */
 export function reviewHeading(review: AuthenticatorReview): string {
-  return review.expected === 1 ? "Accounts to import" : `${review.pages} of ${review.expected} QR pages scanned`;
+  return review.expected === 1 ? codeText.accountsToImport : codeText.ofQrPagesScanned(review.pages, review.expected);
 }
 
 export function reviewLabel(item: AuthenticatorReview["items"][number]): string {
-  const status = item.status === "new" ? "New" : item.status === "alreadySaved" ? "Already saved" : "Different setup key, skipped";
+  const status = item.status === "new" ? "New" : item.status === "alreadySaved" ? passwordImportText.filterAlreadySaved : codeText.differentSetupKeySkipped;
   return `${item.issuer.trim() || item.account} · ${item.account} · ${status}`;
 }
 

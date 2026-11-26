@@ -10,7 +10,7 @@ import { useVault } from "../app/vault";
 import { api, type DuplicateSet, type VaultEntry } from "../lib/api";
 import { entrySubtitle } from "../lib/entries";
 import { plural, relativeTime } from "../lib/format";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 /**
  * Settings: find logins saved twice over and delete the copies the person picks, as on Android
@@ -113,7 +113,7 @@ function DuplicateCard({ set, known, chosen, onPick }: {
 }) {
   const keeper = known.get(set.keep);
   return (
-    <Card title={keeper?.title || "Untitled"} description={keeper ? entrySubtitle(keeper) : undefined}>
+    <Card title={keeper?.title || codeText.untitled} description={keeper ? entrySubtitle(keeper) : undefined}>
       <div className="form-stack">
         <p className="field-hint">{strings.theOldestCopyStaysEvery}</p>
         {set.remove.map((id, index) => (
@@ -127,5 +127,5 @@ function DuplicateCard({ set, known, chosen, onPick }: {
 
 /** " · saved yesterday", when this window knows the copy. */
 function saved(copy: VaultEntry | undefined): string {
-  return copy?.createdAt ? ` · saved ${relativeTime(copy.createdAt).toLowerCase()}` : "";
+  return copy?.createdAt ? codeText.saved(relativeTime(copy.createdAt).toLowerCase()) : "";
 }

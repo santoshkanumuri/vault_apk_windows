@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import { Check } from "lucide-react";
 import { argbToHsv, css, hsvToArgb, inkFor, needsOutline, parseHex, toHex } from "../lib/cardColors";
 import { TextField } from "./Field";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 type Props = {
   /** Opaque ARGB, 0xFFRRGGBB. */
@@ -55,7 +55,7 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
     <div className="color-picker">
       <span className="color-picker-label">{strings.cardColor}</span>
       <div className={"color-preview" + (needsOutline(value) ? " outlined" : "")} style={{ background: css(value), color: ink }} aria-hidden="true">
-        <strong>{title.trim() || "Card"}</strong>
+        <strong>{title.trim() || codeText.card}</strong>
         <span className="mono">{lastDigits ? `•••• ${lastDigits}` : "•••• ••••"}</span>
       </div>
       <div
@@ -63,7 +63,7 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
         className="color-pad"
         role="group"
         tabIndex={0}
-        aria-label={`Saturation and brightness. Saturation ${Math.round(hsv[1] * 100)} percent, brightness ${Math.round(hsv[2] * 100)} percent. Use the arrow keys.`}
+        aria-label={codeText.saturationAndBrightnessSaturationPercentBrightness(Math.round(hsv[1] * 100), Math.round(hsv[2] * 100))}
         onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); fromPointer(event); }}
         onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) fromPointer(event); }}
         onKeyDown={padKeys}
@@ -81,7 +81,7 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
         step={1}
         value={Math.round(hsv[0])}
         aria-label={strings.hue}
-        aria-valuetext={`${Math.round(hsv[0])} degrees`}
+        aria-valuetext={codeText.degrees(Math.round(hsv[0]))}
         style={{ ["--hue-thumb" as string]: hueColor }}
         onChange={(event) => pick([Number(event.target.value), hsv[1], hsv[2]])}
       />
@@ -94,8 +94,8 @@ export function CardColorPicker({ value, onChange, used, title, lastDigits }: Pr
           spellCheck={false}
           autoComplete="off"
           maxLength={7}
-          error={!typedValid && hexText.length > 1 ? "Use 6 hex digits, 0 to 9 and A to F." : undefined}
-          hint={typedValid || hexText.length <= 1 ? "Any color, for example #2E7034." : undefined}
+          error={!typedValid && hexText.length > 1 ? codeText.use6HexDigits0To : undefined}
+          hint={typedValid || hexText.length <= 1 ? codeText.anyColorForExample2e7034 : undefined}
           onValue={(typed) => {
             const cleaned = "#" + typed.replace(/^#/, "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6).toUpperCase();
             setHexText(cleaned);

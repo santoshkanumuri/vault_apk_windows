@@ -21,7 +21,7 @@ import { overviewText, syncFacts, syncNowOutcome, syncOverview, waitingToApplyHe
 import { totpAt } from "../lib/totp";
 import { useTotpCodes } from "./codes/useTotp";
 import { EntryQuickActions } from "./items/actions";
-import { strings } from "../strings";
+import { codeText, strings, syncStatusText } from "../strings";
 import { cardExpiryKind, cardLastFour } from "../lib/cardExpiry";
 
 /** Items for the Add type picker. Shared with the Home quick actions. */
@@ -29,10 +29,10 @@ export function useAddItems(): MenuItem[] {
   const router = useRouter();
   return [
     ...(["logins", "cards", "codes", "questions", "autofill"] as Category[]).map((key) => ({
-      key, label: key === "autofill" ? "Autofill profile" : key === "questions" ? "Security question" : key === "codes" ? "Two-step code" : categories[key].singular.charAt(0).toUpperCase() + categories[key].singular.slice(1), icon: categories[key].icon,
+      key, label: key === "autofill" ? codeText.autofillProfile : key === "questions" ? codeText.securityQuestion : key === "codes" ? codeText.twoStepCode : categories[key].singular.charAt(0).toUpperCase() + categories[key].singular.slice(1), icon: categories[key].icon,
       onSelect: () => void router.navigate({ page: "edit", category: key })
     })),
-    { key: "note", label: "Note", icon: FileText, onSelect: () => void router.navigate({ page: "note-edit" }) }
+    { key: "note", label: strings.note, icon: FileText, onSelect: () => void router.navigate({ page: "note-edit" }) }
   ];
 }
 
@@ -103,14 +103,14 @@ function AttentionStrip() {
   const extension = browserIndicator(snapshot, browser.data, Boolean(browser.error));
 
   const items: Attention[] = [];
-  if (conflictCount > 0) items.push({ key: "conflicts", kind: "warning", label: `${plural(conflictCount, "change")} need${conflictCount === 1 ? "s" : ""} review`, detail: "Edited on both devices", onClick: () => void router.navigate(conflicts.data ? { page: "conflicts" } : { page: "sync" }) });
+  if (conflictCount > 0) items.push({ key: "conflicts", kind: "warning", label: `${plural(conflictCount, "change")} need${conflictCount === 1 ? "s" : ""} review`, detail: codeText.editedOnBothDevices2, onClick: () => void router.navigate(conflicts.data ? { page: "conflicts" } : { page: "sync" }) });
   const state = overview?.overview;
   if (snapshot.enrolled && overview && state && ((state.state === "attention" && state.cause !== "rejected") || state.state === "stale" || state.state === "keys")) {
     items.push({ key: "phone", kind: overview.text.kind, label: overview.text.title, detail: overview.text.detail, onClick: () => void router.root({ page: "sync" }) });
   } else if (snapshot.enrolled && !overview && (phone.kind === "warning" || phone.kind === "error") && phone.label !== "Needs review") items.push({ key: "phone", kind: phone.kind, label: phone.label, detail: phone.detail, onClick: () => void router.root({ page: "sync" }) });
-  if (sync.data && (sync.data.setAside ?? 0) > 0) items.push({ key: "set-aside", kind: "warning", label: `${plural(sync.data.setAside ?? 0, "change")} couldn't be read`, detail: "Set aside and tried again on each sync", onClick: () => void router.root({ page: "sync" }) });
-  if (sync.data && waitingToApplyHere(sync.data) > 0) items.push({ key: "waiting", kind: "info", label: `${plural(waitingToApplyHere(sync.data), "change")} waiting`, detail: "Applied on a later sync", onClick: () => void router.root({ page: "sync" }) });
-  if (browser.data && extension.label === "Not listening") items.push({ key: "browser", kind: "warning", label: "Browser filling is off", detail: "Nuvori isn't listening for the extension", onClick: () => void router.root({ page: "settings", section: "browser" }) });
+  if (sync.data && (sync.data.setAside ?? 0) > 0) items.push({ key: "set-aside", kind: "warning", label: `${plural(sync.data.setAside ?? 0, "change")} couldn't be read`, detail: codeText.setAsideAndTriedAgainOn, onClick: () => void router.root({ page: "sync" }) });
+  if (sync.data && waitingToApplyHere(sync.data) > 0) items.push({ key: "waiting", kind: "info", label: `${plural(waitingToApplyHere(sync.data), "change")} waiting`, detail: codeText.appliedOnALaterSync, onClick: () => void router.root({ page: "sync" }) });
+  if (browser.data && extension.label === "Not listening") items.push({ key: "browser", kind: "warning", label: codeText.browserFillingIsOff, detail: codeText.nuvoriIsnTListeningForThe, onClick: () => void router.root({ page: "settings", section: "browser" }) });
   // Cards that have expired or expire within 90 days, the first three as on Android's Home.
   entries.filter((entry) => entry.type === "CARD" && cardExpiryKind(entry.tertiaryValue, now)).slice(0, 3).forEach((entry) => {
     const kind = cardExpiryKind(entry.tertiaryValue, now) ?? "warning";
@@ -119,8 +119,8 @@ function AttentionStrip() {
     items.push({ key: `card-${entry.id}`, kind, label: kind === "error" ? strings.cardHasExpired(title) : strings.cardExpiresSoon(title),
       detail: lastFour ? strings.cardEnding(lastFour) : undefined, onClick: () => void router.navigate({ page: "item", id: entry.id }) });
   });
-  if (!snapshot.enrolled) items.push({ key: "pair", kind: "info", label: "Pair with your phone", detail: "Keep both devices in sync", onClick: () => void router.root({ page: "sync" }), dismissible: true });
-  if (hello && !snapshot.helloEnabled) items.push({ key: "hello", kind: "info", label: "Turn on Windows Hello", detail: "Unlock with your face, fingerprint, or PIN", onClick: () => void router.root({ page: "settings", section: "security" }), dismissible: true });
+  if (!snapshot.enrolled) items.push({ key: "pair", kind: "info", label: strings.pairWithYourPhone, detail: codeText.keepBothDevicesInSync, onClick: () => void router.root({ page: "sync" }), dismissible: true });
+  if (hello && !snapshot.helloEnabled) items.push({ key: "hello", kind: "info", label: strings.turnOnWindowsHello, detail: codeText.unlockWithYourFaceFingerprintOr, onClick: () => void router.root({ page: "settings", section: "security" }), dismissible: true });
   const visible = items.filter((item) => !item.dismissible || !dismissed.includes(item.key));
 
   if (!visible.length) {
@@ -129,10 +129,10 @@ function AttentionStrip() {
     return (
       <p className="calm-line" role="status">
         {syncing ? <StatusIcon kind="progress" size={16} /> : inStep ? <CircleCheck aria-hidden="true" /> : <StatusIcon kind="info" size={16} />}
-        {!snapshot.enrolled ? "Your vault is ready" : syncing ? "Syncing with your devices…"
+        {!snapshot.enrolled ? codeText.yourVaultIsReady : syncing ? codeText.syncingWithYourDevices
           // "In sync" only when the overview says so (H1): changes missing here are named instead.
           : !inStep && overview ? (state?.state === "waitingHere" ? overview.text.detail : overview.text.title)
-          : lastSync ? `Everything's in sync · ${relativeTime(state?.lastSynced || lastSync).toLowerCase()}` : "Everything's up to date"}
+          : lastSync ? codeText.everythingSInSync(relativeTime(state?.lastSynced || lastSync).toLowerCase()) : codeText.everythingSUpToDate}
       </p>
     );
   }
@@ -178,10 +178,10 @@ function QuickAccess() {
         <ul className="qa-grid">
           {items.map(({ entry }) => (
             <li key={entry.id} className={cx("qa-card", router.highlight === entry.id && "is-highlighted")} data-row-id={entry.id}>
-              <button type="button" className="qa-open" onClick={() => void router.navigate({ page: "item", id: entry.id })} aria-label={`Open ${entry.title}`}>
+              <button type="button" className="qa-open" onClick={() => void router.navigate({ page: "item", id: entry.id })} aria-label={codeText.open2(entry.title)}>
                 <Avatar title={entry.title || "?"} cardColor={entry.type === "CARD" ? entry.color : undefined} site={entry.type === "PASSWORD" ? entry.tertiaryValue : undefined} />
                 <span className="qa-text">
-                  <span className="qa-title"><span className="truncate">{entry.title || "Untitled"}</span>{entry.favorite && <Star className="fav-star" aria-label={strings.favorite} />}</span>
+                  <span className="qa-title"><span className="truncate">{entry.title || codeText.untitled}</span>{entry.favorite && <Star className="fav-star" aria-label={strings.favorite} />}</span>
                   <span className="qa-subtitle truncate">{entrySubtitle(entry)}</span>
                 </span>
               </button>
@@ -219,8 +219,8 @@ function LiveCodes() {
           const urgent = code ? code.seconds <= 5 : false;
           return (
             <li key={entry.id} className={cx("live-code", urgent && "is-urgent")}>
-              <button type="button" className="live-code-main" aria-label={`Copy code for ${entry.title}`}
-                onClick={() => void copy(async () => (await totpAt(entry))?.value ?? null, { label: "Code", secret: true, message: `${entry.title} code copied` })}>
+              <button type="button" className="live-code-main" aria-label={codeText.copyCodeFor(entry.title)}
+                onClick={() => void copy(async () => (await totpAt(entry))?.value ?? null, { label: strings.code, secret: true, message: codeText.codeCopied(entry.title) })}>
                 <span className="live-code-text">
                   <span className="live-code-title truncate">{entry.title}</span>
                   <span className="live-code-value">{code?.value ? groupCode(code.value) : "––– –––"}</span>
@@ -240,7 +240,7 @@ function Categories({ counts }: { counts: Record<Category | "notes", number> }) 
   const router = useRouter();
   const tiles: Array<{ key: Category | "notes"; label: string; icon: LucideIcon }> = [
     ...categoryOrder.map((key) => ({ key, label: categories[key].label, icon: categories[key].icon })),
-    { key: "notes" as const, label: "Notes", icon: FileText }
+    { key: "notes" as const, label: strings.notes, icon: FileText }
   ];
   return (
     <section className="section" aria-labelledby="categories-title">
@@ -276,7 +276,7 @@ function QuickActions() {
         {snapshot.enrolled ? (
           <button type="button" className="action-row" disabled={running || !sync.data} onClick={() => void syncNow.run()}>
             <span className="row-icon"><RefreshCw aria-hidden="true" className={running ? "spin" : undefined} /></span>
-            <span className="row-text"><span className="row-title">{running ? "Syncing changes" : "Sync now"}</span><span className="row-description">{lastSync ? `Last sync ${relativeTime(lastSync).toLowerCase()}` : "Exchange changes with your devices"}</span></span>
+            <span className="row-text"><span className="row-title">{running ? syncStatusText.syncing : codeText.syncNow}</span><span className="row-description">{lastSync ? codeText.lastSync(relativeTime(lastSync).toLowerCase()) : codeText.exchangeChangesWithYourDevices}</span></span>
           </button>
         ) : (
           <button type="button" className="action-row" onClick={() => void router.root({ page: "sync" })}>
@@ -304,7 +304,7 @@ export function useSyncNow(address: string, after?: () => Promise<void> | void) 
     const target = (override?.address ?? address).trim();
 
     setBusy(true);
-    const progress = toast.progress("Syncing with your devices…");
+    const progress = toast.progress(codeText.syncingWithYourDevices);
     try {
       const report = await api.syncNow(target);
       if (override) await api.configureSync(target, override.automatic);
@@ -319,7 +319,7 @@ export function useSyncNow(address: string, after?: () => Promise<void> | void) 
       else progress.success(outcome.text);
       return true;
     } catch (failure) {
-      progress.error(failure, "Sync didn't finish. Try again.");
+      progress.error(failure, codeText.syncDidnTFinishTryAgain);
       return false;
     } finally {
       setBusy(false);

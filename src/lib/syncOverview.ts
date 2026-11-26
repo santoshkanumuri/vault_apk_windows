@@ -6,7 +6,7 @@
 import type { CloudStatus, DeviceFailure, MembershipStatus, SyncReport, SyncStatus } from "./api";
 import type { StatusKind } from "../components/Status";
 import { plural, relativeTime, toMillis } from "./format.ts";
-import { syncStatusText as words } from "../strings.ts";
+import { codeText, strings, syncStatusText as words } from "../strings.ts";
 
 export type TransportHealth = "off" | "ok" | "failed";
 export type PeerAck = "upToDate" | "waiting" | "silent" | "notChecked" | "failed";
@@ -279,7 +279,7 @@ export function syncNowOutcome(report: SyncReport, after?: { overview: SyncOverv
   const state = after?.overview.state;
   const settled = !after || state === "upToDate" || state === "syncing";
   const summary = parts.length ? `${driveOnly ? "Synced through Google Drive" : "Synced"} · ${parts.join(", ")}`
-    : driveOnly ? (settled ? "Google Drive is up to date" : "Google Drive checked") : "Sync check complete";
+    : driveOnly ? (settled ? codeText.googleDriveIsUpToDate : codeText.googleDriveChecked) : codeText.syncCheckComplete;
   if (report.conflicts) return { kind: "warning", text: `${summary}. ${plural(report.conflicts, "change")} need review.` };
   if (report.waitingToApply) return { kind: "info", text: `${summary}. ${report.waitingToApply} still waiting to apply.` };
   if (report.peersWaiting && !report.cloud) return { kind: "info", text: `${summary}. ${plural(report.peersWaiting, "device")} will catch up when connected.` };

@@ -21,7 +21,7 @@ import { ActivityPage } from "../pages/ActivityPage";
 import { MorePage } from "../pages/MorePage";
 import { TrashPage } from "../pages/TrashPage";
 import { BackupsPage } from "../pages/Backups";
-import { driveBackupText } from "../strings";
+import { codeText, driveBackupText } from "../strings";
 import { AutoTypePicker } from "../components/AutoTypePicker";
 import { MasterPasswordSwitchPrompt } from "../pages/sync/MasterPasswordSwitch";
 import { SearchPalette } from "../pages/SearchPalette";
@@ -38,24 +38,24 @@ import { strings } from "../strings";
 type NavItem = { id: string; label: string; icon: LucideIcon; route: Route };
 
 const primaryNav: NavItem[] = [
-  { id: "home", label: "Home", icon: House, route: { page: "home" } },
-  { id: "cards", label: "Cards", icon: CreditCard, route: { page: "list", category: "cards" } },
-  { id: "logins", label: "Passwords", icon: KeyRound, route: { page: "list", category: "logins" } },
+  { id: "home", label: codeText.home, icon: House, route: { page: "home" } },
+  { id: "cards", label: codeText.cards, icon: CreditCard, route: { page: "list", category: "cards" } },
+  { id: "logins", label: codeText.passwords, icon: KeyRound, route: { page: "list", category: "logins" } },
   { id: "signins", label: "Sign-ins", icon: LogIn, route: { page: "signins" } },
-  { id: "codes", label: "Codes", icon: Clock3, route: { page: "codes" } },
-  { id: "notes", label: "Notes", icon: FileText, route: { page: "notes" } },
-  { id: "questions", label: "Questions", icon: CircleHelp, route: { page: "list", category: "questions" } },
-  { id: "autofill", label: "Autofill", icon: UserRound, route: { page: "list", category: "autofill" } }
+  { id: "codes", label: strings.codes, icon: Clock3, route: { page: "codes" } },
+  { id: "notes", label: strings.notes, icon: FileText, route: { page: "notes" } },
+  { id: "questions", label: codeText.questions, icon: CircleHelp, route: { page: "list", category: "questions" } },
+  { id: "autofill", label: codeText.autofill, icon: UserRound, route: { page: "list", category: "autofill" } }
 ];
 const secondaryNav: NavItem[] = [
-  { id: "sync", label: "Devices & sync", icon: MonitorSmartphone, route: { page: "sync" } },
-  { id: "activity", label: "Activity", icon: Activity, route: { page: "activity" } },
-  { id: "trash", label: "Recently deleted", icon: ArchiveRestore, route: { page: "trash" } },
-  { id: "settings", label: "Settings", icon: Settings, route: { page: "settings" } }
+  { id: "sync", label: codeText.devicesSync, icon: MonitorSmartphone, route: { page: "sync" } },
+  { id: "activity", label: strings.activity, icon: Activity, route: { page: "activity" } },
+  { id: "trash", label: strings.recentlyDeleted, icon: ArchiveRestore, route: { page: "trash" } },
+  { id: "settings", label: strings.settings, icon: Settings, route: { page: "settings" } }
 ];
 const bottomNav: NavItem[] = [
   primaryNav[0], primaryNav[1], primaryNav[2], primaryNav.find((item) => item.id === "codes") ?? primaryNav[3],
-  { id: "more", label: "More", icon: Ellipsis, route: { page: "more" } }
+  { id: "more", label: codeText.more, icon: Ellipsis, route: { page: "more" } }
 ];
 
 
@@ -110,7 +110,7 @@ export function Shell() {
   }, []);
   const toggleTheme = () => {
     const next = toggle();
-    toast.success(next === "dark" ? "Dark theme on" : "Light theme on");
+    toast.success(next === "dark" ? codeText.darkThemeOn : codeText.lightThemeOn);
   };
 
   // Restore scroll per route: back/root navigation returns to the saved position, forward starts at the top.
@@ -183,7 +183,7 @@ export function Shell() {
     const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart", "focus"] as const;
     events.forEach((name) => window.addEventListener(name, bump, { passive: true }));
     const timer = window.setInterval(() => {
-      if (Date.now() - last >= autoLockMinutes * 60_000) void lock({ force: true, reason: "Locked after inactivity" });
+      if (Date.now() - last >= autoLockMinutes * 60_000) void lock({ force: true, reason: codeText.lockedAfterInactivity });
     }, 10_000);
     return () => { events.forEach((name) => window.removeEventListener(name, bump)); window.clearInterval(timer); };
   }, [autoLockMinutes, lock]);
@@ -225,11 +225,11 @@ export function Shell() {
             {secondaryNav.map((item) => navButton(item, section, "side"))}
           </nav>
           <div className="sidebar-footer">
-            <button type="button" className="nav-item" data-tooltip={resolved === "dark" ? "Light theme" : "Dark theme"} onClick={toggleTheme} aria-label={resolved === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
+            <button type="button" className="nav-item" data-tooltip={resolved === "dark" ? codeText.lightTheme : codeText.darkTheme} onClick={toggleTheme} aria-label={resolved === "dark" ? codeText.switchToLightTheme : codeText.switchToDarkTheme}>
               {resolved === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
-              <span className="nav-label">{resolved === "dark" ? "Light theme" : "Dark theme"}</span>
+              <span className="nav-label">{resolved === "dark" ? codeText.lightTheme : codeText.darkTheme}</span>
             </button>
-            <button type="button" className="nav-item" data-tooltip="Lock (Ctrl+L)" onClick={() => void lock()}>
+            <button type="button" className="nav-item" data-tooltip={codeText.lockCtrlL} onClick={() => void lock()}>
               <LockKeyhole aria-hidden="true" />
               <span className="nav-label">{strings.lockVault}</span>
             </button>
@@ -248,7 +248,7 @@ export function Shell() {
                 <span className="search-trigger-label">{strings.search}</span>
                 <span className="search-trigger-keys"><Kbd>{strings.ctrl}</Kbd><Kbd>{strings.k}</Kbd></span>
               </button>
-              <IconButton className="narrow-only" label={resolved === "dark" ? "Switch to light theme" : "Switch to dark theme"} icon={resolved === "dark" ? Sun : Moon} onClick={toggleTheme} />
+              <IconButton className="narrow-only" label={resolved === "dark" ? codeText.switchToLightTheme : codeText.switchToDarkTheme} icon={resolved === "dark" ? Sun : Moon} onClick={toggleTheme} />
               <IconButton className="narrow-only" label={strings.lockVault} icon={LockKeyhole} onClick={() => void lock()} />
             </div>
           </header>
@@ -309,13 +309,13 @@ function useRouteTitle(route: Route): string {
     }
     case "notes": return "Notes";
     case "note": return notes.some((note) => note.id === route.id) ? "Note" : "Note";
-    case "note-edit": return route.id ? "Edit note" : "New note";
-    case "sync": return "Devices & sync";
-    case "conflicts": return "Needs review";
+    case "note-edit": return route.id ? codeText.editNote : codeText.newNote;
+    case "sync": return codeText.devicesSync;
+    case "conflicts": return strings.needsReview;
     case "backups": return driveBackupText.pageTitle;
     case "settings": return "Settings";
     case "activity": return "Activity";
-    case "trash": return "Recently deleted";
+    case "trash": return strings.recentlyDeleted;
     case "help": return helpText.title;
     case "more": return "More";
   }

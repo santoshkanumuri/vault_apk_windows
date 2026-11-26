@@ -17,7 +17,7 @@ import { accountProblem, accountsOf, forLogin, groupBySite, providerName, provid
 import { FilterInput } from "../items/Toolbar";
 import marks from "../../lib/sign-in-marks.json";
 import "./signins.css";
-import { strings } from "../../strings";
+import { codeText, passwordImportText, strings } from "../../strings";
 
 type Mark = { title: string; hex: string; path?: string; letter?: string };
 const MARKS = marks.marks as Record<string, Mark>;
@@ -93,8 +93,8 @@ export function SignInsPage() {
 
   const remove = async (item: SignIn) => {
     const who = item.account ? ` (${item.account})` : "";
-    if (!(await confirm({ title: `Forget ${providerName(item.provider)}${who} on ${item.site}?`, message: "Nuvori stops reminding you about it. The site and your account there are not changed.", confirmLabel: "Forget", danger: true }))) return;
-    await apply(() => api.deleteSignIn(item.id), "Sign-in method forgotten", "Couldn't forget this sign-in method.");
+    if (!(await confirm({ title: codeText.forgetOn(providerName(item.provider), who, item.site), message: codeText.nuvoriStopsRemindingYouAboutIt, confirmLabel: codeText.forget, danger: true }))) return;
+    await apply(() => api.deleteSignIn(item.id), codeText.signInMethodForgotten, codeText.couldnTForgetThisSignIn);
   };
 
   const onChipKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -117,7 +117,7 @@ export function SignInsPage() {
       <p className="toolbar-text">{strings.whenYouSignInToA}</p>
       {state && !state.enabled && (
         <StatusBanner kind="info" title={strings.rememberingSignInMethodsIsOff}
-          action={<Button size="sm" busy={busy} onClick={() => void apply(() => api.setSignIns(true), "Sign-in methods on")}>{strings.turnOn}</Button>}>{strings.theExtensionDoesnTWatchSign}</StatusBanner>
+          action={<Button size="sm" busy={busy} onClick={() => void apply(() => api.setSignIns(true), codeText.signInMethodsOn)}>{strings.turnOn}</Button>}>{strings.theExtensionDoesnTWatchSign}</StatusBanner>
       )}
       {items.length > 0 && (
         <div className="toolbar signins-toolbar">
@@ -136,7 +136,7 @@ export function SignInsPage() {
                 <button key={id || "all"} type="button" role="radio" data-provider={id || "all"} aria-checked={provider === id} tabIndex={provider === id ? 0 : -1}
                   className={cx("filter-chip", provider === id && "is-selected")} onClick={() => setProvider(id)}>
                   {id && <ProviderMark provider={id} size={18} />}
-                  {id ? providerName(id) : "All"}
+                  {id ? providerName(id) : passwordImportText.filterAll}
                   {id && <span className="filter-chip-count">{counts.get(id as (typeof providers)[number])}</span>}
                 </button>
               ))}
@@ -151,9 +151,9 @@ export function SignInsPage() {
             action={<Button onClick={() => void reload()}>{strings.tryAgain}</Button>} /></div>
         ) : items.length === 0 ? (
           <div className="card"><EmptyState icon={LogIn} title={strings.noSignInMethodsYet}
-            body="Sign in to a site with “Continue with Google”, GitHub, Microsoft, Apple or another provider, and choose Save when the extension asks. Nuvori then shows which one, and which account, you used." /></div>
+            body={codeText.signInToASiteWith} /></div>
         ) : groups.length === 0 ? (
-          <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} body="Try another site, or clear the filters."
+          <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} body={codeText.tryAnotherSiteOrClearThe}
             action={filtered ? <Button onClick={() => { setQuery(""); setProvider(""); setAccount(""); }}>{strings.clearFilters}</Button> : undefined} /></div>
         ) : (
           <>
@@ -175,7 +175,7 @@ export function SignInsPage() {
                         </span>
                       )}
                     </div>
-                    <ul className="signin-methods" aria-label={`Sign-in methods for ${group.site}`}>
+                    <ul className="signin-methods" aria-label={codeText.signInMethodsFor(group.site)}>
                       {group.methods.map((item) => (
                         <li key={item.id} className="signin-method">
                           <ProviderMark provider={item.provider} size={30} />
@@ -187,8 +187,8 @@ export function SignInsPage() {
                             </span>
                           </span>
                           <span className="signin-actions">
-                            <IconButton label={item.account ? `Edit account for ${providerName(item.provider)} on ${group.site}` : `Add account for ${providerName(item.provider)} on ${group.site}`} icon={Pencil} onClick={() => setEditing(item)} disabled={busy} />
-                            <IconButton label={`Forget ${providerName(item.provider)} on ${group.site}`} icon={Trash2} className="btn-danger-text" onClick={() => void remove(item)} disabled={busy} />
+                            <IconButton label={item.account ? codeText.editAccountForOn(providerName(item.provider), group.site) : codeText.addAccountForOn(providerName(item.provider), group.site)} icon={Pencil} onClick={() => setEditing(item)} disabled={busy} />
+                            <IconButton label={codeText.forgetOn2(providerName(item.provider), group.site)} icon={Trash2} className="btn-danger-text" onClick={() => void remove(item)} disabled={busy} />
                           </span>
                         </li>
                       ))}
@@ -201,7 +201,7 @@ export function SignInsPage() {
         )}
       <p className="detail-meta">{strings.keptInYourEncryptedVaultOn}</p>
       <AccountDialog item={editing} busy={busy} onClose={() => setEditing(null)}
-        onSave={async (value) => { if (editing && (await apply(() => api.editSignIn(editing.id, value), "Account saved", "Couldn't save the account."))) setEditing(null); }} />
+        onSave={async (value) => { if (editing && (await apply(() => api.editSignIn(editing.id, value), codeText.accountSaved, codeText.couldnTSaveTheAccount))) setEditing(null); }} />
     </div>
   );
 }
@@ -211,7 +211,7 @@ function AccountDialog({ item, busy, onClose, onSave }: { item: SignIn | null; b
   useEffect(() => { if (item) setValue(item.account); }, [item]);
   const problem = accountProblem(value);
   return (
-    <Dialog open={item !== null} title={item?.account ? "Edit account" : "Add account"} description={item ? `${providerName(item.provider)} on ${item.site}` : undefined} onClose={onClose}
+    <Dialog open={item !== null} title={item?.account ? codeText.editAccount : codeText.addAccount} description={item ? codeText.on(providerName(item.provider), item.site) : undefined} onClose={onClose}
       footer={<>
         <Button variant="ghost" onClick={onClose}>{strings.cancel}</Button>
         <Button variant="primary" busy={busy} disabled={problem !== null} onClick={() => void onSave(value)}>{strings.save}</Button>
@@ -239,7 +239,7 @@ export function LoginSignIns({ loginId }: { loginId: string }) {
             <ProviderMark provider={item.provider} size={24} />
             <span className="signin-text">
               <span className="signin-title">{providerName(item.provider)}{item.account ? <span className="signin-account"> · {item.account}</span> : null}</span>
-              <span className="signin-meta">Last used {relativeTime(item.lastUsedAt).toLowerCase()}</span>
+              <span className="signin-meta">{codeText.lastUsed2(relativeTime(item.lastUsedAt).toLowerCase())}</span>
             </span>
           </li>
         ))}
@@ -257,15 +257,15 @@ export function SignInsSettingRow() {
   if (!state) return null;
   const change = async (enabled: boolean) => {
     setBusy(true);
-    try { setState(await api.setSignIns(enabled)); toast.success(enabled ? "Sign-in methods on" : "Sign-in methods off"); }
-    catch (failure) { toast.error(failure, "Couldn't change the setting."); }
+    try { setState(await api.setSignIns(enabled)); toast.success(enabled ? codeText.signInMethodsOn : codeText.signInMethodsOff); }
+    catch (failure) { toast.error(failure, codeText.couldnTChangeTheSetting); }
     finally { setBusy(false); }
   };
   return (
     <SettingsRow icon={LogIn} title={strings.rememberSignInMethods}
       description={state.enabled
-        ? "The extension asks to remember when you use “Continue with Google”, GitHub or another provider, and reminds you on that site next time. Never in private windows."
-        : "Off. The extension doesn't watch sign-ins or show reminders. Remembered methods stay until you forget them."}
+        ? codeText.theExtensionAsksToRememberWhen
+        : codeText.offTheExtensionDoesnTWatch}
       control={<Toggle label={strings.rememberSignInMethods} checked={state.enabled} disabled={busy} onChange={(value) => void change(value)} />} />
   );
 }

@@ -15,7 +15,7 @@ import { buildIndex, matchesFilter } from "../../lib/search";
 import { totpAt } from "../../lib/totp";
 import { FilterInput } from "../items/Toolbar";
 import { useTotpCodes, type LiveCode } from "./useTotp";
-import { strings } from "../../strings";
+import { codeText, strings } from "../../strings";
 
 export function CodesPage() {
   const { entries, unlocked } = useVault();
@@ -43,7 +43,7 @@ export function CodesPage() {
       </div>
 
       {codes.length === 0 ? (
-        <div className="card"><EmptyState icon={Clock3} title={strings.noCodesYet} body="Add the setup key from a site's two-step sign-in to get codes here." action={<Button variant="primary" icon={Plus} onClick={add}>{strings.addCode}</Button>} /></div>
+        <div className="card"><EmptyState icon={Clock3} title={strings.noCodesYet} body={codeText.addTheSetupKeyFromA} action={<Button variant="primary" icon={Plus} onClick={add}>{strings.addCode}</Button>} /></div>
       ) : visible.length === 0 ? (
         <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} action={<Button onClick={() => setFilter("")}>{strings.clearFilter}</Button>} /></div>
       ) : (
@@ -59,23 +59,23 @@ export function CodesPage() {
 
 function CodeTile({ entry, hints, code, onOpen, highlighted }: { entry: VaultEntry; hints: { site?: string; brand?: string }; code?: LiveCode; onOpen: () => void; highlighted: boolean }) {
   const copy = useCopy();
-  const copyCode = () => void copy(async () => (await totpAt(entry))?.value ?? null, { label: "Code", secret: true, message: "Code copied" });
+  const copyCode = () => void copy(async () => (await totpAt(entry))?.value ?? null, { label: strings.code, secret: true, message: strings.codeCopied });
   const urgent = code ? code.seconds <= 5 : false;
   return (
     <li className={cx("code-tile", highlighted && "is-highlighted", urgent && "is-urgent")} data-row-id={entry.id}>
-      <button type="button" className="code-main" onClick={copyCode} aria-label={`Copy code for ${entry.title}`}>
+      <button type="button" className="code-main" onClick={copyCode} aria-label={codeText.copyCodeFor(entry.title)}>
         <Avatar title={entry.title} size="sm" {...hints} />
         <span className="code-text">
           <span className="code-title truncate">{entry.title}</span>
           {entry.primaryValue && <span className="code-account truncate">{entry.primaryValue}</span>}
           <span className="code-value" aria-hidden="true">{code?.value ? groupCode(code.value) : "––– –––"}</span>
-          <span className="code-next" aria-hidden="true">{code?.next && urgent ? `Next ${groupCode(code.next)}` : " "}</span>
+          <span className="code-next" aria-hidden="true">{code?.next && urgent ? codeText.next(groupCode(code.next)) : " "}</span>
         </span>
       </button>
       <div className="code-side">
         {code && <CountdownRing seconds={code.seconds} period={code.period} />}
         <IconButton label={strings.copyCode} icon={Copy} size="sm" tabIndex={-1} onClick={copyCode} />
-        <IconButton label={`Open ${entry.title}`} icon={ChevronRight} size="sm" onClick={onOpen} />
+        <IconButton label={codeText.open2(entry.title)} icon={ChevronRight} size="sm" onClick={onOpen} />
       </div>
     </li>
   );
@@ -86,14 +86,14 @@ function Passkeys({ list, error, reload }: { list: PasskeySummary[] | null; erro
   const toast = useToast();
   const [busy, setBusy] = useState("");
   const remove = async (passkey: PasskeySummary) => {
-    if (!(await confirm({ title: `Delete passkey for ${passkey.rpId}?`, message: `You won't be able to sign in to ${passkey.rpId} as ${passkey.displayName || passkey.username} with it anymore.`, confirmLabel: "Delete passkey", danger: true }))) return;
+    if (!(await confirm({ title: codeText.deletePasskeyFor(passkey.rpId), message: codeText.youWonTBeAbleTo(passkey.rpId, passkey.displayName || passkey.username), confirmLabel: codeText.deletePasskey, danger: true }))) return;
     setBusy(passkey.id);
     try {
       await api.deletePasskey(passkey.id);
-      toast.success("Passkey deleted");
+      toast.success(codeText.passkeyDeleted);
       await reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't delete the passkey.");
+      toast.error(failure, codeText.couldnTDeleteThePasskey);
     } finally {
       setBusy("");
     }
@@ -119,7 +119,7 @@ function Passkeys({ list, error, reload }: { list: PasskeySummary[] | null; erro
                   </span>
                 </div>
                 <div className="list-row-actions always">
-                  <IconButton label={`Delete passkey for ${passkey.rpId}`} icon={Trash2} size="sm" className="btn-danger-text" busy={busy === passkey.id} onClick={() => void remove(passkey)} />
+                  <IconButton label={codeText.deletePasskeyFor2(passkey.rpId)} icon={Trash2} size="sm" className="btn-danger-text" busy={busy === passkey.id} onClick={() => void remove(passkey)} />
                 </div>
               </li>
             ))}

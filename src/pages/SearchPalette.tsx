@@ -11,7 +11,7 @@ import { iconHints } from "../lib/siteIcons";
 import { cx } from "../lib/format";
 import { buildIndex, fold, highlight, searchDocs, tokenize, type SearchDoc } from "../lib/search";
 import { useEntryActions, type QuickAction } from "./items/actions";
-import { strings } from "../strings";
+import { codeText, driveBackupText, strings } from "../strings";
 import { CloudUpload } from "lucide-react";
 
 type Command = { id: string; title: string; hint: string; icon: LucideIcon; keywords: string; run: () => void };
@@ -20,7 +20,7 @@ type Result =
   | { kind: "command"; key: string; command: Command };
 
 const groupOrder: Array<EntryType | "NOTE" | "COMMAND"> = ["PASSWORD", "CARD", "AUTHENTICATOR", "QUESTION", "AUTOFILL", "NOTE", "COMMAND"];
-const groupTitle = (group: EntryType | "NOTE" | "COMMAND") => group === "NOTE" ? "Notes" : group === "COMMAND" ? "Go to" : categories[categoryOrder.find((key) => categories[key].type === group)!].label;
+const groupTitle = (group: EntryType | "NOTE" | "COMMAND") => group === "NOTE" ? "Notes" : group === "COMMAND" ? codeText.goTo : categories[categoryOrder.find((key) => categories[key].type === group)!].label;
 const groupIcon = (group: EntryType | "NOTE" | "COMMAND"): LucideIcon => group === "NOTE" ? FileText : group === "COMMAND" ? ArrowRight : categories[categoryOrder.find((key) => categories[key].type === group)!].icon;
 
 export function SearchPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -49,17 +49,17 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
   const goRoot = (route: Route) => { onClose(); void router.root(route); };
 
   const commands = useMemo<Command[]>(() => [
-    { id: "home", title: "Home", hint: "Dashboard", icon: House, keywords: "home dashboard", run: () => goRoot({ page: "home" }) },
-    ...categoryOrder.map((key) => ({ id: key, title: categories[key].label, hint: "Open list", icon: categories[key].icon, keywords: `${categories[key].label} ${categories[key].singular}${key === "logins" ? " logins login" : ""}`, run: () => goRoot(key === "codes" ? { page: "codes" } : { page: "list", category: key }) })),
-    { id: "notes", title: "Notes", hint: "Open list", icon: FileText, keywords: "notes", run: () => goRoot({ page: "notes" }) },
-    ...categoryOrder.map((key) => ({ id: `new-${key}`, title: `New ${categories[key].singular}`, hint: "Create", icon: Plus, keywords: `new add create ${categories[key].singular}`, run: () => go({ page: "edit", category: key }) })),
-    { id: "new-note", title: "New note", hint: "Create", icon: Plus, keywords: "new add create note", run: () => go({ page: "note-edit" }) },
-    { id: "backups", title: "Backups", hint: "Google Drive backup", icon: CloudUpload, keywords: "backup backups drive google cloud restore copy", run: () => goRoot({ page: "backups" }) },
-    { id: "sync", title: "Devices & sync", hint: "Phone sync and pairing", icon: MonitorSmartphone, keywords: "sync phone devices pair pairing", run: () => goRoot({ page: "sync" }) },
-    { id: "activity", title: "Activity", hint: "Recent events", icon: Activity, keywords: "activity log logs history events", run: () => goRoot({ page: "activity" }) },
-    { id: "settings", title: "Settings", hint: "Theme, security, extension", icon: Settings, keywords: "settings preferences theme dark light hello extension browser", run: () => goRoot({ page: "settings" }) },
-    { id: "help", title: "Help", hint: "How this app works", icon: CircleHelp, keywords: "help how faq question guide support", run: () => goRoot({ page: "help" }) },
-    { id: "lock", title: "Lock vault", hint: "Ctrl+L", icon: LockKeyhole, keywords: "lock", run: () => { onClose(); void lock(); } }
+    { id: "home", title: codeText.home, hint: codeText.dashboard, icon: House, keywords: "home dashboard", run: () => goRoot({ page: "home" }) },
+    ...categoryOrder.map((key) => ({ id: key, title: categories[key].label, hint: codeText.openList, icon: categories[key].icon, keywords: `${categories[key].label} ${categories[key].singular}${key === "logins" ? " logins login" : ""}`, run: () => goRoot(key === "codes" ? { page: "codes" } : { page: "list", category: key }) })),
+    { id: "notes", title: strings.notes, hint: codeText.openList, icon: FileText, keywords: "notes", run: () => goRoot({ page: "notes" }) },
+    ...categoryOrder.map((key) => ({ id: `new-${key}`, title: codeText.new2(categories[key].singular), hint: codeText.create, icon: Plus, keywords: `new add create ${categories[key].singular}`, run: () => go({ page: "edit", category: key }) })),
+    { id: "new-note", title: codeText.newNote, hint: codeText.create, icon: Plus, keywords: "new add create note", run: () => go({ page: "note-edit" }) },
+    { id: "backups", title: driveBackupText.pageTitle, hint: driveBackupText.cardTitle, icon: CloudUpload, keywords: "backup backups drive google cloud restore copy", run: () => goRoot({ page: "backups" }) },
+    { id: "sync", title: codeText.devicesSync, hint: codeText.phoneSyncAndPairing, icon: MonitorSmartphone, keywords: "sync phone devices pair pairing", run: () => goRoot({ page: "sync" }) },
+    { id: "activity", title: strings.activity, hint: codeText.recentEvents, icon: Activity, keywords: "activity log logs history events", run: () => goRoot({ page: "activity" }) },
+    { id: "settings", title: strings.settings, hint: codeText.themeSecurityExtension, icon: Settings, keywords: "settings preferences theme dark light hello extension browser", run: () => goRoot({ page: "settings" }) },
+    { id: "help", title: codeText.help, hint: codeText.howThisAppWorks, icon: CircleHelp, keywords: "help how faq question guide support", run: () => goRoot({ page: "help" }) },
+    { id: "lock", title: strings.lockVault, hint: "Ctrl+L", icon: LockKeyhole, keywords: "lock", run: () => { onClose(); void lock(); } }
   ], [router, lock]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const docs = useMemo(() => open ? buildIndex(entries, notes) : [], [open, entries, notes]);
@@ -136,12 +136,12 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
           <Kbd>{strings.esc}</Kbd>
         </div>
         <div className="palette-results" id="palette-results" role="listbox" ref={list} aria-label={strings.results}>
-          {tokens.length > 0 && flat.length === 0 && <p className="palette-empty">No results for "{query}". Search matches titles, usernames, websites, tags, notes, and card last 4.</p>}
+          {tokens.length > 0 && flat.length === 0 && <p className="palette-empty">{codeText.noResultsForSearchMatchesTitles(query)}</p>}
           {groups.map(({ group, items }) => {
             const GroupIcon = groupIcon(group);
             return (
-              <div key={group} className="palette-group" role="group" aria-label={!tokens.length && group === "PASSWORD" ? "Recent" : groupTitle(group)}>
-                <div className="palette-group-title"><GroupIcon aria-hidden="true" />{!tokens.length && group === "PASSWORD" ? "Favorites and recent" : groupTitle(group)}</div>
+              <div key={group} className="palette-group" role="group" aria-label={!tokens.length && group === "PASSWORD" ? codeText.recent : groupTitle(group)}>
+                <div className="palette-group-title"><GroupIcon aria-hidden="true" />{!tokens.length && group === "PASSWORD" ? codeText.favoritesAndRecent : groupTitle(group)}</div>
                 {items.map((result) => {
                   index++;
                   const current = index;

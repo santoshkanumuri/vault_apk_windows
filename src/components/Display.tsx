@@ -4,6 +4,7 @@ import { css, inkFor } from "../lib/cardColors";
 import { cx, hashIndex, monogram } from "../lib/format";
 import { useSiteIcon } from "../app/siteIcons";
 import { glyphColor, needsBorder } from "../lib/siteIcons";
+import { codeText } from "../strings";
 
 /**
  * A letter avatar. `cardColor` (a card's own ARGB color) paints it in that card's color.
@@ -107,7 +108,7 @@ export function CountdownRing({ seconds, period, size = 28 }: { seconds: number;
   const reset = seconds > previous.current;
   useEffect(() => { previous.current = seconds; });
   return (
-    <span className={cx("ring", urgent && "is-urgent", reset && "is-reset")} style={{ width: size, height: size }} aria-label={`${seconds} seconds left`} role="img">
+    <span className={cx("ring", urgent && "is-urgent", reset && "is-reset")} style={{ width: size, height: size }} aria-label={codeText.secondsLeft(seconds)} role="img">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
         <circle className="ring-track" cx={size / 2} cy={size / 2} r={radius} />
         <circle className="ring-value" cx={size / 2} cy={size / 2} r={radius} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - fraction)} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
