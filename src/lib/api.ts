@@ -353,6 +353,8 @@ export const api = {
   lockVault: () => call<AppSnapshot>("lock_vault"),
   stopSharing: () => call<AppSnapshot>("stop_sharing"),
   resetVault: (password: string) => call<AppSnapshot>("reset_vault", { password }),
+  /** Wraps the vault key under a new master password on this PC. The vault stays unlocked. */
+  changeMasterPassword: (current: string, replacement: string) => call<void>("change_master_password", { current, replacement }),
   /** Deletes this PC's locked vault without its password. `confirmation` is the typed word RESET. */
   startFresh: (confirmation: string) => call<AppSnapshot>("start_fresh", { confirmation }),
   showMainWindow: () => call<void>("show_main_window"),
@@ -480,5 +482,7 @@ export const api = {
   membershipStatus: () => call<MembershipStatus>("membership_status"),
   leaveGroup: (keepItems = true) => call<AppSnapshot>("leave_group", { keepItems }),
   dismissRemovedNotice: () => call<void>("dismiss_removed_notice"),
-  markManagerLost: (lost: boolean) => call<MembershipStatus>("mark_manager_lost", { lost })
+  markManagerLost: (lost: boolean) => call<MembershipStatus>("mark_manager_lost", { lost }),
+  /** Names this PC on paired devices (a signed `device_name` change, as on Android). */
+  renameThisDevice: (name: string) => call<MembershipStatus>("rename_this_device", { name })
 };

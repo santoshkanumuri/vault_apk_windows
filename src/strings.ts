@@ -461,6 +461,7 @@ export const strings = {
   setupLink: "Setup link",
   startsWithNuvoriPairV3It: "Starts with nuvori-pair://v3/. It contains a one-time secret.",
   phoneSMasterPassword: "Phone's master password",
+  pairingSamePasswordHint: "Use the phone's master password. It must also unlock this PC, because paired devices keep the same master password.",
   continue: "Continue",
   showQr: "Show QR",
   thisPcKeepsItsItemsYour: "This PC keeps its items. Your phone is told the next time this PC reaches it.",
@@ -634,4 +635,39 @@ export const syncStatusText = {
   factNotYet: "Not yet",
   factCouldntReach: "Couldn't reach",
   factDidntFinish: "Didn't finish",
+} as const;
+
+/**
+ * Change master password and Rename this PC, with Android's wording (`VaultUi.kt`, strings.xml
+ * `name_this_device` and the rows near it). Kept in its own block to keep merges simple.
+ */
+export const accountText = {
+  changeMasterPassword: "Change master password",
+  changeMasterPasswordRow: "Choose a new password for unlocking Nuvori on this PC.",
+  changePassword: "Change password",
+  currentPassword: "Current password",
+  newPassword: "New password",
+  confirmNewPassword: "Confirm new password",
+  passwordsDontMatch: "Passwords don't match.",
+  cantReset: "Nuvori can't reset this password. If you forget it, your vault can't be recovered.",
+  pairedChangeOnPhone: (phone: string) => `Paired devices keep the same master password, so the change happens on ${phone}, under Settings > Security. This PC needs the new password too.`,
+  pairedOrLeaveGroup: "To give this PC a password of its own instead, leave the sync group under Danger zone. It keeps its items.",
+  hello: "Windows Hello unlock keeps working.",
+  changing: "Changing the password. This takes a few seconds.",
+  changed: "Master password changed",
+  enterCurrent: "Enter your current password.",
+  tooShort: "Use a new master password with at least 12 characters.",
+  sameAsCurrent: "Choose a password different from your current one.",
+  failed: "Couldn't change the master password.",
+  rename: "Rename",
+  nameThisDevice: "Name this device",
+  nameAppearsOnPairedDevices: "This name appears on paired devices. Your verified device ID stays the same.",
+  deviceName: "Device name",
+  saveName: "Save name",
+  renamed: "Device renamed",
+  renameFailed: "Couldn't rename this PC.",
+  nameRequired: "Enter a name.",
+  nameTooLong: "Use 40 characters or fewer.",
+  nameHasControls: "Remove line breaks and tabs from the name.",
+  renameThisPc: (name: string) => `Rename ${name}`,
 } as const;

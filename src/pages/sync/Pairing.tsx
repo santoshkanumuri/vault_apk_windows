@@ -328,7 +328,7 @@ export function PairingCard() {
               {scanning && <video ref={camera} className="pairing-camera" autoPlay muted playsInline aria-label={strings.cameraPreviewForThePhoneS} />}
               {scanNotice && <p className="muted small" role="status">{scanNotice}</p>}
               <PasswordField ref={linkInput} label={strings.setupLink} value={setupLink} onValue={(value) => { setSetupLink(value); setFieldError((current) => ({ ...current, link: undefined })); }} autoComplete="off" hint={strings.startsWithNuvoriPairV3It} error={fieldError.link} />
-              <PasswordField ref={passwordInput} label={strings.phoneSMasterPassword} value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError((current) => ({ ...current, password: undefined })); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
+              <PasswordField ref={passwordInput} label={strings.phoneSMasterPassword} hint={strings.pairingSamePasswordHint} value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError((current) => ({ ...current, password: undefined })); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
               <div className="form-actions start">
                 <Button variant="primary" type="submit" busy={busy}>{strings.continue}</Button>
               </div>
@@ -336,7 +336,7 @@ export function PairingCard() {
           ) : (
             <form className="form-stack" onSubmit={(event) => void startReverse(event)} noValidate>
               <p className="muted small">Use this if your phone can't reach this PC. This PC shows a QR; your phone scans it with <strong>{strings.scanWindowsQr}</strong>.</p>
-              <PasswordField ref={passwordInput} label={strings.phoneSMasterPassword} value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError({}); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
+              <PasswordField ref={passwordInput} label={strings.phoneSMasterPassword} hint={strings.pairingSamePasswordHint} value={masterPassword} onValue={(value) => { setMasterPassword(value); setFieldError({}); }} autoComplete="current-password" capsLockWarning error={fieldError.password} />
               <div className="form-actions start">
                 <Button variant="primary" type="submit" icon={QrCode} busy={busy}>{strings.showQr}</Button>
               </div>

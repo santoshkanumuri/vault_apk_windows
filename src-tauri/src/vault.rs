@@ -193,6 +193,32 @@ impl VaultStore {
         Ok(())
     }
 
+    /// Android `VaultKeyFile.changePassword`: the same vault key, wrapped again under `replacement`
+    /// with a fresh salt and nonce and Argon2id settings timed on this PC. The database, its key,
+    /// Windows Hello, the device identity and the sync keys stay as they are; backup files saved
+    /// earlier keep the password they were made with.
+    ///
+    /// `unlocked_key` is the key of the vault that is open, so a key file swapped underneath is
+    /// refused. The new key file is proven to open with `replacement` before it is saved, and it
+    /// replaces the old one in one step (`write_new_bootstrap`: a synced temporary file, then a
+    /// rename), so an interruption leaves either the old file or the new one, never neither.
+    pub fn change_password(&self, unlocked_key: &[u8; 32], current: &str, replacement: &str) -> Result<(), VaultError> {
+        if replacement.chars().count() < MIN_PASSWORD_LENGTH {
+            return Err(VaultError::PasswordTooShort);
+        }
+        let bootstrap_path = self.directory.join(BOOTSTRAP_FILE);
+        let (key, _, elapsed, params) = self.unwrap_key(current)?;
+        if *key != *unlocked_key {
+            return Err(VaultError::WrongPasswordOrCorruptKey);
+        }
+        // The unwrap above timed this PC, as an unlock does, so no extra benchmark runs.
+        let replacement_file = wrap_vault_key(&key, replacement, KdfParams::for_measured(elapsed, params.iterations))?;
+        if *unwrap_bootstrap(&replacement_file, replacement)? != *key {
+            return Err(VaultError::KeyWrappingFailed);
+        }
+        write_new_bootstrap(&bootstrap_path, &replacement_file)
+    }
+
     /// When the vault was last changed, in Unix milliseconds: the newest write time of its
     /// database and key files. Reads file times only, never the files.
     pub fn last_used_millis(&self) -> Option<i64> {
@@ -952,6 +978,87 @@ impl UnlockedVault {
         json.and_then(|json| serde_json::from_str::<crate::snapshot::SnapshotMember>(&json).ok())
             .map(|member| member.display_name)
             .filter(|name| !name.trim().is_empty())
+    }
+
+    /// Android `activeMembershipCount(vaultId) > 1`: true while this PC shares its vault with
+    /// another active device. Every device in a sync group keeps the managing device's master
+    /// password, so the password can't change here until this PC is the only active member. A
+    /// membership that doesn't verify counts as shared, so an unreadable group never unlocks the change.
+    pub fn shares_with_other_devices(&self) -> Result<bool, VaultError> {
+        if !self.is_enrolled()? {
+            return Ok(false);
+        }
+        Ok(match crate::membership::verify(&self.membership_events()?) {
+            Ok(verified) => verified.members.values().filter(|member| member.active).count() > 1,
+            Err(_) => true,
+        })
+    }
+
+    /// Android `LocalDeviceNameChangeWriter`: this PC names itself in the sync group. The name goes
+    /// out as a signed `device_name` change, `{"name": ...}` under this PC's own device ID, that each
+    /// paired device applies to its device list; the verified device ID stays the same. Only an
+    /// active member renames itself. Returns false when the name is already the saved one.
+    pub fn rename_this_device(&mut self, name: &str) -> Result<bool, VaultError> {
+        let name = name.trim();
+        if !valid_device_name(name) {
+            return Err(VaultError::InvalidDeviceName);
+        }
+        if !self.is_enrolled()? {
+            return Err(VaultError::NotSharing);
+        }
+        let verified = crate::membership::verify(&self.membership_events()?).map_err(|_| VaultError::NotSharing)?;
+        let local = self.identity_store.get_or_create()?;
+        let member = verified
+            .members
+            .get(&local.device_id)
+            .filter(|member| member.active)
+            .ok_or(VaultError::NotSharing)?;
+        if self.member_name(&local.device_id).as_deref() == Some(name) {
+            return Ok(false);
+        }
+        // The same row the incoming change would update on a paired device (`incoming_apply.rs`),
+        // written in the change's own transaction. A missing row is made from the verified member.
+        let row = crate::snapshot::SnapshotMember {
+            vault_id: verified.vault_id.clone(),
+            device_id: member.device_id.clone(),
+            display_name: name.to_owned(),
+            identity_public_key: URL_SAFE_NO_PAD.encode(member.public_key),
+            status: "ACTIVE".to_owned(),
+            added_by_device_id: member.added_by_device_id.clone(),
+            membership_sequence: member.membership_sequence,
+            key_epoch: member.key_epoch,
+        };
+        let vault_id = verified.vault_id.clone();
+        let device_id = local.device_id.clone();
+        self.write_change(
+            "device_name",
+            &device_id,
+            ChangeKind::Upsert,
+            serde_json::json!({ "name": name }),
+            |transaction| {
+                let saved: Option<String> = transaction
+                    .query_row(
+                        "SELECT member_json FROM sync_memberships WHERE vault_id = ?1 AND device_id = ?2",
+                        params![vault_id, device_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let member_json = match saved.and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok()) {
+                    Some(mut saved) => {
+                        saved["displayName"] = serde_json::Value::String(row.display_name.clone());
+                        saved.to_string()
+                    }
+                    None => serde_json::to_string(&row)?,
+                };
+                transaction.execute(
+                    "INSERT INTO sync_memberships (vault_id, device_id, member_json) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(vault_id, device_id) DO UPDATE SET member_json = excluded.member_json",
+                    params![vault_id, device_id, member_json],
+                )?;
+                Ok(())
+            },
+        )?;
+        Ok(true)
     }
 
     /// "Mark as lost": the managing phone is gone. This PC keeps the group's membership as it is and
@@ -2922,6 +3029,12 @@ pub(crate) fn note_sync_json(note: &LocalNote) -> serde_json::Value {
     })
 }
 
+/// Android's device name rule (`LocalDeviceNameChangeWriter`, `IncomingEntryChangeApplier`): not
+/// blank, at most 40 UTF-16 units as Kotlin counts `String.length`, no control characters.
+pub(crate) fn valid_device_name(name: &str) -> bool {
+    !name.trim().is_empty() && name.encode_utf16().count() <= 40 && !name.chars().any(char::is_control)
+}
+
 fn now_millis() -> Result<i64, VaultError> {
     Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -3281,6 +3394,22 @@ fn wrap_vault_key(vault_key: &[u8; 32], password: &str, kdf: KdfParams) -> Resul
     })
 }
 
+/// The vault key that `password` unwraps from `bootstrap` (format 2 only), or an error.
+fn unwrap_bootstrap(bootstrap: &VaultBootstrap, password: &str) -> Result<Zeroizing<[u8; 32]>, VaultError> {
+    let params = bootstrap.kdf_params()?;
+    let salt: [u8; 16] = decode_array(&bootstrap.salt)?;
+    let nonce: [u8; 12] = decode_array(&bootstrap.nonce)?;
+    let wrapped = URL_SAFE_NO_PAD.decode(&bootstrap.wrapped_key)?;
+    let wrapping_key = Zeroizing::new(derive(password, &salt, params)?);
+    let mut unwrapped = Aes256Gcm::new_from_slice(&*wrapping_key)
+        .expect("32-byte key")
+        .decrypt(Nonce::from_slice(&nonce), wrapped.as_ref())
+        .map_err(|_| VaultError::WrongPasswordOrCorruptKey)?;
+    let key: Result<[u8; 32], _> = unwrapped.as_slice().try_into();
+    unwrapped.zeroize();
+    key.map(Zeroizing::new).map_err(|_| VaultError::InvalidVaultKey)
+}
+
 fn derive(password: &str, salt: &[u8; 16], kdf: KdfParams) -> Result<[u8; 32], VaultError> {
     let params = Params::new(kdf.memory_kib, kdf.iterations, kdf.parallelism, Some(32))
         .map_err(|error| VaultError::Argon2(error.to_string()))?;
@@ -3430,6 +3559,8 @@ pub enum VaultError {
     MissingNoteChange,
     #[error("the vault database is open in another program")]
     InUse,
+    #[error("device name is empty, too long or has control characters")]
+    InvalidDeviceName,
 }
 
 /// An "AUTOFILL" item's profile; unknown or missing fields are empty.
@@ -5007,5 +5138,271 @@ mod tests {
         drop(vault);
         assert!(crate::epoch_keys::content_key(&vault_id, 2).is_none(), "locking releases them");
         std::fs::remove_dir_all(directory).ok();
+    }
+
+    /// Android `VaultKeyFile.changePassword`: the same vault key is wrapped under the new password, so
+    /// every item, the signed history and Windows Hello keep working, and only the new password opens it.
+    #[test]
+    fn a_new_master_password_opens_the_same_vault_and_the_old_one_stops_working() {
+        let directory = std::env::temp_dir().join(format!("nuvori-password-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("first-master-password").unwrap();
+        vault.save_note(None, "Kept", "Still here", None).unwrap();
+        let history = ChangeStore::operation_count(vault.connection()).unwrap();
+        let key = Zeroizing::new(*vault.key_for_hello());
+        let sealed = hello::seal(vault.key_for_hello(), hello::test_signer(1)).unwrap();
+        store.enable_hello(&sealed).unwrap();
+        let hello_file = fs::read(directory.join(HELLO_FILE)).unwrap();
+        let before = fs::read(directory.join(BOOTSTRAP_FILE)).unwrap();
+
+        // Refused changes leave the key file exactly as it was.
+        assert!(matches!(store.change_password(&key, "first-master-password", "too-short"), Err(VaultError::PasswordTooShort)));
+        assert!(matches!(
+            store.change_password(&key, "wrong-master-password", "second-master-password"),
+            Err(VaultError::WrongPasswordOrCorruptKey)
+        ));
+        assert!(
+            matches!(store.change_password(&[0; 32], "first-master-password", "second-master-password"), Err(VaultError::WrongPasswordOrCorruptKey)),
+            "only the key of the vault that is unlocked is wrapped again"
+        );
+        assert_eq!(fs::read(directory.join(BOOTSTRAP_FILE)).unwrap(), before);
+
+        store.change_password(&key, "first-master-password", "second-master-password").unwrap();
+        let old = serde_json::from_slice::<serde_json::Value>(&before).unwrap();
+        let new = read_bootstrap(&directory);
+        assert_eq!(new["formatVersion"], 2);
+        assert_ne!(new["salt"], old["salt"], "a new salt, as Android's persistWrappedKey");
+        assert_ne!(new["wrappedKey"], old["wrappedKey"]);
+        assert_eq!(fs::read(directory.join(HELLO_FILE)).unwrap(), hello_file, "Windows Hello seals the vault key, which is unchanged");
+        assert!(
+            fs::read_dir(&directory).unwrap().all(|file| !file.unwrap().file_name().to_string_lossy().ends_with(".tmp")),
+            "the temporary key file is renamed into place"
+        );
+
+        // The open vault keeps working; nothing in the database was rewritten.
+        vault.save_note(None, "After", "Saved after the change", None).unwrap();
+        assert_eq!(ChangeStore::operation_count(vault.connection()).unwrap(), history + 1);
+        drop(vault);
+
+        assert!(matches!(store.unlock("first-master-password"), Err(VaultError::WrongPasswordOrCorruptKey)));
+        assert!(store.verify_password("first-master-password").is_err());
+        store.verify_password("second-master-password").unwrap();
+        let reopened = store.unlock("second-master-password").unwrap();
+        let mut bodies: Vec<String> = reopened.list_notes().unwrap().into_iter().map(|note| note.body).collect();
+        bodies.sort();
+        assert_eq!(bodies, ["Saved after the change", "Still here"]);
+        drop(reopened);
+        let hello_key = hello::open(&store.hello_file().unwrap(), hello::test_signer(1)).unwrap();
+        assert_eq!(store.unlock_hello(&hello_key).unwrap().list_notes().unwrap().len(), 2);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A change cut off before its rename leaves only a stray temporary file: the old password still
+    /// opens the vault, and a later change still works.
+    #[test]
+    fn an_interrupted_password_change_keeps_the_old_password() {
+        let directory = std::env::temp_dir().join(format!("nuvori-password-cut-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let vault = store.create("first-master-password").unwrap();
+        let key = Zeroizing::new(*vault.key_for_hello());
+        drop(vault);
+        fs::write(directory.join(format!("vault-key-{}.tmp", Uuid::new_v4())), b"{\"formatVersion\":2,\"sal").unwrap();
+        store.unlock("first-master-password").unwrap();
+        store.change_password(&key, "first-master-password", "second-master-password").unwrap();
+        store.unlock("second-master-password").unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Android blocks a password change while another device shares the vault, so every paired
+    /// device keeps the managing device's password. A PC on its own may change it.
+    #[test]
+    fn a_paired_pc_shares_its_vault_and_an_unpaired_one_does_not() {
+        let directory = std::env::temp_dir().join(format!("nuvori-password-shared-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("first-master-password").unwrap();
+        assert!(!vault.shares_with_other_devices().unwrap());
+        enroll_this_pc(&mut vault, "android-vault", [7; 32], None);
+        assert!(vault.shares_with_other_devices().unwrap());
+        vault.connection().execute("DELETE FROM sync_membership_events WHERE sequence = 1", []).unwrap();
+        assert!(vault.shares_with_other_devices().unwrap(), "a membership that doesn't verify counts as shared");
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Signed membership with `host` managing and this PC added, as Android writes it.
+    fn enroll_this_pc(vault: &mut UnlockedVault, vault_id: &str, content_key: [u8; 32], this_pc_name: Option<&str>) -> (String, [u8; 32]) {
+        use ed25519_dalek::{Signer, SigningKey};
+        use sha2::{Digest, Sha256};
+        let identity = vault.identity_store.get_or_create().unwrap();
+        vault.connection().execute(
+            "INSERT INTO sync_group_state (vault_id, content_key, transport_secret) VALUES (?1, ?2, ?3)",
+            params![vault_id, content_key.as_slice(), [8_u8; 32].as_slice()],
+        ).unwrap();
+        vault.connection().execute("UPDATE local_sync_settings SET vault_id = ?1 WHERE id = 1", [vault_id]).unwrap();
+        let host = SigningKey::from_bytes(&[5; 32]);
+        let signed = |previous: Option<&crate::membership::MembershipEvent>, action, subject: &str, subject_key: [u8; 32]| {
+            let mut event = crate::membership::MembershipEvent {
+                vault_id: vault_id.to_owned(),
+                sequence: previous.map_or(1, |event| event.sequence + 1),
+                format_version: 1,
+                previous_hash: previous.map_or(GENESIS_HASH.to_owned(), |event| event.hash.clone()),
+                action,
+                issuer_device_id: "host".to_owned(),
+                subject_device_id: subject.to_owned(),
+                subject_public_key: URL_SAFE_NO_PAD.encode(subject_key),
+                key_epoch: 1,
+                signature: String::new(),
+                hash: String::new(),
+            };
+            let bytes = event.signing_bytes().unwrap();
+            event.signature = URL_SAFE_NO_PAD.encode(host.sign(&bytes).to_bytes());
+            let mut digest = Sha256::new();
+            digest.update(&bytes);
+            digest.update(event.signature.as_bytes());
+            event.hash = hex::encode(digest.finalize());
+            event
+        };
+        let genesis = signed(None, crate::membership::MembershipAction::Genesis, "host", host.verifying_key().to_bytes());
+        let add = signed(Some(&genesis), crate::membership::MembershipAction::Add, &identity.device_id, identity.public_key);
+        for event in [&genesis, &add] {
+            vault.connection().execute(
+                "INSERT INTO sync_membership_events (vault_id, sequence, event_json) VALUES (?1, ?2, ?3)",
+                params![vault_id, event.sequence as i64, serde_json::to_string(event).unwrap()],
+            ).unwrap();
+        }
+        crate::membership::verify(&[genesis, add]).expect("the test chain verifies");
+        if let Some(name) = this_pc_name {
+            let member = serde_json::json!({
+                "vaultId": vault_id, "deviceId": identity.device_id, "displayName": name,
+                "identityPublicKey": identity.public_key_base64_url(), "status": "ACTIVE",
+                "addedByDeviceId": "host", "membershipSequence": 2, "keyEpoch": 1
+            });
+            vault.connection().execute(
+                "INSERT INTO sync_memberships (vault_id, device_id, member_json) VALUES (?1, ?2, ?3)",
+                params![vault_id, identity.device_id, member.to_string()],
+            ).unwrap();
+        }
+        (identity.device_id, identity.public_key)
+    }
+
+    fn device_name_changes(vault: &mut UnlockedVault) -> Vec<ChangeRecord> {
+        let mut statement = vault.connection().prepare(
+            "SELECT format_version, vault_id, device_id, sequence, previous_hash, mutation_id, entity_type, entity_id,
+                    base_revision, record_version_json, occurred_at_utc, payload_ciphertext, payload_nonce, device_signature, hash
+             FROM sync_operations WHERE entity_type = 'device_name' ORDER BY sequence",
+        ).unwrap();
+        statement.query_map([], |row| {
+            let version: String = row.get(9)?;
+            Ok(ChangeRecord {
+                format_version: row.get(0)?,
+                vault_id: row.get(1)?,
+                device_id: row.get(2)?,
+                sequence: row.get::<_, i64>(3)? as u64,
+                previous_hash: row.get(4)?,
+                mutation_id: row.get(5)?,
+                entity_type: row.get(6)?,
+                entity_id: row.get(7)?,
+                kind: ChangeKind::Upsert,
+                base_revision: row.get::<_, i64>(8)? as u64,
+                record_version: serde_json::from_str(&version).unwrap(),
+                occurred_at_utc: row.get(10)?,
+                payload_ciphertext: row.get(11)?,
+                payload_nonce: row.get(12)?,
+                device_signature: row.get(13)?,
+                hash: row.get(14)?,
+            })
+        }).unwrap().collect::<Result<_, _>>().unwrap()
+    }
+
+    fn shown_name(vault: &mut UnlockedVault, device_id: &str) -> Option<String> {
+        vault.connection().query_row(
+            "SELECT member_json FROM sync_memberships WHERE device_id = ?1", [device_id],
+            |row| row.get::<_, String>(0),
+        ).optional().unwrap().map(|json| serde_json::from_str::<serde_json::Value>(&json).unwrap()["displayName"].as_str().unwrap().to_owned())
+    }
+
+    /// Android `LocalDeviceNameChangeWriter`: the PC names only itself, in a signed `device_name`
+    /// change sealed with the group key, and the new name shows here and on a paired device.
+    #[test]
+    fn renaming_this_pc_signs_a_device_name_change_that_paired_devices_apply() {
+        let directory = std::env::temp_dir().join(format!("nuvori-rename-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("twelve-character-password").unwrap();
+        assert!(matches!(vault.rename_this_device("Work laptop"), Err(VaultError::NotSharing)), "an unpaired PC has no name in a group");
+        let (device_id, public_key) = enroll_this_pc(&mut vault, "android-vault", [7; 32], Some("Windows device"));
+
+        let (too_long, too_many_units) = ("x".repeat(41), "😀".repeat(21));
+        let refused: [&str; 6] = ["", "   ", &too_long, &too_many_units, "Work\nlaptop", "Tab\tname"];
+        for bad in refused {
+            assert!(matches!(vault.rename_this_device(bad), Err(VaultError::InvalidDeviceName)), "{bad:?} is refused");
+        }
+        assert!(device_name_changes(&mut vault).is_empty());
+        assert!(!vault.rename_this_device("Windows device").unwrap(), "the same name writes nothing");
+        assert!(device_name_changes(&mut vault).is_empty());
+
+        assert!(vault.rename_this_device("  Work laptop  ").unwrap());
+        assert_eq!(shown_name(&mut vault, &device_id).as_deref(), Some("Work laptop"));
+        assert!(vault.membership_status().unwrap().devices.iter().any(|device| device.is_this_device && device.name == "Work laptop"));
+        let changes = device_name_changes(&mut vault);
+        assert_eq!(changes.len(), 1);
+        let change = &changes[0];
+        assert_eq!((change.entity_id.as_str(), change.device_id.as_str()), (device_id.as_str(), device_id.as_str()));
+        assert_eq!(change.hash, change.compute_hash());
+        let signature: [u8; 64] = URL_SAFE_NO_PAD.decode(&change.device_signature).unwrap().try_into().unwrap();
+        assert!(verify_signature(&public_key, &change.signing_bytes(), &signature), "signed by this PC's identity");
+        assert!(payload::decrypt(&vault.key, change).is_err(), "sealed with the group key, not this PC's vault key");
+        let sealed: serde_json::Value = serde_json::from_slice(&payload::decrypt(&[7; 32], change).unwrap()).unwrap();
+        assert_eq!(sealed, serde_json::json!({ "name": "Work laptop" }));
+
+        // A second rename continues this PC's chain.
+        assert!(vault.rename_this_device("Home PC").unwrap());
+        let changes = device_name_changes(&mut vault);
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[1].previous_hash, changes[0].hash);
+        assert_eq!(changes[1].sequence, changes[0].sequence + 1);
+        crate::sync::validate_chain(&changes).unwrap();
+
+        // A paired device with the same group applies the change and shows the new name.
+        let other_directory = std::env::temp_dir().join(format!("nuvori-rename-peer-{}", Uuid::new_v4()));
+        let other_store = VaultStore::new(&other_directory);
+        let mut other = other_store.create("twelve-character-password").unwrap();
+        other.connection().execute("INSERT INTO sync_group_state (vault_id, content_key, transport_secret) VALUES ('android-vault', ?1, ?2)",
+            params![[7_u8; 32].as_slice(), [8_u8; 32].as_slice()]).unwrap();
+        let member = vault.connection().query_row("SELECT member_json FROM sync_memberships WHERE device_id = ?1", [&device_id], |row| row.get::<_, String>(0)).unwrap();
+        let mut member: serde_json::Value = serde_json::from_str(&member).unwrap();
+        member["displayName"] = "Windows device".into();
+        other.connection().execute("INSERT INTO sync_memberships (vault_id, device_id, member_json) VALUES ('android-vault', ?1, ?2)",
+            params![device_id, member.to_string()]).unwrap();
+        // The receive path a paired PC runs: verify against this PC's key, store, then apply.
+        let batch = crate::incoming::IncomingVerifier::new("android-vault", &device_id, public_key, 0, GENESIS_HASH)
+            .unwrap()
+            .verify_batch(changes.clone())
+            .unwrap();
+        crate::incoming_store::IncomingStore::persist_batch(other.connection(), &batch).unwrap();
+        for change in &changes {
+            crate::incoming_apply::IncomingApply::apply(other.connection(), change, &[7; 32]).unwrap();
+        }
+        assert_eq!(shown_name(&mut other, &device_id).as_deref(), Some("Home PC"));
+
+        drop((vault, other));
+        fs::remove_dir_all(directory).unwrap();
+        fs::remove_dir_all(other_directory).unwrap();
+    }
+
+    /// A PC whose row was never saved (an older pairing) gets one made from the signed membership.
+    #[test]
+    fn renaming_a_pc_without_a_saved_name_makes_its_member_row() {
+        let directory = std::env::temp_dir().join(format!("nuvori-rename-row-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("twelve-character-password").unwrap();
+        let (device_id, public_key) = enroll_this_pc(&mut vault, "android-vault", [7; 32], None);
+        assert!(vault.rename_this_device("Study desktop").unwrap());
+        let json: String = vault.connection().query_row("SELECT member_json FROM sync_memberships WHERE device_id = ?1", [&device_id], |row| row.get(0)).unwrap();
+        let member: crate::snapshot::SnapshotMember = serde_json::from_str(&json).unwrap();
+        assert_eq!(member.display_name, "Study desktop");
+        assert_eq!(member.identity_public_key, URL_SAFE_NO_PAD.encode(public_key));
+        assert_eq!((member.status.as_str(), member.added_by_device_id.as_str(), member.membership_sequence), ("ACTIVE", "host", 2));
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

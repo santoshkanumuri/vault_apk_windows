@@ -1849,6 +1849,28 @@ fn pairing_status(controller: State<'_, Arc<PairingController>>) -> Result<Pairi
     controller.status()
 }
 
+/// Android `VaultViewModel.changePassword`'s rule, worded for a PC that joins the group.
+const PAIRED_PASSWORD_CHANGE: &str =
+    "Master password changes are unavailable while devices share a vault. Paired devices must keep the same master password.";
+const PAIRING_PASSWORD_DIFFERS: &str =
+    "This PC's master password is different from the phone's. Paired devices must keep the same master password: change this PC's master password to the phone's in Settings, then pair.";
+
+/// Android `joinDevicePairing`: the password typed for pairing must also unlock this device, so the
+/// whole group keeps the managing device's master password. The handshake then proves it is the
+/// phone's. Runs on the pairing thread because it takes an Argon2id run.
+fn ensure_same_password(state: &ManagedState, password: &str) -> Result<(), String> {
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked.as_ref().ok_or("Unlock the Windows vault before pairing")?;
+    match app.store.verify_password(password) {
+        Ok(()) => Ok(()),
+        Err(VaultError::WrongPasswordOrCorruptKey) => {
+            activity::log(Level::Warning, Category::Pairing, "Pairing stopped: this PC's master password differs from the phone's");
+            Err(PAIRING_PASSWORD_DIFFERS.to_owned())
+        }
+        Err(other) => Err(public_vault_error(other)),
+    }
+}
+
 #[tauri::command]
 fn start_pairing(
     setup_link: String,
@@ -1864,7 +1886,7 @@ fn start_pairing(
     thread::spawn(move || {
         let link = Zeroizing::new(setup_link);
         let password = Zeroizing::new(master_password);
-        let result = join_android(app, &controller, &link, &password);
+        let result = ensure_same_password(&app, &password).and_then(|()| join_android(app, &controller, &link, &password));
         controller.finish(result);
     });
     Ok(())
@@ -1910,7 +1932,7 @@ fn start_reverse_pairing(
     let controller = controller.inner().clone();
     thread::spawn(move || {
         let password = Zeroizing::new(master_password);
-        let result = join_reverse(app, &controller, offer, &password);
+        let result = ensure_same_password(&app, &password).and_then(|()| join_reverse(app, &controller, offer, &password));
         controller.finish(result);
     });
     Ok(())
@@ -2465,6 +2487,65 @@ async fn reset_vault(
     .map_err(|_| "Vault reset stopped unexpectedly".to_owned())??;
     vault_changed(&app_handle, false);
     Ok(snapshot)
+}
+
+/// Settings > Change master password (Android `VaultViewModel.changePassword`). Wraps the same
+/// vault key under the new password (`VaultStore::change_password`); nothing else changes, so the
+/// vault stays unlocked and Windows Hello keeps working. Every device in a sync group keeps the
+/// managing device's master password, so, as on Android, the change is refused while this PC
+/// shares its vault with another active device (`shares_with_other_devices`).
+#[tauri::command]
+async fn change_master_password(
+    current: String,
+    replacement: String,
+    state: State<'_, ManagedState>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let current = Zeroizing::new(current);
+        let replacement = Zeroizing::new(replacement);
+        // Held for the whole change (about three Argon2id runs), so a lock and unlock can't
+        // read the key file in between.
+        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
+        if vault.shares_with_other_devices().map_err(public_vault_error)? {
+            activity::log(Level::Warning, Category::Security, "Master password change blocked: this PC shares its vault");
+            return Err(PAIRED_PASSWORD_CHANGE.to_owned());
+        }
+        let key = Zeroizing::new(*vault.key_for_hello());
+        app.store.change_password(&key, &current, &replacement).map_err(|error| match error {
+            VaultError::WrongPasswordOrCorruptKey => {
+                activity::log(Level::Warning, Category::Security, "Master password change blocked: wrong current password");
+                "The current password is wrong.".to_owned()
+            }
+            VaultError::PasswordTooShort => "Use a new master password with at least 12 characters.".to_owned(),
+            other => {
+                activity::diagnostic(Category::Security, "Master password change failed", &other);
+                "Couldn't change the master password. Your current password still works.".to_owned()
+            }
+        })?;
+        activity::log(Level::Success, Category::Security, "Master password changed");
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Changing the master password stopped unexpectedly".to_owned())?
+}
+
+/// Devices & sync > This PC > Rename (Android `VaultViewModel.nameThisDevice`). The name reaches
+/// paired devices as a signed `device_name` change with the next sync, which the change starts.
+#[tauri::command]
+fn rename_this_device(name: String, state: State<'_, ManagedState>) -> Result<membership_exit::MembershipStatus, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+    let renamed = vault.rename_this_device(&name).map_err(|error| match error {
+        VaultError::InvalidDeviceName => "Enter a device name of up to 40 characters.".to_owned(),
+        VaultError::NotSharing => "Pair this PC first. Its name is shown on paired devices.".to_owned(),
+        other => public_vault_error(other),
+    })?;
+    if renamed {
+        activity::log(Level::Success, Category::Pairing, "Renamed this PC");
+    }
+    vault.membership_status().map_err(public_vault_error)
 }
 
 /// "Start fresh on this PC" on the unlock screen, for a forgotten password or an earlier
@@ -3524,6 +3605,7 @@ pub fn run() {
             lock_vault,
             stop_sharing,
             reset_vault,
+            change_master_password,
             start_fresh,
             list_notes,
             save_note,
@@ -3562,6 +3644,7 @@ pub fn run() {
             resolve_conflict,
             photo_sync_status,
             membership_status,
+            rename_this_device,
             mark_manager_lost,
             leave_group,
             dismiss_removed_notice,
