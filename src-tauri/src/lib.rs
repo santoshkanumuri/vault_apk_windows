@@ -8,6 +8,7 @@ pub mod browser_ipc;
 mod browser_setup;
 mod browsers;
 mod backup_export;
+mod drive_backup;
 mod clipboard;
 pub mod change_store;
 pub mod checkpoint;
@@ -1050,11 +1051,11 @@ async fn cloud_connect(state: State<'_, ManagedState>, pairing: State<'_, Arc<Pa
         return Err("Google Drive sync is not set up in this build of Nuvori.".into());
     }
     {
+        // A PC that is not paired may still connect its Drive, for Google Drive backup
+        // (`drive_backup.rs`). Sync itself still does nothing without a sync group: a cloud pass
+        // returns before it reads anything (`CloudController::pass`).
         let app = state.lock().map_err(|_| "Vault state unavailable")?;
-        let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
-        if !vault.is_enrolled().map_err(public_vault_error)? {
-            return Err("Pair this PC with your phone first. Google Drive then keeps them in sync when they are apart.".into());
-        }
+        app.unlocked.as_ref().ok_or("Unlock the vault first")?;
     }
     if sync.cloud.connecting.swap(true, Ordering::SeqCst) {
         return Err("Finish the Google sign-in in your browser, or cancel it.".into());
@@ -3685,6 +3686,7 @@ pub fn run() {
             let _ = app.state::<Arc<SyncController>>().cloud.sign_in_alert
                 .set(Box::new(move |needed| desktop::show_sign_in_needed(&handle, needed)));
             passkey_plugin::start(app.state::<ManagedState>().inner().clone(), app.handle().clone());
+            drive_backup::start(app.state::<ManagedState>().inner().clone());
             if desktop::plugin_launch() {
                 // Windows started Nuvori for a passkey request. The request opens the unlock window if needed.
             } else if background && vault_configured(app.handle()) {
@@ -3801,7 +3803,12 @@ pub fn run() {
             close_unlock_prompt,
             pending_card_code,
             approve_card_code,
-            decline_card_code
+            decline_card_code,
+            drive_backup::drive_backup_status,
+            drive_backup::set_drive_backup,
+            drive_backup::set_drive_backup_interval,
+            drive_backup::turn_off_drive_backup,
+            drive_backup::back_up_to_drive_now
         ])
         .build(tauri::generate_context!())
         .expect("failed to run Nuvori");

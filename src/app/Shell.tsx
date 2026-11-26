@@ -20,6 +20,8 @@ import { SettingsPage } from "../pages/SettingsPage";
 import { ActivityPage } from "../pages/ActivityPage";
 import { MorePage } from "../pages/MorePage";
 import { TrashPage } from "../pages/TrashPage";
+import { BackupsPage } from "../pages/Backups";
+import { driveBackupText } from "../strings";
 import { AutoTypePicker } from "../components/AutoTypePicker";
 import { MasterPasswordSwitchPrompt } from "../pages/sync/MasterPasswordSwitch";
 import { SearchPalette } from "../pages/SearchPalette";
@@ -281,6 +283,7 @@ function PageFor({ route }: { route: Route }): ReactNode {
     case "note-edit": return <NoteEditorPage id={route.id} />;
     case "sync": return <SyncPage />;
     case "conflicts": return <ConflictsPage />;
+    case "backups": return <BackupsPage />;
     case "settings": return <SettingsPage section={route.section} />;
     case "activity": return <ActivityPage />;
     case "trash": return <TrashPage />;
@@ -309,6 +312,7 @@ function useRouteTitle(route: Route): string {
     case "note-edit": return route.id ? "Edit note" : "New note";
     case "sync": return "Devices & sync";
     case "conflicts": return "Needs review";
+    case "backups": return driveBackupText.pageTitle;
     case "settings": return "Settings";
     case "activity": return "Activity";
     case "trash": return "Recently deleted";

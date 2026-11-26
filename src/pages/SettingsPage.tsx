@@ -6,7 +6,8 @@ import { passwordImportText } from "../strings";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
-import { DatabaseBackup } from "lucide-react";
+import { CloudUpload, DatabaseBackup } from "lucide-react";
+import { driveBackupText } from "../strings";
 import { PasswordField, Segmented, TextField, Toggle } from "../components/Field";
 import { StatusBanner, StatusChip, type StatusKind } from "../components/Status";
 import { useConfirm } from "../app/confirm";
@@ -115,6 +116,8 @@ export function SettingsPage({ section }: { section?: string }) {
         <AuthenticatorImportRow />
         <SettingsRow icon={ArchiveRestore} title={strings.recentlyDeleted} description={strings.restoreItemsDeletedInTheLast2} onClick={() => void router.navigate({ page: "trash" })} />
         <BackupRow />
+        <SettingsRow icon={CloudUpload} title={driveBackupText.cardTitle} description={driveBackupText.pageRow}
+          onClick={() => void router.navigate({ page: "backups" })} />
       </SettingsGroup>
       <KeepassImportDialog open={keepass} onClose={() => setKeepass(false)} />
       <PasswordImportDialog open={passwordImport} onClose={() => setPasswordImport(false)} />

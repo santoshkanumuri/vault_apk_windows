@@ -43,6 +43,11 @@ const SALT_BYTES: usize = 16;
 const NONCE_BYTES: usize = 12;
 #[cfg(test)]
 const MAX_WRAPPED_KEY: usize = 128 * 1024;
+/// Magic, settings, salt, nonce and the length of the wrapped keyset: the header before it.
+const HEADER_PREFIX_BYTES: usize = MAGIC.len() + 3 * 4 + SALT_BYTES + NONCE_BYTES + 4;
+/// A wrapped keyset is a few hundred bytes. A saved key with a larger header than this did not
+/// come from this app (`BackupKey::from_parts`).
+const MAX_STORED_HEADER: usize = HEADER_PREFIX_BYTES + 128 * 1024;
 
 // Tink `AES128_GCM_HKDF_1MB`: 16-byte key material and derived AES-128 key, HKDF-SHA256, 1 MiB
 // ciphertext segments with a 16-byte tag. A stream starts with its header length, a salt for HKDF
@@ -140,6 +145,23 @@ impl BackupKey {
         let keyset = keyset_bytes(&material, key_id);
         let header = wrap_keyset(&keyset, password, kdf)?;
         Ok(Self { header, material })
+    }
+
+    /// The file header and the key material, to keep one key for the backups that follow
+    /// (`drive_backup.rs`). The material is the raw stream key, so it belongs only where the
+    /// vault's own secrets go: inside the encrypted vault database, never in a file of its own.
+    pub fn parts(&self) -> (Vec<u8>, Zeroizing<Vec<u8>>) {
+        (self.header.clone(), Zeroizing::new(self.material.to_vec()))
+    }
+
+    /// A key that [`BackupKey::parts`] saved. Only the password its header was wrapped with opens
+    /// the backups this key writes, whatever the vault's password is now.
+    pub fn from_parts(header: Vec<u8>, material: &[u8]) -> Result<Self, BackupError> {
+        let material: [u8; KEY_BYTES] = material.try_into().map_err(|_| BackupError::InvalidSettings)?;
+        if header.len() <= HEADER_PREFIX_BYTES || header.len() > MAX_STORED_HEADER {
+            return Err(BackupError::InvalidSettings);
+        }
+        Ok(Self { header, material: Zeroizing::new(material) })
     }
 }
 
@@ -963,6 +985,32 @@ mod tests {
                 assert_eq!(file.len(), body_offset(&file) + length + segments * TAG_BYTES, "{length}");
                 assert_eq!(decrypt(&file, PASSWORD).unwrap(), plain, "{length} in chunks of {chunk}");
             }
+        }
+    }
+
+    #[test]
+    fn a_saved_key_writes_backups_that_open_with_its_own_password() {
+        let (header, material) = key().parts();
+        let saved = BackupKey::from_parts(header, &material).unwrap();
+        let mut writer = EncryptingWriter::new(Vec::new(), &saved).unwrap();
+        writer.write_all(b"a scheduled backup").unwrap();
+        let file = writer.finish().unwrap();
+        assert_eq!(decrypt(&file, PASSWORD).unwrap(), b"a scheduled backup");
+        assert!(matches!(decrypt(&file, "another password here"), Err(BackupError::WrongPasswordOrDamaged)));
+    }
+
+    #[test]
+    fn a_saved_key_that_came_back_damaged_is_refused() {
+        let (header, material) = key().parts();
+        for (what, header, material) in [
+            ("no header", Vec::new(), material.to_vec()),
+            ("no keyset", header[..HEADER_PREFIX_BYTES].to_vec(), material.to_vec()),
+            ("a header from somewhere else", vec![0; MAX_STORED_HEADER + 1], material.to_vec()),
+            ("short material", header.clone(), material[..KEY_BYTES - 1].to_vec()),
+            ("long material", header.clone(), vec![0; KEY_BYTES + 1]),
+            ("no material", header.clone(), Vec::new()),
+        ] {
+            assert!(matches!(BackupKey::from_parts(header, &material), Err(BackupError::InvalidSettings)), "{what}");
         }
     }
 

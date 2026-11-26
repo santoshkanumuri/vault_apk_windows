@@ -265,6 +265,15 @@ impl VaultStore {
         Ok(crate::pvault::Kdf { memory_kib: kdf.memory_kib, iterations: kdf.iterations, parallelism: kdf.parallelism })
     }
 
+    /// The salt of the vault key file. It is not secret: it sits beside the vault, and only the
+    /// master password turns it into a key. Every write of the file makes a fresh salt
+    /// (`wrap_key`), so a salt that differs from the one a saved secret was made with means the
+    /// master password changed. Google Drive backup uses it to notice that (`drive_backup.rs`).
+    pub fn password_salt(&self) -> Result<String, VaultError> {
+        let bootstrap: VaultBootstrap = serde_json::from_slice(&fs::read(self.directory.join(BOOTSTRAP_FILE))?)?;
+        Ok(bootstrap.salt)
+    }
+
     /// "Start fresh on this PC": deletes the same files as the password-checked reset, without the
     /// password. Only for a locked vault: the caller makes sure this process has it closed, and
     /// this refuses when any other process still has the database open. Nothing is read from

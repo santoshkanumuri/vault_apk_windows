@@ -12,6 +12,7 @@ import { cx } from "../lib/format";
 import { buildIndex, fold, highlight, searchDocs, tokenize, type SearchDoc } from "../lib/search";
 import { useEntryActions, type QuickAction } from "./items/actions";
 import { strings } from "../strings";
+import { CloudUpload } from "lucide-react";
 
 type Command = { id: string; title: string; hint: string; icon: LucideIcon; keywords: string; run: () => void };
 type Result =
@@ -53,6 +54,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
     { id: "notes", title: "Notes", hint: "Open list", icon: FileText, keywords: "notes", run: () => goRoot({ page: "notes" }) },
     ...categoryOrder.map((key) => ({ id: `new-${key}`, title: `New ${categories[key].singular}`, hint: "Create", icon: Plus, keywords: `new add create ${categories[key].singular}`, run: () => go({ page: "edit", category: key }) })),
     { id: "new-note", title: "New note", hint: "Create", icon: Plus, keywords: "new add create note", run: () => go({ page: "note-edit" }) },
+    { id: "backups", title: "Backups", hint: "Google Drive backup", icon: CloudUpload, keywords: "backup backups drive google cloud restore copy", run: () => goRoot({ page: "backups" }) },
     { id: "sync", title: "Devices & sync", hint: "Phone sync and pairing", icon: MonitorSmartphone, keywords: "sync phone devices pair pairing", run: () => goRoot({ page: "sync" }) },
     { id: "activity", title: "Activity", hint: "Recent events", icon: Activity, keywords: "activity log logs history events", run: () => goRoot({ page: "activity" }) },
     { id: "settings", title: "Settings", hint: "Theme, security, extension", icon: Settings, keywords: "settings preferences theme dark light hello extension browser", run: () => goRoot({ page: "settings" }) },
