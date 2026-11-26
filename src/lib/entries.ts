@@ -43,7 +43,7 @@ export function profileFrom(value: string): Profile {
 }
 
 export function emptyEntry(type: EntryType): EntryDraft {
-  return { type, title: "", primaryValue: "", secondaryValue: "", tertiaryValue: "", fourthValue: "", cardKind: "CREDIT", network: "", totpAlgorithm: "SHA1", totpDigits: 6, totpPeriod: 30, notes: "", tags: "", favorite: false, groupIds: [] };
+  return { type, title: "", primaryValue: "", secondaryValue: "", tertiaryValue: "", fourthValue: "", cardKind: "CREDIT", network: "", totpAlgorithm: "SHA1", totpDigits: 6, totpPeriod: 30, linkedAuthenticatorId: "", notes: "", tags: "", favorite: false, groupIds: [] };
 }
 
 /** One-line, non-secret description shown under the title in lists and search. */

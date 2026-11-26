@@ -12,7 +12,7 @@ const id = () => `mock-${nextId++}`;
 type Draft = Partial<VaultEntry> & { type: VaultEntry["type"]; title: string };
 const entry = (draft: Draft, age: number): VaultEntry => ({
   id: id(), primaryValue: "", secondaryValue: "", tertiaryValue: "", fourthValue: "", cardKind: "CREDIT", network: "", totpAlgorithm: "SHA1", totpDigits: 6, totpPeriod: 30,
-  notes: "", tags: "", favorite: false, createdAt: minutes(age + 5000), updatedAt: minutes(age), groupIds: [], ...draft
+  linkedAuthenticatorId: "", notes: "", tags: "", favorite: false, createdAt: minutes(age + 5000), updatedAt: minutes(age), groupIds: [], ...draft
 });
 
 const state = {
@@ -62,6 +62,8 @@ const state = {
   cloud: { available: true, connected: false, account: "", lastSync: "", lastError: "", connecting: false, needsSignIn: false, checkSeconds: 15 } as CloudStatus
 };
 state.entries[0].groupIds = ["g-work"];
+// The GitHub login shows the GitHub code under it ("Linked code").
+state.entries[0].linkedAuthenticatorId = state.entries.find((item) => item.type === "AUTHENTICATOR")?.id ?? "";
 state.conflicts = [
   { id: "c-1", entityType: "entry", entityId: state.entries[1].id, title: state.entries[1].title, localUpdatedAt: minutes(42), remoteUpdatedAt: minutes(18), remoteDevice: "Pixel 8", summary: "Password changed on both devices" },
   { id: "c-2", entityType: "note", entityId: state.notes[0].id, title: state.notes[0].title, localUpdatedAt: minutes(300), remoteUpdatedAt: minutes(260), remoteDevice: "Pixel 8", summary: "Note text edited on both devices" }

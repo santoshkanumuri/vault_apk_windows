@@ -36,6 +36,8 @@ export type VaultEntry = {
   totpAlgorithm: string;
   totpDigits: number;
   totpPeriod: number;
+  /** A login's "Linked code": the id of an authenticator item in this vault, or "". */
+  linkedAuthenticatorId: string;
   notes: string;
   tags: string;
   favorite: boolean;
