@@ -8,6 +8,7 @@ import { useConfirm } from "../app/confirm";
 import { useNow, usePolling } from "../app/hooks";
 import { useRouteState } from "../app/router";
 import { useToast } from "../app/toast";
+import { PasskeyRequestsSection } from "./PasskeyRequests";
 import { api, type ActivityCategory, type ActivityEvent } from "../lib/api";
 import { cx, formatDateTime, relativeTime, toMillis } from "../lib/format";
 import { strings } from "../strings";
@@ -79,6 +80,7 @@ export function ActivityPage() {
         : events.length === 0 ? <div className="card"><EmptyState icon={ScrollText} title={filter === "all" ? "No activity yet" : `No ${categoryLabels[filter as ActivityCategory].toLowerCase()} activity`} body="Unlocks, saves, syncs, and browser fills show up here. Events are kept until you close Nuvori." /></div>
         : <ActivityList events={events} />}
       <p className="detail-meta">{strings.activityNeverIncludesPasswordsUsernamesOr}</p>
+      <PasskeyRequestsSection />
     </div>
   );
 }

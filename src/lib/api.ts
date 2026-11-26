@@ -87,6 +87,12 @@ export type TrashedItem = {
 export type VaultGroup = { id: string; name: string; notes: string; folderType: string };
 export type PasskeySummary = { id: string; rpId: string; username: string; displayName: string; createdAt: number };
 export type EntryPhoto = { id: string; mimeType: string; dataUrl: string; isCover?: boolean; addedAt?: number };
+/**
+ * One request Windows passed to Nuvori's passkey provider. `create` is a new passkey, otherwise a
+ * sign-in; `site` is empty when the request never named one; `reason` is why Nuvori didn't offer a
+ * passkey, and is empty when it did. Kept on this PC only.
+ */
+export type PasskeyRequest = { at: number; create: boolean; site: string; offered: boolean; reason: string };
 
 export type SyncPhase = "idle" | "connecting" | "sending" | "receiving" | "applying" | "done" | "error";
 export type SyncStatus = {
@@ -433,6 +439,9 @@ export const api = {
 
   activityLog: (limit?: number) => call<ActivityEvent[]>("activity_log", limit === undefined ? {} : { limit }),
   clearActivityLog: () => call<void>("clear_activity_log"),
+  /** What Windows asked this PC's passkey provider, newest first. Reads while the vault is locked. */
+  passkeyRequests: () => call<PasskeyRequest[]>("passkey_requests"),
+  clearPasskeyRequests: () => call<void>("clear_passkey_requests"),
   browserStatus: () => call<BrowserStatus>("browser_status"),
   listBrowsers: () => call<Browser[]>("list_browsers"),
   setBrowser: (id: string, change: { connected?: boolean; askAtStart?: boolean; family?: BrowserFamily }) =>

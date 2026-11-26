@@ -2906,6 +2906,7 @@ fn initialize_notes(connection: &Connection) -> Result<(), VaultError> {
         );",
     )?;
     crate::local_recovery::initialize(connection)?;
+    crate::passkey_requests::initialize(connection)?;
     crate::site_icons::initialize(connection)?;
     crate::sign_ins::initialize(connection)?;
     migrate_local_schema(connection)

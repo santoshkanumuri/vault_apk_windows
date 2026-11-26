@@ -237,6 +237,11 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .trash-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trash-meta { color: var(--muted); font-size: 12px; }
 .trash-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.request-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+.request-row + .request-row { border-top: 1px solid var(--hairline); }
+.request-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.request-site { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-meta { color: var(--muted); font-size: 12px; }
 /* Previous passwords on a login (pages/items/ItemDetail.tsx) */
 .previous-passwords-toggle { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 var(--s4); border: 0; background: transparent; color: var(--text); font-weight: 600; text-align: left; }
 .previous-passwords-toggle:hover { background: var(--hover); }

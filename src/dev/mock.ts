@@ -1,7 +1,7 @@
 // Development-only stand-in for the Tauri backend so the UI can be previewed in a plain browser
 // (`npm run dev`, then open http://localhost:1420). Synthetic data only. Never bundled in production:
 // it is reached solely through a branch guarded by `import.meta.env.DEV`.
-import type { ActivityEvent, Appearance, AppSnapshot, BrowserStatus, BuildStatus, CloudStatus, EntryPhoto, LocalNote, MembershipStatus, PairingStatus, PasskeySummary, QuickSearchStatus, SyncConflict, SyncStatus, VaultEntry, VaultGroup } from "../lib/api";
+import type { ActivityEvent, Appearance, AppSnapshot, BrowserStatus, BuildStatus, CloudStatus, EntryPhoto, LocalNote, MembershipStatus, PairingStatus, PasskeyRequest, PasskeySummary, QuickSearchStatus, SyncConflict, SyncStatus, VaultEntry, VaultGroup } from "../lib/api";
 import { MOCK_APPEARANCE_EVENT } from "../lib/api";
 
 const now = Date.now();
@@ -57,6 +57,11 @@ const state = {
   sync: { lastSync: new Date(minutes(3)).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "192.168.1.24", automatic: true, running: false, message: "Sent 2 changes and received 1.", phase: "idle", progressDone: 0, progressTotal: 0, lastError: "", lastAttempt: new Date(minutes(1)).toISOString(), consecutiveFailures: 0, nextRetrySeconds: 0, wifiCheckSeconds: 60, driveCheckSeconds: 15, syncOnOpen: true } as SyncStatus,
   pairing: { stage: "", confirmation: "", message: "", invitation: "" } as PairingStatus,
   activity: [] as ActivityEvent[],
+  passkeyRequests: [
+    { at: minutes(12), create: false, site: "github.com", offered: true, reason: "" },
+    { at: minutes(90), create: false, site: "bank.example", offered: false, reason: "No passkey for this site is saved on this PC" },
+    { at: minutes(300), create: true, site: "shop.example", offered: false, reason: "Nuvori was locked, or the prompt was closed" }
+  ] as PasskeyRequest[],
   conflicts: [] as SyncConflict[],
   removedNotice: null as MembershipStatus["removedNotice"],
   pendingLeave: false,
@@ -413,6 +418,8 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "cancel_pairing": state.pairing = { stage: "", confirmation: "", message: "", invitation: "" }; return null;
     case "activity_log": return state.activity.slice(0, Number(args.limit ?? 500));
     case "clear_activity_log": state.activity = []; return null;
+    case "passkey_requests": return state.passkeyRequests;
+    case "clear_passkey_requests": state.passkeyRequests = []; return null;
     case "list_conflicts": requireUnlocked(); return state.conflicts.map((c) => ({ ...c }));
     case "resolve_conflict": {
       state.conflicts = state.conflicts.filter((c) => c.id !== args.id);
