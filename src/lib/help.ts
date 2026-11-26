@@ -190,6 +190,13 @@ export const helpTopics: HelpTopic[] = [
   },
   {
     section: "Your items",
+    question: "How do I back up my vault and restore it?",
+    answer:
+      "Open Settings and choose Export encrypted backup under Your data. The .pvault file opens with your master password at the time, on this PC or in Nuvori for Android. To bring one back, choose Restore from backup. It shows what the backup holds and offers to save this vault first, then replaces everything in this vault once you confirm with your master password. A paired PC leaves its sync group first, so the old items can't sync back.",
+    go: { label: "Open Your data settings", route: { page: "settings", section: "data" } },
+  },
+  {
+    section: "Your items",
     question: "Can I bring in logins from another password manager?",
     answer:
       "Open Settings and choose Import from KeePass under Your data. It reads a KeePassXC or KeePass database (.kdbx) and brings in logins, codes and notes. You see what it found before anything is saved.",
