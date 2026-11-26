@@ -66,6 +66,26 @@ export type PreviousPassword = { password: string; replacedAt: number };
 /** An encrypted backup saved by export_backup: the file's name and what it holds. */
 export type BackupSaved = { fileName: string; items: number; photos: number };
 
+/** Google Drive backup on this PC (`drive_backup.rs`). Times are Unix milliseconds. */
+export type DriveBackupStatus = {
+  /** False when this build has no Google sign-in configured. */
+  available: boolean;
+  /** This PC is signed in to Google Drive. It is the same sign-in sync uses. */
+  connected: boolean;
+  account: string;
+  enabled: boolean;
+  intervalMs: number;
+  lastBackupAt: number;
+  running: boolean;
+  /** The master password changed after the backup key was made, so it is needed once more. */
+  needsPassword: boolean;
+  /** The Drive sign-in no longer works, so the card offers to connect again. */
+  needsSignIn: boolean;
+  /** When the password that opens these backups was entered. */
+  passwordSetAt: number;
+  lastError: string;
+};
+
 /** The "Website icons" setting and the icons the browser extension saved: site -> `data:image/png;base64,...`. */
 export type SiteIconsState = { enabled: boolean; icons: Record<string, string> };
 
@@ -371,6 +391,13 @@ export const api = {
   clearSiteIcons: () => call<SiteIconsState>("clear_site_icons"),
   /** Checks the master password, asks where to save, then writes a .pvault backup encrypted with it. `null` when the Save dialog is cancelled. `today` is the local date, YYYY-MM-DD, for the file name. */
   exportBackup: (password: string, today: string) => call<BackupSaved | null>("export_backup", { password, today }),
+  driveBackupStatus: () => call<DriveBackupStatus>("drive_backup_status"),
+  /** Turns Google Drive backup on, and takes the master password again after it changed. Slow: it derives the backup key. */
+  setDriveBackup: (password: string, intervalMs: number) => call<DriveBackupStatus>("set_drive_backup", { password, intervalMs }),
+  setDriveBackupInterval: (intervalMs: number) => call<DriveBackupStatus>("set_drive_backup_interval", { intervalMs }),
+  /** Stops backups on this PC and forgets its backup key. The files already in the Drive stay. */
+  turnOffDriveBackup: () => call<DriveBackupStatus>("turn_off_drive_backup"),
+  backUpToDriveNow: () => call<DriveBackupStatus>("back_up_to_drive_now"),
   /** Sign-in methods the extension remembered ("Continue with GitHub" and the account). */
   signIns: () => call<SignInsState>("sign_ins"),
   setSignIns: (enabled: boolean) => call<SignInsState>("set_sign_ins", { enabled }),

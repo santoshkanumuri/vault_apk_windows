@@ -13,6 +13,7 @@ export type Route =
   | { page: "note-edit"; id?: string }
   | { page: "sync" }
   | { page: "conflicts" }
+  | { page: "backups" }
   | { page: "settings"; section?: string }
   | { page: "activity" }
   | { page: "trash" }
