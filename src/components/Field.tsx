@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ComponentPropsWithRef, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
 import { Eye, EyeOff, TriangleAlert } from "lucide-react";
 import { cx } from "../lib/format";
+import { codeText, passwordImportText } from "../strings";
 
 type FieldShellProps = { label: string; hint?: ReactNode; error?: string; id: string; children: ReactNode; className?: string; trailing?: ReactNode };
 
@@ -73,7 +74,7 @@ export function PasswordInput({ label, capsLockWarning, revealable = true, class
           onKeyDown={(event) => { checkCaps(event); props.onKeyDown?.(event); }}
           onKeyUp={(event) => { checkCaps(event); props.onKeyUp?.(event); }}
           onBlur={(event) => { setCaps(false); props.onBlur?.(event); }} />
-        {revealable && <button className="secret-toggle" type="button" disabled={props.disabled} aria-label={`${visible ? "Hide" : "Show"} ${label}`} title={visible ? "Hide" : "Show"} aria-pressed={visible} aria-controls={props.id} onClick={() => setVisible((current) => !current)}>
+        {revealable && <button className="secret-toggle" type="button" disabled={props.disabled} aria-label={`${visible ? "Hide" : "Show"} ${label}`} title={visible ? codeText.hide2 : passwordImportText.filter} aria-pressed={visible} aria-controls={props.id} onClick={() => setVisible((current) => !current)}>
           {visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
         </button>}
       </div>

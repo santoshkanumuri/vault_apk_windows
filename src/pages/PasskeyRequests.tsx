@@ -9,7 +9,7 @@ import { useNow, usePolling } from "../app/hooks";
 import { useToast } from "../app/toast";
 import { api, type PasskeyRequest } from "../lib/api";
 import { cx, formatDateTime, relativeTime } from "../lib/format";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 /**
  * "Passkey requests": what Windows asked Nuvori's passkey provider, newest first. Windows decides
@@ -28,13 +28,13 @@ export function PasskeyRequestsSection() {
   const refusals = all.filter((request) => !request.offered).length;
 
   const clear = async () => {
-    if (!(await confirm({ title: "Clear the passkey request history?", message: "This removes the requests shown here. Your passkeys are not touched.", confirmLabel: "Clear history", danger: true }))) return;
+    if (!(await confirm({ title: codeText.clearThePasskeyRequestHistory, message: codeText.thisRemovesTheRequestsShownHere, confirmLabel: codeText.clearHistory, danger: true }))) return;
     try {
       await api.clearPasskeyRequests();
-      toast.success("Passkey request history cleared");
+      toast.success(codeText.passkeyRequestHistoryCleared);
       await requests.reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't clear the request history.");
+      toast.error(failure, codeText.couldnTClearTheRequestHistory);
     }
   };
 

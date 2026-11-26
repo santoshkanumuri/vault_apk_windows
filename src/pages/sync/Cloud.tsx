@@ -9,18 +9,18 @@ import { usePolling } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import { api, type CloudStatus } from "../../lib/api";
 import { formatDateTime, relativeTime } from "../../lib/format";
-import { strings } from "../../strings";
+import { codeText, driveBackupText, strings, syncStatusText } from "../../strings";
 
 const DRIVE_CHECK_LABELS: Record<string, string> = { "15": "15 seconds", "60": "minute", "300": "5 minutes" };
-const DRIVE_CHECK_OPTIONS = [{ value: "15", label: "15 s" }, { value: "60", label: "1 min" }, { value: "300", label: "5 min" }, { value: "0", label: "Sync now only" }];
+const DRIVE_CHECK_OPTIONS = [{ value: "15", label: "15 s" }, { value: "60", label: codeText.t1Min }, { value: "300", label: codeText.t5Min }, { value: "0", label: codeText.syncNowOnly }];
 
 /** What the chip in the card's corner says. */
 export function cloudIndicator(status: CloudStatus): { kind: StatusKind; label: string } {
-  if (status.connecting) return { kind: "progress", label: "Waiting for sign-in" };
-  if (!status.connected) return { kind: "neutral", label: "Off" };
-  if (status.needsSignIn) return { kind: "warning", label: "Sign in again" };
-  if (status.lastError) return { kind: "warning", label: "Needs attention" };
-  return { kind: "success", label: status.lastSync ? "On" : "Starting" };
+  if (status.connecting) return { kind: "progress", label: codeText.waitingForSignIn };
+  if (!status.connected) return { kind: "neutral", label: driveBackupText.chipOff };
+  if (status.needsSignIn) return { kind: "warning", label: codeText.signInAgain };
+  if (status.lastError) return { kind: "warning", label: strings.needsAttention };
+  return { kind: "success", label: status.lastSync ? driveBackupText.chipOn : codeText.starting };
 }
 
 /**
@@ -41,10 +41,10 @@ export function CloudCard() {
     setBusy(true);
     try {
       const next = await api.cloudConnect();
-      if (next.connected) toast.success(`Google Drive connected as ${next.account}. Now connect the same account on your phone.`);
-      else toast.info("Google sign-in was canceled. Nothing changed.");
+      if (next.connected) toast.success(codeText.googleDriveConnectedAsNowConnect(next.account));
+      else toast.info(driveBackupText.connectCancelled);
     } catch (failure) {
-      toast.error(failure, "Couldn't connect Google Drive.");
+      toast.error(failure, driveBackupText.couldntConnect);
     } finally {
       setBusy(false);
       await cloud.reload();
@@ -55,9 +55,9 @@ export function CloudCard() {
     setBusy(true);
     try {
       await api.setSyncSchedule({ driveSeconds: Number(value) });
-      toast.success(value === "0" ? "Google Drive is checked only when you select Sync now" : `Checks Google Drive every ${DRIVE_CHECK_LABELS[value] ?? value}`);
+      toast.success(value === "0" ? codeText.googleDriveIsCheckedOnlyWhen : codeText.checksGoogleDriveEvery(DRIVE_CHECK_LABELS[value] ?? value));
     } catch (failure) {
-      toast.error(failure, "Couldn't change the check interval.");
+      toast.error(failure, codeText.couldnTChangeTheCheckInterval);
     } finally {
       setBusy(false);
       await cloud.reload();
@@ -71,17 +71,17 @@ export function CloudCard() {
 
   const disconnect = async () => {
     const agreed = await confirm({
-      title: "Disconnect Google Drive on this PC?",
-      message: "This PC stops syncing through Google Drive. Sync over Wi-Fi keeps working. The encrypted files stay in your Drive for your other devices.",
-      confirmLabel: "Disconnect",
+      title: codeText.disconnectGoogleDriveOnThisPc,
+      message: codeText.thisPcStopsSyncingThroughGoogle,
+      confirmLabel: strings.disconnect,
     });
     if (!agreed) return;
     setBusy(true);
     try {
       await api.cloudDisconnect();
-      toast.success("Google Drive disconnected on this PC");
+      toast.success(codeText.googleDriveDisconnectedOnThisPc);
     } catch (failure) {
-      toast.error(failure, "Couldn't disconnect Google Drive.");
+      toast.error(failure, codeText.couldnTDisconnectGoogleDrive);
     } finally {
       setBusy(false);
       await cloud.reload();
@@ -93,8 +93,8 @@ export function CloudCard() {
       <div className="connection-head">
         <span className="connection-icon" aria-hidden="true"><Cloud /></span>
         <div className="connection-text">
-          <h2 id="cloud-title">{status.connected ? "Google Drive" : "Sync when your devices are apart"}</h2>
-          <p className="muted small">{status.connected ? status.account : "Optional. Uses your own Google Drive, not a Nuvori server."}</p>
+          <h2 id="cloud-title">{status.connected ? syncStatusText.factDrive : codeText.syncWhenYourDevicesAreApart}</h2>
+          <p className="muted small">{status.connected ? status.account : driveBackupText.cardSub}</p>
         </div>
         <StatusChip kind={indicator.kind} label={indicator.label} />
       </div>
@@ -135,13 +135,13 @@ export function CloudCard() {
             <StatusBanner kind="warning" title={strings.lastDriveSyncDidnTFinish}>{status.lastError}</StatusBanner>
           ) : null}
           <dl className="connection-facts">
-            <div><dt>{strings.lastDriveSync}</dt><dd title={status.lastSync ? formatDateTime(status.lastSync) : undefined}>{status.lastSync ? relativeTime(status.lastSync) : "Not yet"}</dd></div>
+            <div><dt>{strings.lastDriveSync}</dt><dd title={status.lastSync ? formatDateTime(status.lastSync) : undefined}>{status.lastSync ? relativeTime(status.lastSync) : driveBackupText.notYet}</dd></div>
             <div><dt>{strings.storedInYourDrive}</dt><dd>{strings.encryptedChangesOnly}</dd></div>
           </dl>
           {status.checkSeconds !== undefined && (
             <SettingsRow icon={Timer} title={strings.checkGoogleDriveEvery} description={status.checkSeconds === 0
-              ? "Only when this PC unlocks and when you select Sync now. Your own changes still upload about 2 seconds after you save them."
-              : "While this PC is unlocked. Shorter means other devices' changes arrive sooner. Your own changes upload about 2 seconds after you save them."}
+              ? codeText.onlyWhenThisPcUnlocksAnd
+              : codeText.whileThisPcIsUnlockedShorter}
               control={<Segmented label={strings.checkGoogleDriveEvery} size="sm" value={String(status.checkSeconds)} onChange={(value) => void changeInterval(value)}
                 options={DRIVE_CHECK_OPTIONS} />} />
           )}

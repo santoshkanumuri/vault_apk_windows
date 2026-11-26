@@ -8,7 +8,7 @@ import { useToast } from "../app/toast";
 import { useVault } from "../app/vault";
 import { api, type KeepassSummary } from "../lib/api";
 import { cx, plural } from "../lib/format";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 /** The largest KeePass file the import reads (keepass_import.rs MAX_FILE_BYTES). */
 const MAX_BYTES = 32 * 1024 * 1024;
@@ -28,9 +28,9 @@ export function FilePicker({ label, hint, accept, file, onFile }: { label: strin
     <div className="field">
       <label htmlFor={id}>{label}</label>
       <div className="file-picker">
-        <Button id={id} icon={FolderOpen} onClick={() => input.current?.click()} aria-describedby={`${id}-name`}>{file ? "Change file" : "Choose file"}</Button>
-        <span id={`${id}-name`} className={cx("file-picker-name", !file && "muted")}>{file ? `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB` : "No file chosen"}</span>
-        {file && <IconButton label={`Remove ${label.toLowerCase()}`} icon={X} size="sm" onClick={() => { if (input.current) input.current.value = ""; onFile(null); }} />}
+        <Button id={id} icon={FolderOpen} onClick={() => input.current?.click()} aria-describedby={`${id}-name`}>{file ? codeText.changeFile : codeText.chooseFile}</Button>
+        <span id={`${id}-name`} className={cx("file-picker-name", !file && "muted")}>{file ? codeText.kb(file.name, Math.max(1, Math.round(file.size / 1024))) : codeText.noFileChosen}</span>
+        {file && <IconButton label={codeText.remove(label.toLowerCase())} icon={X} size="sm" onClick={() => { if (input.current) input.current.value = ""; onFile(null); }} />}
       </div>
       <input ref={input} type="file" accept={accept} className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(event) => onFile(event.target.files?.[0] ?? null)} />
       <span className="field-hint">{hint}</span>
@@ -72,7 +72,7 @@ export function KeepassImportDialog({ open, onClose }: { open: boolean; onClose:
       const { data, key } = await inputs();
       setPreview(await api.keepassPreview(data, password, key));
     } catch (failure) {
-      setError(typeof failure === "string" ? failure : failure instanceof Error ? failure.message : "The KeePass file couldn't be opened.");
+      setError(typeof failure === "string" ? failure : failure instanceof Error ? failure.message : codeText.theKeepassFileCouldnTBe);
     } finally {
       setBusy("");
     }
@@ -90,7 +90,7 @@ export function KeepassImportDialog({ open, onClose }: { open: boolean; onClose:
       setBusy("");
       close();
     } catch (failure) {
-      setError(typeof failure === "string" ? failure : failure instanceof Error ? failure.message : "The import stopped.");
+      setError(typeof failure === "string" ? failure : failure instanceof Error ? failure.message : codeText.theImportStopped);
       setBusy("");
     }
   };
@@ -124,11 +124,11 @@ export function KeepassImportDialog({ open, onClose }: { open: boolean; onClose:
         <div className="form-stack keepass-preview">
           <p><strong>{file?.name}</strong> holds:</p>
           <ul className="keepass-counts">
-            <li><strong>{preview.logins}</strong> {preview.logins === 1 ? "login" : "logins"}</li>
-            <li><strong>{preview.codes}</strong> authenticator {preview.codes === 1 ? "code" : "codes"}, linked to their logins</li>
-            <li><strong>{preview.notes}</strong> {preview.notes === 1 ? "note" : "notes"} (entries without a password)</li>
+            <li><strong>{preview.logins}</strong> {preview.logins === 1 ? codeText.login : codeText.logins}</li>
+            <li><strong>{preview.codes}</strong> authenticator {preview.codes === 1 ? codeText.code : codeText.codes}, linked to their logins</li>
+            <li><strong>{preview.notes}</strong> {preview.notes === 1 ? codeText.note : codeText.notes} (entries without a password)</li>
           </ul>
-          {preview.groups.length > 0 && <p className="field-hint">Each item gets its KeePass group as a tag, for example "KeePass: {preview.groups[0]}".</p>}
+          {preview.groups.length > 0 && <p className="field-hint">{codeText.eachItemGetsItsKeepassGroup(preview.groups[0])}</p>}
           <p className="field-hint">{strings.loginsAlreadyInNuvoriWithThe}</p>
           {skipped.length > 0 && <p className="field-hint">Not imported: {skipped.join(", ")}.</p>}
         </div>

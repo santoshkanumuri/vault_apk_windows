@@ -1,3 +1,4 @@
+import { codeText } from "../strings.ts";
 export type Strength = { score: 0 | 1 | 2 | 3 | 4; label: string; hint: string };
 
 const common = ["password", "123456", "qwerty", "letmein", "welcome", "admin", "iloveyou", "monkey", "dragon", "abc123", "nuvori"];
@@ -17,10 +18,10 @@ export function passwordStrength(password: string): Strength {
   if (/(.)\1{2,}/.test(password)) bits -= 10;
   if (/^(?:[a-z]+|\d+)$/i.test(password)) bits -= 8;
   const score = (bits < 35 ? 0 : bits < 50 ? 1 : bits < 65 ? 2 : bits < 85 ? 3 : 4) as Strength["score"];
-  const label = ["Weak", "Fair", "Good", "Strong", "Very strong"][score];
-  const hint = password.length < 12 ? "Use at least 12 characters."
-    : score < 2 ? "Add more words, numbers, or symbols."
-    : score < 3 ? "A longer passphrase is even better."
+  const label = ["Weak", "Fair", "Good", "Strong", codeText.veryStrong][score];
+  const hint = password.length < 12 ? codeText.useAtLeast12Characters
+    : score < 2 ? codeText.addMoreWordsNumbersOrSymbols
+    : score < 3 ? codeText.aLongerPassphraseIsEvenBetter
     : "";
   return { score, label, hint };
 }

@@ -1,6 +1,7 @@
 import type { AppSnapshot, BrowserStatus, CloudStatus, SyncStatus } from "./api";
 import type { StatusKind } from "../components/Status";
 import { waitingToApplyHere } from "./syncOverview.ts";
+import { codeText, strings } from "../strings.ts";
 
 export type Indicator = { kind: StatusKind; label: string; detail?: string };
 
@@ -47,11 +48,11 @@ export const SYNC_WORDS = {
 
 export function phaseLabel(status: SyncStatus): string {
   switch (status.phase) {
-    case "connecting": return "Checking that the device belongs to your vault.";
-    case "sending": return "Sending encrypted changes.";
-    case "receiving": return "Receiving encrypted changes.";
-    case "applying": return "Applying received changes.";
-    default: return "Sending and receiving encrypted changes.";
+    case "connecting": return codeText.checkingThatTheDeviceBelongsTo;
+    case "sending": return codeText.sendingEncryptedChanges;
+    case "receiving": return codeText.receivingEncryptedChanges;
+    case "applying": return codeText.applyingReceivedChanges;
+    default: return codeText.sendingAndReceivingEncryptedChanges;
   }
 }
 
@@ -61,7 +62,7 @@ export function phaseLabel(status: SyncStatus): string {
  * only through Google Drive is not shown as still looking for its devices (H1).
  */
 export function syncIndicator(snapshot: AppSnapshot, status: SyncStatus | null, unavailable = false, lastSync?: string, cloud?: CloudStatus | null): Indicator {
-  if (!snapshot.enrolled) return { kind: "neutral", label: SYNC_WORDS.off, detail: "Pair a device to start syncing." };
+  if (!snapshot.enrolled) return { kind: "neutral", label: SYNC_WORDS.off, detail: codeText.pairADeviceToStartSyncing };
   if (unavailable || !status) return { kind: "neutral", label: SYNC_WORDS.searching };
   if (isSyncing(status)) {
     return { kind: "progress", label: status.phase === "connecting" ? SYNC_WORDS.connecting : SYNC_WORDS.transferring, detail: phaseLabel(status) };
@@ -74,30 +75,30 @@ export function syncIndicator(snapshot: AppSnapshot, status: SyncStatus | null, 
   const failed = status.phase === "error" || Boolean(lastError && failures > 0);
   const text = lastError || status.message;
   if (failed && !looksUnreachable(text) && !lastError.includes("busy syncing")) return { kind: "error", label: SYNC_WORDS.attention, detail: text };
-  if (driveOn && cloud?.needsSignIn) return { kind: "error", label: SYNC_WORDS.attention, detail: "Google Drive needs you to sign in again." };
+  if (driveOn && cloud?.needsSignIn) return { kind: "error", label: SYNC_WORDS.attention, detail: codeText.googleDriveNeedsYouToSign };
   if (!status.automatic) {
     // Google Drive is then the only automatic way, so its problem is the status.
     if (driveOn && cloud?.lastError) return { kind: "warning", label: SYNC_WORDS.attention, detail: cloud.lastError };
-    if (!driveOn) return { kind: "neutral", label: SYNC_WORDS.paused, detail: "Automatic checks are off. Sync now still works." };
+    if (!driveOn) return { kind: "neutral", label: SYNC_WORDS.paused, detail: codeText.automaticChecksAreOffSyncNow };
   }
   // A busy or unreachable device is still being looked for, as the phone shows it.
   if (lastError.includes("busy syncing")) return { kind: "warning", label: SYNC_WORDS.searching, detail: lastError };
   if (failed) return { kind: "warning", label: SYNC_WORDS.searching, detail: text };
-  if (status.conflicts > 0) return { kind: "warning", label: "Needs review", detail: `${status.conflicts} edited on both devices` };
+  if (status.conflicts > 0) return { kind: "warning", label: strings.needsReview, detail: codeText.editedOnBothDevices(status.conflicts) };
   const update = (status.needsUpdate ?? []).reduce((sum, device) => sum + device.count, 0);
   if (update > 0) return { kind: "warning", label: SYNC_WORDS.attention, detail: `Update Nuvori to apply ${update} ${update === 1 ? "change" : "changes"} from another device.` };
   const waiting = waitingToApplyHere(status);
-  if (waiting > 0) return { kind: "info", label: SYNC_WORDS.received, detail: "Received changes apply on a later sync." };
+  if (waiting > 0) return { kind: "info", label: SYNC_WORDS.received, detail: codeText.receivedChangesApplyOnALater };
   if (lastSync || status.lastSync) return { kind: "success", label: SYNC_WORDS.checked };
   return { kind: "info", label: SYNC_WORDS.searching };
 }
 
 export function browserIndicator(snapshot: AppSnapshot, status: BrowserStatus | null, unavailable = false): Indicator {
-  if (unavailable || !status) return { kind: "neutral", label: "Unavailable" };
+  if (unavailable || !status) return { kind: "neutral", label: codeText.unavailable };
   const registered = status.hosts.chrome || status.hosts.brave || status.hosts.edge || status.hosts.firefox;
-  if (!registered) return { kind: "warning", label: "Not set up" };
-  if (!status.listening) return { kind: "warning", label: "Not listening" };
-  if (snapshot.vaultState !== "unlocked") return { kind: "neutral", label: "Locked" };
-  if (status.lastRequestAt && Date.now() - status.lastRequestAt < 10 * 60 * 1000) return { kind: "success", label: "Connected" };
-  return { kind: "success", label: "Ready" };
+  if (!registered) return { kind: "warning", label: codeText.notSetUp };
+  if (!status.listening) return { kind: "warning", label: codeText.notListening };
+  if (snapshot.vaultState !== "unlocked") return { kind: "neutral", label: codeText.locked };
+  if (status.lastRequestAt && Date.now() - status.lastRequestAt < 10 * 60 * 1000) return { kind: "success", label: codeText.connected };
+  return { kind: "success", label: codeText.ready };
 }

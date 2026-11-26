@@ -11,7 +11,7 @@ import { useVault } from "../app/vault";
 import { api } from "../lib/api";
 import { alreadyRead, importResult, isOneAuthExport, MAX_EXPORT_BYTES, reviewHeading, reviewLabel,
   type AuthenticatorReview, type AuthenticatorSource } from "../lib/authenticatorImport";
-import { authenticatorImportText as text, strings } from "../strings";
+import { authenticatorImportText as text, codeText, strings } from "../strings";
 
 const message = (failure: unknown, fallback: string) =>
   typeof failure === "string" ? failure : failure instanceof Error && failure.message ? failure.message : fallback;
@@ -155,10 +155,10 @@ export function AuthenticatorImportDialog({ open, onClose }: { open: boolean; on
     }).catch((failure: unknown) => {
       if (closed) return;
       const name = failure instanceof Error ? failure.name : "";
-      setError(name === "NotAllowedError" ? "Camera access was denied."
-        : name === "NotFoundError" ? "No camera was found."
-        : name === "NotReadableError" ? "The camera is busy or unavailable."
-        : "The camera couldn't start.");
+      setError(name === "NotAllowedError" ? codeText.cameraAccessWasDenied
+        : name === "NotFoundError" ? codeText.noCameraWasFound
+        : name === "NotReadableError" ? codeText.theCameraIsBusyOrUnavailable
+        : codeText.theCameraCouldnTStart);
       setNotice("");
       setScanning(false);
     });

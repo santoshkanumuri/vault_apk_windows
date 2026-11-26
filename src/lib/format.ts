@@ -1,3 +1,4 @@
+import { codeText } from "../strings.ts";
 export function cx(...names: Array<string | false | null | undefined>): string {
   return names.filter(Boolean).join(" ");
 }
@@ -19,14 +20,14 @@ export function relativeTime(value: number | string | undefined | null, now = Da
   if (!at) return "Never";
   const diff = Math.round((now - at) / 1000);
   if (diff < -30) return formatDateTime(at);
-  if (diff < 45) return "Just now";
+  if (diff < 45) return codeText.justNow;
   const minutes = Math.round(diff / 60);
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return codeText.minAgo(minutes);
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return codeText.hAgo(hours);
   const days = Math.round(hours / 24);
   if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
+  if (days < 7) return codeText.daysAgo(days);
   return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: new Date(at).getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" });
 }
 
@@ -87,8 +88,8 @@ export function hashIndex(value: string, buckets: number): number {
 
 export function greeting(date = new Date()): string {
   const hour = date.getHours();
-  if (hour < 5) return "Good evening";
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
+  if (hour < 5) return codeText.goodEvening;
+  if (hour < 12) return codeText.goodMorning;
+  if (hour < 18) return codeText.goodAfternoon;
+  return codeText.goodEvening;
 }

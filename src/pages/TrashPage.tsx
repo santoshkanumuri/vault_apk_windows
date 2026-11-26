@@ -12,7 +12,7 @@ import { api, type TrashedItem } from "../lib/api";
 import { typeLabel } from "../lib/entries";
 import { formatDateTime, relativeTime } from "../lib/format";
 import { TRASH_DAYS } from "../lib/trash";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 function label(item: TrashedItem): string {
   return item.itemType === "NOTE" ? "Note" : typeLabel(item.itemType);
@@ -20,7 +20,7 @@ function label(item: TrashedItem): string {
 
 function daysLeft(item: TrashedItem, now: number): string {
   const days = Math.max(0, Math.ceil((item.expiresAt - now) / 86_400_000));
-  return days <= 1 ? "Deleted for good tomorrow" : `${days} days left`;
+  return days <= 1 ? codeText.deletedForGoodTomorrow : codeText.daysLeft(days);
 }
 
 /**
@@ -49,62 +49,62 @@ export function TrashPage() {
       const open = restored.kind === "note"
         ? () => void router.navigate({ page: "note", id: restored.id })
         : () => void router.navigate({ page: "item", id: restored.id });
-      toast.success(item.reason === "join" ? `This PC's version restored as a new ${label(item).toLowerCase()}`
-        : item.reason === "removal" ? `That version restored as a new ${label(item).toLowerCase()}`
-        : `${label(item)} restored`, { action: { label: "Open", run: open } });
+      toast.success(item.reason === "join" ? codeText.thisPcSVersionRestoredAs(label(item).toLowerCase())
+        : item.reason === "removal" ? codeText.thatVersionRestoredAsANew(label(item).toLowerCase())
+        : codeText.restored(label(item)), { action: { label: strings.open, run: open } });
     } catch (failure) {
-      toast.error(failure, "Couldn't restore this item.");
+      toast.error(failure, codeText.couldnTRestoreThisItem);
     }
   };
 
   const forget = async (item: TrashedItem) => {
-    const message = item.reason === "join" ? "This PC forgets its version. Your phone's version stays. You can't undo this." : "This PC forgets its copy. You can't undo this.";
-    if (!(await confirm({ title: `Delete "${item.title || "Untitled"}" for good?`, message, confirmLabel: "Delete for good", danger: true }))) return;
+    const message = item.reason === "join" ? codeText.thisPcForgetsItsVersionYour : codeText.thisPcForgetsItsCopyYou;
+    if (!(await confirm({ title: `Delete "${item.title || "Untitled"}" for good?`, message, confirmLabel: codeText.deleteForGood, danger: true }))) return;
     try {
       await api.forgetTrashed(item.id);
       await trash.reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't delete this item.");
+      toast.error(failure, codeText.couldnTDeleteThisItem);
     }
   };
 
   const empty = async () => {
-    if (!(await confirm({ title: "Empty Recently deleted?", message: `This PC forgets all ${items.length} deleted items. You can't undo this.`, confirmLabel: "Empty", danger: true }))) return;
+    if (!(await confirm({ title: codeText.emptyRecentlyDeleted, message: codeText.thisPcForgetsAllDeletedItems(items.length), confirmLabel: strings.empty, danger: true }))) return;
     try {
       await api.emptyTrash();
       await trash.reload();
-      toast.success("Recently deleted is empty");
+      toast.success(codeText.recentlyDeletedIsEmpty);
     } catch (failure) {
-      toast.error(failure, "Couldn't empty Recently deleted.");
+      toast.error(failure, codeText.couldnTEmptyRecentlyDeleted);
     }
   };
 
   return (
     <div className="page page-narrow">
       <div className="toolbar">
-        <p className="toolbar-text">Items deleted on this PC or on a paired device stay here for {TRASH_DAYS} days. A restored item syncs to your other devices.</p>
+        <p className="toolbar-text">{codeText.itemsDeletedOnThisPcOr(TRASH_DAYS)}</p>
         <div className="toolbar-group">
           <Button variant="ghost" icon={Trash2} onClick={() => void empty()} disabled={items.length === 0}>{strings.empty}</Button>
         </div>
       </div>
       {joinCopies > 0 && (
-        <StatusBanner kind="info" title={joinCopies === 1 ? "1 item needs review" : `${joinCopies} items need review`}>
-          When this PC joined your phone's vault, your phone had another version of {joinCopies === 1 ? "this item" : "these items"}. Your phone's version is kept. Compare, then restore this PC's version as a new item, or delete it. {joinCopies === 1 ? "It stays" : "They stay"} here until you choose.
+        <StatusBanner kind="info" title={joinCopies === 1 ? codeText.t1ItemNeedsReview : codeText.itemsNeedReview(joinCopies)}>
+          When this PC joined your phone's vault, your phone had another version of {joinCopies === 1 ? codeText.thisItem : codeText.theseItems}. Your phone's version is kept. Compare, then restore this PC's version as a new item, or delete it. {joinCopies === 1 ? codeText.itStays : codeText.theyStay} here until you choose.
         </StatusBanner>
       )}
       {trash.loading && !trash.data ? <div className="card card-padded center"><Spinner label={strings.loading} /></div>
-        : items.length === 0 ? <div className="card"><EmptyState icon={ArchiveRestore} title={strings.nothingDeletedRecently} body={`Deleted passwords, cards, codes and notes stay here for ${TRASH_DAYS} days.`} /></div>
+        : items.length === 0 ? <div className="card"><EmptyState icon={ArchiveRestore} title={strings.nothingDeletedRecently} body={codeText.deletedPasswordsCardsCodesAndNotes(TRASH_DAYS)} /></div>
         : (
           <ul className="card list trash-list">
             {items.map((item) => (
               <li key={item.id} className="trash-row">
                 <Avatar title={item.title || "?"} />
                 <span className="trash-text">
-                  <span className="trash-title">{item.title || "Untitled"}</span>
+                  <span className="trash-title">{item.title || codeText.untitled}</span>
                   <span className="trash-meta">
                     {item.reason === "join" ? <><span className="badge">{strings.needsReview}</span> {label(item)} · this PC's version · set aside </>
                       : item.reason === "removal" ? <><span className="badge badge-removed" title={strings.thisPcWasRemovedFromThe}>{strings.removed}</span> {label(item)} · a paired device's version, not applied · kept </>
-                      : <>{label(item)} · deleted {item.deletedElsewhere ? "on another device " : ""}</>}
+                      : <>{label(item)} · deleted {item.deletedElsewhere ? codeText.onAnotherDevice : ""}</>}
                     <time title={formatDateTime(item.deletedAt)}>{relativeTime(item.deletedAt, now).replace(/^Just/, "just").replace(/^Yesterday/, "yesterday")}</time>{item.reason === "join" ? "" : ` · ${daysLeft(item, now)}`}
                   </span>
                 </span>

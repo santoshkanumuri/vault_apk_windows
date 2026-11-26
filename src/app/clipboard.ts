@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { api } from "../lib/api";
 import { usePreferences } from "./settings";
 import { useToast } from "./toast";
+import { codeText } from "../strings";
 
 let clearTimer: number | undefined;
 let generation = 0;
@@ -49,7 +50,7 @@ export function useCopy() {
   return useCallback(async (value: string | (() => Promise<string | null> | string | null), options: CopyOptions) => {
     try {
       const text = typeof value === "function" ? await value() : value;
-      if (!text) { toast.warning(`Nothing to copy for ${options.label.toLowerCase()}.`); return false; }
+      if (!text) { toast.warning(codeText.nothingToCopyFor(options.label.toLowerCase())); return false; }
       // Secrets go through the backend: kept out of clipboard history (Win+V) and cloud clipboard,
       // and cleared by the backend even with no window open. An older backend, or the browser
       // preview, falls back to the page's clipboard and timer below.
@@ -65,10 +66,10 @@ export function useCopy() {
         }, clipboardSeconds * 1000);
       }
       // Clearing is best effort (only while Nuvori is running), so the toast does not promise it.
-      toast.success(options.message ?? `${options.label} copied`);
+      toast.success(options.message ?? codeText.copied(options.label));
       return true;
     } catch (error) {
-      toast.error(error, `Couldn't copy ${options.label.toLowerCase()}.`);
+      toast.error(error, codeText.couldnTCopy(options.label.toLowerCase()));
       return false;
     }
   }, [toast, clipboardSeconds]);

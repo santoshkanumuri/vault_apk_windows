@@ -16,7 +16,7 @@ import { codeLabel, codesToLink } from "../../lib/linkedCode";
 import { cx } from "../../lib/format";
 import { passwordStrength } from "../../lib/strength";
 import { isValidSecret } from "../../lib/totp";
-import { strings } from "../../strings";
+import { codeText, strings } from "../../strings";
 
 /** Registers a "Discard changes?" guard while the form is dirty. */
 export function useUnsavedGuard(dirty: boolean) {
@@ -24,7 +24,7 @@ export function useUnsavedGuard(dirty: boolean) {
   const confirm = useConfirm();
   useEffect(() => {
     if (!dirty) { setGuard(null); return; }
-    setGuard(() => confirm({ title: "Discard changes?", message: "Your edits haven't been saved.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }));
+    setGuard(() => confirm({ title: codeText.discardChanges, message: codeText.yourEditsHavenTBeenSaved, confirmLabel: codeText.discard, cancelLabel: codeText.keepEditing, danger: true }));
     return () => setGuard(null);
   }, [dirty, setGuard, confirm]);
 }
@@ -81,7 +81,7 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
     const found = validate();
     setErrors(found);
     if (Object.values(found).some(Boolean)) {
-      setFormError("Check the highlighted fields.");
+      setFormError(codeText.checkTheHighlightedFields);
       window.setTimeout(() => form.current?.querySelector<HTMLElement>("[aria-invalid=true]")?.focus(), 0);
       return;
     }
@@ -90,13 +90,13 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
       const saved = await api.saveEntry({ ...draft, title: draft.title.trim() });
       upsertEntry(saved);
       setDraft(saved);
-      toast.success(`${capitalize(info.singular)} saved`);
+      toast.success(codeText.saved2(capitalize(info.singular)));
       router.setGuard(null);
       if (existing) await router.back();
       else await router.navigate({ page: "item", id: saved.id }, { replace: true });
       void refresh();
     } catch (failure) {
-      toast.error(failure, "Couldn't save this item.");
+      toast.error(failure, codeText.couldnTSaveThisItem);
       setBusy(false);
     }
   };
@@ -110,12 +110,12 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
       <form ref={form} className="card card-padded form-stack" onSubmit={(event) => void save(event)} noValidate>
         {formError && <StatusBanner kind="error">{formError}</StatusBanner>}
         {type === "AUTOFILL" ? <ProfileFields draft={draft} set={set} error={errors.primaryValue} /> : <>
-          <TextField label={type === "CARD" ? "Card name" : type === "PASSWORD" || type === "AUTHENTICATOR" ? "Service" : "Title"} value={draft.title} onValue={(v) => set("title", v)} error={errors.title} placeholder={type === "CARD" ? "e.g. Travel card" : type === "PASSWORD" ? "e.g. GitHub" : undefined} autoFocus={!existing} required maxLength={300} />
+          <TextField label={type === "CARD" ? codeText.cardName : type === "PASSWORD" || type === "AUTHENTICATOR" ? codeText.service : strings.title} value={draft.title} onValue={(v) => set("title", v)} error={errors.title} placeholder={type === "CARD" ? "e.g. Travel card" : type === "PASSWORD" ? "e.g. GitHub" : undefined} autoFocus={!existing} required maxLength={300} />
           {type === "PASSWORD" && <LoginFields draft={draft} set={set} errors={errors} codes={codesToLink(entries)} />}
           {type === "CARD" && <>
             <TextField label={strings.cardNumber} value={draft.primaryValue} onValue={(v) => set("primaryValue", v.replace(/\D/g, "").slice(0, 19))} error={errors.primaryValue} inputMode="numeric" autoComplete="off" className="mono" required />
             <div className="field-row">
-              <SelectField label={strings.type} value={draft.cardKind} onValue={(v) => set("cardKind", v as EntryDraft["cardKind"])} options={[{ value: "CREDIT", label: "Credit" }, { value: "DEBIT", label: "Debit" }]} />
+              <SelectField label={strings.type} value={draft.cardKind} onValue={(v) => set("cardKind", v as EntryDraft["cardKind"])} options={[{ value: "CREDIT", label: codeText.credit }, { value: "DEBIT", label: codeText.debit }]} />
               <TextField label={strings.network} value={draft.network} onValue={(v) => set("network", v)} placeholder={strings.visaMastercard} />
             </div>
             <TextField label={strings.nameOnCard} value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} autoComplete="off" />
@@ -159,7 +159,7 @@ export function ItemEditorPage({ id, category }: { id?: string; category: Catego
 
         <div className="form-actions">
           <Button variant="ghost" onClick={() => void router.back()} disabled={busy}>{strings.cancel}</Button>
-          <Button variant="primary" type="submit" icon={Save} busy={busy}>{existing ? "Save changes" : `Save ${info.singular}`}</Button>
+          <Button variant="primary" type="submit" icon={Save} busy={busy}>{existing ? codeText.saveChanges : codeText.save(info.singular)}</Button>
         </div>
       </form>
     </div>
@@ -173,7 +173,7 @@ function LoginFields({ draft, set, errors, codes }: { draft: EntryDraft; set: <K
   const [generateError, setGenerateError] = useState("");
   // One click uses the settings last chosen in the generator on this PC.
   const quickGenerate = () => generateWithSavedSettings().then((value) => { setGenerateError(""); set("secondaryValue", value); },
-    () => setGenerateError("Couldn't generate a passphrase. Open the generator options and try again."));
+    () => setGenerateError(codeText.couldnTGenerateAPassphraseOpen));
   return <>
     <TextField label={strings.usernameOrEmail} value={draft.primaryValue} onValue={(v) => set("primaryValue", v)} autoComplete="off" spellCheck={false} />
     <PasswordField label={strings.password} value={draft.secondaryValue} onValue={(v) => set("secondaryValue", v)} error={errors.secondaryValue || generateError || undefined} autoComplete="new-password" required

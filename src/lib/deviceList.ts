@@ -1,7 +1,7 @@
 // How the Devices list on the Sync page groups and explains devices. Windows can't add or remove
 // devices: only the managing phone signs those changes, so this PC tells the user where to do it.
 import type { MemberDevice } from "./api";
-import { accountText } from "../strings.ts";
+import { accountText, codeText, strings } from "../strings.ts";
 
 /** An active device not seen for this long is shown as possibly unused. */
 export const STALE_AFTER_DAYS = 30;
@@ -39,8 +39,8 @@ export function splitDevices(devices: MemberDevice[]): { active: MemberDevice[];
 /** The one-line hint under a device that may be lost or unused. */
 export function staleHint(device: MemberDevice, managerName?: string, now = Date.now()): string {
   const days = daysSinceSeen(device, now);
-  if (device.isManager) return `Not seen for ${days} days. Only this phone can add or remove devices, so keep it, or move the managing role to another phone.`;
-  return `Not seen for ${days} days. If you no longer use it, remove it on ${managerLabel(managerName)} so it stops counting toward your device limit.`;
+  if (device.isManager) return codeText.notSeenForDaysOnlyThis(days);
+  return codeText.notSeenForDaysIfYou(days, managerLabel(managerName));
 }
 
 /**

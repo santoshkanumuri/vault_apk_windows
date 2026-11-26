@@ -5,6 +5,7 @@ import { useRouter } from "./router";
 import { useToast } from "./toast";
 import { useVault } from "./vault";
 import { newestTime } from "../lib/syncState";
+import { codeText } from "../strings";
 
 /** Current time, ticking on the second boundary. */
 export function useNow(intervalMs = 1000, enabled = true): number {
@@ -124,9 +125,9 @@ export function useLock() {
       clearClipboardNow();
       router.reset();
       setSnapshot(next);
-      toast.info(options?.reason ?? "Vault locked");
+      toast.info(options?.reason ?? codeText.vaultLocked);
     } catch (error) {
-      toast.error(error, "Couldn't lock the vault.");
+      toast.error(error, codeText.couldnTLockTheVault);
     }
   }, [router, setSnapshot, toast, unlocked]);
 }

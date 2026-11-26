@@ -16,7 +16,7 @@ import { buildIndex, matchesFilter } from "../../lib/search";
 import { FolderDialog } from "../FolderDialog";
 import { EntryQuickActions } from "./actions";
 import { FilterInput, FolderPicker, SortPicker } from "./Toolbar";
-import { strings } from "../../strings";
+import { codeText, strings } from "../../strings";
 
 export function ItemsListPage({ category }: { category: Exclude<Category, "codes"> }) {
   const info = categories[category];
@@ -45,27 +45,27 @@ export function ItemsListPage({ category }: { category: Exclude<Category, "codes
   return (
     <div className="page">
       <div className="toolbar">
-        <FilterInput value={filter} onChange={setFilter} placeholder={`Filter ${info.label.toLowerCase()}`} />
+        <FilterInput value={filter} onChange={setFilter} placeholder={codeText.filter(info.label.toLowerCase())} />
         <div className="toolbar-group">
-          <FolderPicker folders={folders} value={folderId} onChange={setFolderId} allLabel="All folders"
+          <FolderPicker folders={folders} value={folderId} onChange={setFolderId} allLabel={codeText.allFolders}
             onNew={() => setFolderDialog({ folder: null })}
             onEdit={() => setFolderDialog({ folder: folders.find((folder) => folder.id === folderId) ?? null })} />
           <SortPicker value={sort} onChange={setSort} />
-          <Button variant="primary" icon={Plus} onClick={add} className="toolbar-add">Add {info.singular}</Button>
+          <Button variant="primary" icon={Plus} onClick={add} className="toolbar-add">{codeText.add(info.singular)}</Button>
         </div>
       </div>
 
       {!loaded ? <div className="card card-padded center"><Spinner label={strings.loading} /></div>
         : ofType.length === 0 ? (
-          <div className="card"><EmptyState icon={info.icon} title={`No ${info.label.toLowerCase()} yet`} body={`Add your first ${info.singular} to keep it in your encrypted vault.`} action={<Button variant="primary" icon={Plus} onClick={add}>Add {info.singular}</Button>} /></div>
+          <div className="card"><EmptyState icon={info.icon} title={codeText.noYet(info.label.toLowerCase())} body={codeText.addYourFirstToKeepIt(info.singular)} action={<Button variant="primary" icon={Plus} onClick={add}>{codeText.add(info.singular)}</Button>} /></div>
         ) : visible.length === 0 ? (
-          <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} body="Try another word, or clear the folder filter." action={<Button onClick={() => { setFilter(""); setFolderId(""); }}>{strings.clearFilters}</Button>} /></div>
+          <div className="card"><EmptyState icon={SearchX} title={strings.noMatches} body={codeText.tryAnotherWordOrClearThe} action={<Button onClick={() => { setFilter(""); setFolderId(""); }}>{strings.clearFilters}</Button>} /></div>
         ) : (
           <>
             <div className="list-head">
-              <p className="list-count">{plural(visible.length, info.singular)}{visible.length !== ofType.length ? ` of ${ofType.length}` : ""}</p>
+              <p className="list-count">{plural(visible.length, info.singular)}{visible.length !== ofType.length ? codeText.of(ofType.length) : ""}</p>
               {info.type === "CARD" && <Segmented label={strings.view} size="sm" value={view} onChange={setView}
-                options={[{ value: "cards", label: "Cards", icon: CreditCard }, { value: "list", label: "List", icon: List }]} />}
+                options={[{ value: "cards", label: codeText.cards, icon: CreditCard }, { value: "list", label: codeText.list, icon: List }]} />}
             </div>
             {wallet ? (
               <ul className="card-grid" aria-label={info.label}>
@@ -81,12 +81,12 @@ export function ItemsListPage({ category }: { category: Exclude<Category, "codes
               {visible.map((entry) => {
                 const subtitle = subtitles.get(entry.id);
                 return (
-                  <ListRow key={entry.id} id={entry.id} title={entry.title || "Untitled"} subtitle={subtitle} favorite={entry.favorite}
+                  <ListRow key={entry.id} id={entry.id} title={entry.title || codeText.untitled} subtitle={subtitle} favorite={entry.favorite}
                     passkey={entry.type === "PASSWORD" && passkeyIds.has(entry.id)}
                     leading={<Avatar title={entry.title || info.label} cardColor={entry.type === "CARD" ? entry.color : undefined} {...iconHints(entry, entries)} />}
                     highlighted={router.highlight === entry.id}
                     entering={fresh.has(entry.id)}
-                    openLabel={`Open ${entry.title}`}
+                    openLabel={codeText.open2(entry.title)}
                     onOpen={() => void router.navigate({ page: "item", id: entry.id })}
                     actions={<EntryQuickActions entry={entry} />} />
                 );

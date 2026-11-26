@@ -1,4 +1,5 @@
 import { NETWORK_MARKS, type NetworkMark } from "./networkMarks";
+import { codeText } from "../strings.ts";
 
 /** The network from the card number's prefix, when the Network field is empty. Same rules as the phone. */
 export function cardNetwork(number: string): string {
@@ -7,11 +8,11 @@ export function cardNetwork(number: string): string {
   const two = n(2), three = n(3), four = n(4), six = n(6);
   if (digits.startsWith("4")) return "Visa";
   if ((two >= 51 && two <= 55) || (four >= 2221 && four <= 2720)) return "Mastercard";
-  if (two === 34 || two === 37) return "American Express";
+  if (two === 34 || two === 37) return codeText.americanExpress;
   if (digits.startsWith("6011") || two === 65 || (three >= 644 && three <= 649) || (six >= 622126 && six <= 622925)) return "Discover";
   if (four >= 3528 && four <= 3589) return "JCB";
   if (two === 62) return "UnionPay";
-  if ((three >= 300 && three <= 305) || [36, 38, 39].includes(two)) return "Diners Club";
+  if ((three >= 300 && three <= 305) || [36, 38, 39].includes(two)) return codeText.dinersClub;
   return "";
 }
 

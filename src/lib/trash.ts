@@ -1,9 +1,10 @@
 import { api } from "./api";
+import { codeText } from "../strings.ts";
 
 /** Shown in delete confirmations: how long Recently deleted keeps an item on this PC. */
 export const TRASH_DAYS = 30;
 
-export const deleteMessage = `It will be removed from this PC and from paired devices on the next sync. This PC keeps a copy in Recently deleted for ${TRASH_DAYS} days.`;
+export const deleteMessage = codeText.itWillBeRemovedFromThis(TRASH_DAYS);
 
 /**
  * Undo for a delete: restores the copy that this PC just put in Recently deleted. It comes back as

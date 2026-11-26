@@ -1,6 +1,7 @@
 import { CircleHelp, Clock3, CreditCard, KeyRound, UserRound, type LucideIcon } from "lucide-react";
 import type { EntryDraft, EntryType, VaultEntry, VaultGroup } from "./api";
 import { cardLast4, hostFromUrl, maskCard } from "./format";
+import { codeText, strings } from "../strings.ts";
 
 export type Category = "logins" | "cards" | "codes" | "questions" | "autofill";
 
@@ -13,11 +14,11 @@ export type CategoryInfo = {
 };
 
 export const categories: Record<Category, CategoryInfo> = {
-  logins: { key: "logins", type: "PASSWORD", label: "Passwords", singular: "password", icon: KeyRound },
-  cards: { key: "cards", type: "CARD", label: "Cards", singular: "card", icon: CreditCard },
-  codes: { key: "codes", type: "AUTHENTICATOR", label: "Codes", singular: "code", icon: Clock3 },
-  questions: { key: "questions", type: "QUESTION", label: "Questions", singular: "question", icon: CircleHelp },
-  autofill: { key: "autofill", type: "AUTOFILL", label: "Autofill", singular: "profile", icon: UserRound }
+  logins: { key: "logins", type: "PASSWORD", label: codeText.passwords, singular: "password", icon: KeyRound },
+  cards: { key: "cards", type: "CARD", label: codeText.cards, singular: "card", icon: CreditCard },
+  codes: { key: "codes", type: "AUTHENTICATOR", label: strings.codes, singular: "code", icon: Clock3 },
+  questions: { key: "questions", type: "QUESTION", label: codeText.questions, singular: "question", icon: CircleHelp },
+  autofill: { key: "autofill", type: "AUTOFILL", label: codeText.autofill, singular: "profile", icon: UserRound }
 };
 
 export const categoryOrder: Category[] = ["cards", "logins", "codes", "questions", "autofill"];
@@ -29,8 +30,8 @@ export function categoryForType(type: EntryType): Category {
 export type Profile = { name: string; email: string; phone: string; address1: string; address2: string; unit: string; city: string; state: string; postalCode: string; country: string };
 export const emptyProfile: Profile = { name: "", email: "", phone: "", address1: "", address2: "", unit: "", city: "", state: "", postalCode: "", country: "" };
 export const profileFields: ReadonlyArray<readonly [keyof Profile, string]> = [
-  ["name", "Full name"], ["email", "Email"], ["phone", "Phone"], ["address1", "Address line 1"], ["address2", "Address line 2"],
-  ["unit", "Flat or unit"], ["city", "City"], ["state", "State or region"], ["postalCode", "Postal code"], ["country", "Country"]
+  ["name", codeText.fullName], ["email", "Email"], ["phone", "Phone"], ["address1", codeText.addressLine1], ["address2", codeText.addressLine2],
+  ["unit", codeText.flatOrUnit], ["city", "City"], ["state", codeText.stateOrRegion], ["postalCode", codeText.postalCode], ["country", "Country"]
 ];
 
 export function profileFrom(value: string): Profile {
@@ -52,8 +53,8 @@ export function entrySubtitle(entry: VaultEntry): string {
     case "CARD": return [entry.cardKind === "DEBIT" ? "Debit" : "Credit", entry.network, maskCard(entry.primaryValue)].filter(Boolean).join(" · ");
     case "PASSWORD": return [entry.primaryValue, hostFromUrl(entry.tertiaryValue)].filter(Boolean).join(" · ") || "Password";
     case "AUTHENTICATOR": return entry.primaryValue || "Authenticator";
-    case "QUESTION": return entry.primaryValue || "Security question";
-    case "AUTOFILL": { const p = profileFrom(entry.primaryValue); return [p.name, p.email].filter(Boolean).join(" · ") || "Contact profile"; }
+    case "QUESTION": return entry.primaryValue || codeText.securityQuestion;
+    case "AUTOFILL": { const p = profileFrom(entry.primaryValue); return [p.name, p.email].filter(Boolean).join(" · ") || codeText.contactProfile; }
   }
 }
 

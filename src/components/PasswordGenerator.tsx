@@ -9,7 +9,7 @@ import { Button, IconButton } from "./Button";
 import { Dialog } from "./Dialog";
 import { Segmented, Toggle } from "./Field";
 import { StatusBanner } from "./Status";
-import { strings } from "../strings";
+import { codeText, strings } from "../strings";
 
 /** One click: a new password or passphrase with the settings last used on this PC. */
 export async function generateWithSavedSettings(): Promise<string> {
@@ -18,7 +18,7 @@ export async function generateWithSavedSettings(): Promise<string> {
 }
 
 const separatorOptions: ReadonlyArray<{ value: Separator; label: string }> = [
-  { value: "-", label: "Hyphen" }, { value: ".", label: "Period" }, { value: "_", label: "Underscore" }, { value: " ", label: "Space" },
+  { value: "-", label: codeText.hyphen }, { value: ".", label: codeText.period }, { value: "_", label: codeText.underscore }, { value: " ", label: codeText.space },
 ];
 
 /** Display only: a long passphrase wraps after a separator instead of inside a word. */
@@ -61,7 +61,7 @@ export function PasswordGeneratorDialog({ open, onClose, onUse }: { open: boolea
 
   useEffect(() => {
     if (!open || settings.mode !== "passphrase" || words) return;
-    loadWordList().then(setWords, () => setError("The word list couldn't be loaded. Use a password instead."));
+    loadWordList().then(setWords, () => setError(codeText.theWordListCouldnTBe));
   }, [open, settings.mode, words]);
 
   const regenerate = useCallback(() => {
@@ -81,16 +81,16 @@ export function PasswordGeneratorDialog({ open, onClose, onUse }: { open: boolea
     <Dialog open={open} onClose={onClose} title={strings.generateAPassword} size="md"
       footer={<>
         <Button variant="ghost" onClick={onClose}>{strings.cancel}</Button>
-        <Button variant="primary" disabled={!value} onClick={() => { saveGeneratorSettings(settings); onUse(value); }}>Use {noun}</Button>
+        <Button variant="primary" disabled={!value} onClick={() => { saveGeneratorSettings(settings); onUse(value); }}>{codeText.use(noun)}</Button>
       </>}>
       <div className="form-stack">
         <Segmented label={strings.type} value={settings.mode} onChange={(mode) => change({ mode })}
-          options={[{ value: "password", label: "Password" }, { value: "passphrase", label: "Passphrase" }]} />
+          options={[{ value: "password", label: strings.password }, { value: "passphrase", label: codeText.passphrase }]} />
         <div className="generator-preview">
-          <output className="mono" aria-live="polite" aria-label={`Generated ${noun}`}>{value ? <Breakable value={value} settings={settings} /> : "…"}</output>
-          <IconButton label={`New ${noun}`} icon={RefreshCw} onClick={regenerate} disabled={!value} />
+          <output className="mono" aria-live="polite" aria-label={codeText.generated(noun)}>{value ? <Breakable value={value} settings={settings} /> : "…"}</output>
+          <IconButton label={codeText.new(noun)} icon={RefreshCw} onClick={regenerate} disabled={!value} />
         </div>
-        <p className="field-hint">{strengthLabel(bits)} · about {bits} bits of randomness</p>
+        <p className="field-hint">{codeText.aboutBitsOfRandomness(strengthLabel(bits), bits)}</p>
         {error && <StatusBanner kind="error">{error}</StatusBanner>}
         {settings.mode === "password" ? <>
           <Range label={strings.length} value={settings.length} min={LENGTH_RANGE.min} max={LENGTH_RANGE.max} onChange={(length) => change({ length })} />
@@ -99,7 +99,7 @@ export function PasswordGeneratorDialog({ open, onClose, onUse }: { open: boolea
             <Option label={strings.lowercase} detail="a–z" checked={settings.lowercase} disabled={onlySet(settings.lowercase)} onChange={(lowercase) => change({ lowercase })} />
             <Option label={strings.numbers} detail="0–9" checked={settings.digits} disabled={onlySet(settings.digits)} onChange={(digits) => change({ digits })} />
             <Option label={strings.symbols} detail="! @ # $ % ^ & * - _ = + ?" checked={settings.symbols} disabled={onlySet(settings.symbols)} onChange={(symbols) => change({ symbols })} />
-            <Option label={strings.avoidSimilarCharacters} detail="Leaves out l, I, O, 0 and 1" checked={settings.avoidSimilar} onChange={(avoidSimilar) => change({ avoidSimilar })} />
+            <Option label={strings.avoidSimilarCharacters} detail={codeText.leavesOutLIO0} checked={settings.avoidSimilar} onChange={(avoidSimilar) => change({ avoidSimilar })} />
           </div>
         </> : <>
           <Range label={strings.words} value={settings.words} min={WORDS_RANGE.min} max={WORDS_RANGE.max} onChange={(count) => change({ words: count })} />
@@ -109,7 +109,7 @@ export function PasswordGeneratorDialog({ open, onClose, onUse }: { open: boolea
           </div>
           <div className="generator-options">
             <Option label={strings.capitalizeWords} checked={settings.capitalize} onChange={(capitalize) => change({ capitalize })} />
-            <Option label={strings.includeANumber} detail="Many websites ask for one" checked={settings.includeNumber} onChange={(includeNumber) => change({ includeNumber })} />
+            <Option label={strings.includeANumber} detail={codeText.manyWebsitesAskForOne} checked={settings.includeNumber} onChange={(includeNumber) => change({ includeNumber })} />
           </div>
         </>}
       </div>

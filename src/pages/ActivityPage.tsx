@@ -11,7 +11,7 @@ import { useToast } from "../app/toast";
 import { PasskeyRequestsSection } from "./PasskeyRequests";
 import { api, type ActivityCategory, type ActivityEvent } from "../lib/api";
 import { cx, formatDateTime, relativeTime, toMillis } from "../lib/format";
-import { strings } from "../strings";
+import { codeText, passwordImportText, strings } from "../strings";
 
 const categoryLabels: Record<ActivityCategory, string> = { vault: "Vault", items: "Items", sync: "Sync", pairing: "Pairing", browser: "Browser", security: "Security" };
 
@@ -50,13 +50,13 @@ export function ActivityPage() {
   }, [log.data]);
 
   const clear = async () => {
-    if (!(await confirm({ title: "Clear the activity log?", message: "This removes the events shown here. It doesn't change your vault.", confirmLabel: "Clear log", danger: true }))) return;
+    if (!(await confirm({ title: codeText.clearTheActivityLog, message: codeText.thisRemovesTheEventsShownHere, confirmLabel: codeText.clearLog, danger: true }))) return;
     try {
       await api.clearActivityLog();
-      toast.success("Activity log cleared");
+      toast.success(codeText.activityLogCleared);
       await log.reload();
     } catch (failure) {
-      toast.error(failure, "Couldn't clear the activity log.");
+      toast.error(failure, codeText.couldnTClearTheActivityLog);
     }
   };
 
@@ -66,7 +66,7 @@ export function ActivityPage() {
         <div className="chip-filter" role="radiogroup" aria-label={strings.filterByCategory}>
           {(["all", ...Object.keys(categoryLabels)] as Array<ActivityCategory | "all">).map((key) => (
             <button key={key} type="button" role="radio" aria-checked={filter === key} className={cx("filter-chip", filter === key && "is-selected")} onClick={() => setFilter(key)}>
-              {key === "all" ? "All" : categoryLabels[key]}
+              {key === "all" ? passwordImportText.filterAll : categoryLabels[key]}
               {key !== "all" && counts.get(key) ? <span className="filter-chip-count">{counts.get(key)}</span> : null}
             </button>
           ))}
@@ -76,8 +76,8 @@ export function ActivityPage() {
         </div>
       </div>
       {log.loading && !log.data ? <div className="card card-padded center"><Spinner label={strings.loadingActivity} /></div>
-        : log.error && !log.data ? <div className="card"><EmptyState icon={ScrollText} title={strings.activityLogUnavailable} body="This version of Nuvori doesn't record activity yet, or the log couldn't be read." action={<Button onClick={() => void log.reload()}>{strings.tryAgain}</Button>} /></div>
-        : events.length === 0 ? <div className="card"><EmptyState icon={ScrollText} title={filter === "all" ? "No activity yet" : `No ${categoryLabels[filter as ActivityCategory].toLowerCase()} activity`} body="Unlocks, saves, syncs, and browser fills show up here. Events are kept until you close Nuvori." /></div>
+        : log.error && !log.data ? <div className="card"><EmptyState icon={ScrollText} title={strings.activityLogUnavailable} body={codeText.thisVersionOfNuvoriDoesnT} action={<Button onClick={() => void log.reload()}>{strings.tryAgain}</Button>} /></div>
+        : events.length === 0 ? <div className="card"><EmptyState icon={ScrollText} title={filter === "all" ? codeText.noActivityYet : codeText.noActivity(categoryLabels[filter as ActivityCategory].toLowerCase())} body={codeText.unlocksSavesSyncsAndBrowserFills} /></div>
         : <ActivityList events={events} />}
       <p className="detail-meta">{strings.activityNeverIncludesPasswordsUsernamesOr}</p>
       <PasskeyRequestsSection />
