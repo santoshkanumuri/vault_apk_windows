@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SignInsState } from "./signIns";
+import type { HelloUnlock } from "./helloWindow";
 
 export type { SignIn, SignInsState } from "./signIns";
 
@@ -9,6 +10,10 @@ export type VaultState = "locked" | "unlocked" | "notConfigured";
 export type AppSnapshot = {
   vaultState: VaultState;
   helloEnabled: boolean;
+  /** What the lock screen does about Windows Hello (hello_window.rs, lib/helloWindow.ts). */
+  helloUnlock?: HelloUnlock;
+  /** While unlocked: how often the master password is asked for again, in ms (0 is every unlock). */
+  masterPasswordIntervalMs?: number | null;
   counts: Record<"cards" | "logins" | "codes" | "questions" | "autofill" | "notes", number>;
   pairedDevices: number;
   enrolled: boolean;
@@ -375,6 +380,8 @@ export const api = {
   unlockHello: () => call<AppSnapshot>("unlock_hello"),
   enableHello: (password: string) => call<AppSnapshot>("enable_hello", { password }),
   disableHello: () => call<AppSnapshot>("disable_hello"),
+  /** Every unlock (0), after 1 day or after 1 week. A new choice ends the Windows Hello window. */
+  setMasterPasswordInterval: (intervalMs: number) => call<AppSnapshot>("set_master_password_interval", { intervalMs }),
   lockVault: () => call<AppSnapshot>("lock_vault"),
   stopSharing: () => call<AppSnapshot>("stop_sharing"),
   resetVault: (password: string) => call<AppSnapshot>("reset_vault", { password }),

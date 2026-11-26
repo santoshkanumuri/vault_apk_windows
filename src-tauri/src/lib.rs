@@ -22,6 +22,7 @@ pub mod entry_merge;
 pub mod epoch_keys;
 pub mod duplicates;
 pub mod hello;
+pub mod hello_window;
 pub mod identity;
 pub mod incoming;
 pub mod incoming_apply;
@@ -1753,6 +1754,12 @@ struct Counts {
 struct AppSnapshot {
     vault_state: &'static str,
     hello_enabled: bool,
+    /// What the lock screen does about Windows Hello (`VaultStore::hello_lock_screen`): `off`,
+    /// `ready`, `password` (the master password first) or `everyUnlock`.
+    hello_unlock: &'static str,
+    /// While unlocked: how often the master password is asked for again, in milliseconds (0 is
+    /// every unlock). Unknown while locked: it is kept in the encrypted database.
+    master_password_interval_ms: Option<i64>,
     counts: Counts,
     paired_devices: u32,
     enrolled: bool,
@@ -1796,6 +1803,8 @@ impl AppState {
                 "notConfigured"
             },
             hello_enabled: self.store.hello_enabled(),
+            hello_unlock: self.store.hello_lock_screen(),
+            master_password_interval_ms: self.unlocked.as_ref().map(|vault| self.store.master_password_interval(vault)),
             counts: Counts {
                 cards: *entry_counts.get("CARD").unwrap_or(&0),
                 logins: *entry_counts.get("PASSWORD").unwrap_or(&0),
@@ -2116,6 +2125,8 @@ async fn enable_hello(
             return Err("The vault changed while Windows Hello was open. Try again.".to_owned());
         }
         app.store.enable_hello(&sealed).map_err(public_vault_error)?;
+        // The master password was checked above, so the Windows Hello window starts now.
+        app.store.note_master_password(vault);
         activity::log(Level::Success, Category::Security, "Windows Hello unlock turned on");
         app.snapshot()
     })
@@ -2143,6 +2154,13 @@ async fn unlock_hello(
                 return Err(
                     "Set up Windows Hello after unlocking with your master password".to_owned(),
                 );
+            }
+            // Past the window there's no Hello prompt at all; `VaultStore::unlock_hello` checks the
+            // window again in the database after the prompt.
+            match app.store.hello_lock_screen() {
+                "ready" => {}
+                "everyUnlock" => return Err(hello_window::EVERY_UNLOCK.to_owned()),
+                _ => return Err(hello_window::CLOSED.to_owned()),
             }
             app.store.hello_file().map_err(public_vault_error)?
         };
@@ -2230,6 +2248,26 @@ async fn disable_hello(state: State<'_, ManagedState>) -> Result<AppSnapshot, St
     })
     .await
     .map_err(|_| "Windows Hello setup stopped unexpectedly".to_owned())?
+}
+
+/// Android's "Require the master password again": every unlock, after 1 day or after 1 week. A new
+/// choice ends the current Windows Hello window, so the next unlock asks for the master password.
+#[tauri::command]
+fn set_master_password_interval(interval_ms: i64, state: State<'_, ManagedState>) -> Result<AppSnapshot, String> {
+    if !hello_window::INTERVALS.contains(&interval_ms) {
+        return Err("Choose every unlock, after 1 day or after 1 week.".to_owned());
+    }
+    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
+    if app.store.set_master_password_interval(vault, interval_ms).map_err(public_vault_error)? {
+        let choice = match interval_ms {
+            0 => "at every unlock",
+            hello_window::DAY_MS => "after 1 day",
+            _ => "after 1 week",
+        };
+        activity::log(Level::Info, Category::Security, format!("The master password is now asked for again {choice}"));
+    }
+    app.snapshot()
 }
 
 #[tauri::command]
@@ -3741,6 +3779,7 @@ pub fn run() {
             enable_hello,
             unlock_hello,
             disable_hello,
+            set_master_password_interval,
             lock_vault,
             stop_sharing,
             reset_vault,

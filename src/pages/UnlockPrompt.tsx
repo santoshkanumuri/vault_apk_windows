@@ -5,6 +5,7 @@ import { PasswordField } from "../components/Field";
 import { StatusBanner } from "../components/Status";
 import { api, type AppSnapshot } from "../lib/api";
 import { humanError } from "../lib/errors";
+import { helloLockScreen } from "../lib/helloWindow";
 import { BrandMark } from "./Unlock";
 import { strings } from "../strings";
 
@@ -21,7 +22,9 @@ export function UnlockPrompt() {
   const passwordRef = useRef<HTMLInputElement>(null);
   const helloRef = useRef<HTMLButtonElement>(null);
   const configured = snapshot?.vaultState !== "notConfigured";
-  const helloReady = Boolean(snapshot?.helloEnabled) && helloAvailable;
+  // Windows Hello shows only inside the master password window (lib/helloWindow.ts).
+  const hello = helloLockScreen(snapshot ?? { helloEnabled: false }, helloAvailable);
+  const helloReady = hello.button;
 
   useEffect(() => {
     api.snapshot().then((next) => {
@@ -52,6 +55,8 @@ export function UnlockPrompt() {
       done();
     } catch (failure) {
       setError(humanError(failure, "Windows Hello didn't unlock the vault."));
+      // Past the master password window the button goes away (hello_window.rs).
+      api.snapshot().then(setSnapshot).catch(() => {});
       passwordRef.current?.focus();
     } finally {
       setBusy("");
@@ -94,6 +99,7 @@ export function UnlockPrompt() {
       ) : (
         <>
           {error && <StatusBanner kind="error">{error}</StatusBanner>}
+          {!error && hello.notice && <StatusBanner kind="info">{hello.notice === "password" ? strings.enterYourMasterPasswordWindowsHello : strings.nuvoriAsksForYourMasterPassword}</StatusBanner>}
           {helloReady && (
             <>
               <Button ref={helloRef} variant="primary" size="lg" block icon={Fingerprint} busy={busy === "hello"} disabled={busy !== ""} onClick={() => void unlockHello()}>{strings.unlockWithWindowsHello}</Button>
