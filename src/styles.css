@@ -1042,6 +1042,7 @@ details[open]::details-content { block-size: auto; }
   color: var(--muted); font-size: 12.5px; }
 .list-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
 .detail-card { margin: 4px 0 var(--s5); }
+.detail-expiry { margin-bottom: var(--s5); }
 @media (prefers-reduced-motion: reduce) { .card-grid-item { animation: none; } }
 
 /* Settings > Browser extension: per-browser list */
