@@ -5,6 +5,8 @@
 //! reads the vault. Only ciphertext reaches the disk: the archive is built and encrypted in memory,
 //! one photo at a time, and written to a temporary file beside the chosen one, which replaces it
 //! once complete. A failure removes the temporary file and leaves any earlier file as it was.
+//!
+//! The Open dialog that picks a backup to restore ([`choose_file`], backup_restore.rs) is here too.
 
 use std::{
     fs::{self, OpenOptions},
@@ -18,8 +20,8 @@ use windows::{
         Foundation::{ERROR_CANCELLED, HWND},
         System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize},
         UI::Shell::{
-            Common::COMDLG_FILTERSPEC, FOS_FORCEFILESYSTEM, FOS_NOREADONLYRETURN, FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST,
-            FileSaveDialog, IFileSaveDialog, SIGDN_FILESYSPATH,
+            Common::COMDLG_FILTERSPEC, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_NOREADONLYRETURN, FOS_OVERWRITEPROMPT,
+            FOS_PATHMUSTEXIST, FileOpenDialog, FileSaveDialog, IFileOpenDialog, IFileSaveDialog, IShellItem, SIGDN_FILESYSPATH,
         },
     },
     core::{HSTRING, PCWSTR},
@@ -63,43 +65,83 @@ pub fn parse_date(text: &str) -> Option<time::Date> {
 }
 
 /// Asks where to save the backup with the Windows Save dialog over `owner`. `None` when the user
-/// cancels. The dialog runs on a thread of its own, in the single-threaded COM apartment it needs.
+/// cancels.
 pub fn choose_path(owner: isize, file_name: &str, title: &str) -> Result<Option<PathBuf>, String> {
     let file_name = HSTRING::from(file_name);
     let title = HSTRING::from(title);
-    std::thread::spawn(move || {
-        // SAFETY: COM is initialized on this thread for the dialog's lifetime and uninitialized
-        // after it is released; the filter strings outlive the call that reads them.
+    on_dialog_thread("The Save dialog failed", "Couldn't open the Save dialog.", move || {
+        // SAFETY: called on the dialog's own thread with COM initialized; the filter strings
+        // outlive the call that reads them.
         unsafe {
-            let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).is_ok();
-            let chosen = (|| -> windows::core::Result<Option<PathBuf>> {
-                let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?;
-                dialog.SetOptions(dialog.GetOptions()? | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOREADONLYRETURN)?;
-                let name = HSTRING::from("Nuvori backup (*.pvault)");
-                let spec = HSTRING::from("*.pvault");
-                dialog.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: PCWSTR(name.as_ptr()), pszSpec: PCWSTR(spec.as_ptr()) }])?;
-                dialog.SetDefaultExtension(&HSTRING::from(pvault::EXTENSION))?;
-                dialog.SetFileName(&file_name)?;
-                dialog.SetTitle(&title)?;
-                if let Err(error) = dialog.Show(Some(HWND(owner as *mut _))) {
-                    return if error.code() == ERROR_CANCELLED.to_hresult() { Ok(None) } else { Err(error) };
-                }
-                let path = dialog.GetResult()?.GetDisplayName(SIGDN_FILESYSPATH)?;
-                let text = path.to_string();
-                CoTaskMemFree(Some(path.0 as *const _));
-                Ok(Some(PathBuf::from(text?)))
-            })();
-            if initialized {
-                CoUninitialize();
+            let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?;
+            dialog.SetOptions(dialog.GetOptions()? | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOREADONLYRETURN)?;
+            let name = HSTRING::from("Nuvori backup (*.pvault)");
+            let spec = HSTRING::from("*.pvault");
+            dialog.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: PCWSTR(name.as_ptr()), pszSpec: PCWSTR(spec.as_ptr()) }])?;
+            dialog.SetDefaultExtension(&HSTRING::from(pvault::EXTENSION))?;
+            dialog.SetFileName(&file_name)?;
+            dialog.SetTitle(&title)?;
+            if let Err(error) = dialog.Show(Some(HWND(owner as *mut _))) {
+                return if error.code() == ERROR_CANCELLED.to_hresult() { Ok(None) } else { Err(error) };
             }
-            chosen.map_err(|error| {
-                crate::activity::diagnostic(crate::activity::Category::Vault, "The Save dialog failed", &error);
-                "Couldn't open the Save dialog.".to_owned()
-            })
+            file_system_path(&dialog.GetResult()?).map(Some)
         }
     })
+}
+
+/// Asks which backup to restore with the Windows Open dialog over `owner`, showing `.pvault`
+/// files. `None` when the user cancels.
+pub fn choose_file(owner: isize, title: &str) -> Result<Option<PathBuf>, String> {
+    let title = HSTRING::from(title);
+    on_dialog_thread("The Open dialog failed", "Couldn't open the Open dialog.", move || {
+        // SAFETY: as in `choose_path`.
+        unsafe {
+            let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+            dialog.SetOptions(dialog.GetOptions()? | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM)?;
+            let name = HSTRING::from("Nuvori backup (*.pvault)");
+            let spec = HSTRING::from("*.pvault");
+            dialog.SetFileTypes(&[COMDLG_FILTERSPEC { pszName: PCWSTR(name.as_ptr()), pszSpec: PCWSTR(spec.as_ptr()) }])?;
+            dialog.SetTitle(&title)?;
+            if let Err(error) = dialog.Show(Some(HWND(owner as *mut _))) {
+                return if error.code() == ERROR_CANCELLED.to_hresult() { Ok(None) } else { Err(error) };
+            }
+            file_system_path(&dialog.GetResult()?).map(Some)
+        }
+    })
+}
+
+/// The file the dialog returned, as a path.
+unsafe fn file_system_path(item: &IShellItem) -> windows::core::Result<PathBuf> {
+    // SAFETY: the caller's COM thread; the string is freed once copied.
+    unsafe {
+        let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+        let text = path.to_string();
+        CoTaskMemFree(Some(path.0 as *const _));
+        Ok(PathBuf::from(text?))
+    }
+}
+
+/// Runs a file dialog on a thread of its own, in the single-threaded COM apartment it needs.
+fn on_dialog_thread(
+    diagnostic: &'static str,
+    failure: &'static str,
+    show: impl FnOnce() -> windows::core::Result<Option<PathBuf>> + Send + 'static,
+) -> Result<Option<PathBuf>, String> {
+    std::thread::spawn(move || {
+        // SAFETY: COM is initialized on this thread for the dialog's lifetime and uninitialized
+        // after `show` has released it.
+        let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.is_ok();
+        let chosen = show();
+        if initialized {
+            unsafe { CoUninitialize() };
+        }
+        chosen.map_err(|error| {
+            crate::activity::diagnostic(crate::activity::Category::Vault, diagnostic, &error);
+            failure.to_owned()
+        })
+    })
     .join()
-    .map_err(|_| "Couldn't open the Save dialog.".to_owned())?
+    .map_err(|_| failure.to_owned())?
 }
 
 /// Writes the vault to `path` as an encrypted backup under `key`.

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SignInsState } from "./signIns";
 import type { HelloUnlock } from "./helloWindow";
+import type { BackupReview } from "./backupFile";
 
 export type { SignIn, SignInsState } from "./signIns";
 
@@ -79,6 +80,7 @@ export type PreviousPassword = { password: string; replacedAt: number };
 
 /** An encrypted backup saved by export_backup: the file's name and what it holds. */
 export type BackupSaved = { fileName: string; items: number; photos: number };
+export type { BackupReview } from "./backupFile";
 
 /** Google Drive backup on this PC (`drive_backup.rs`). Times are Unix milliseconds. */
 export type DriveBackupStatus = {
@@ -442,6 +444,14 @@ export const api = {
   /** Stops backups on this PC and forgets its backup key. The files already in the Drive stay. */
   turnOffDriveBackup: () => call<DriveBackupStatus>("turn_off_drive_backup"),
   backUpToDriveNow: () => call<DriveBackupStatus>("back_up_to_drive_now"),
+  /** Restore, step 1: the Open dialog for a .pvault file. Its name, or `null` when cancelled. */
+  restoreChooseFile: () => call<string | null>("restore_choose_file"),
+  /** Step 2: opens the chosen backup with its password and checks all of it. Nothing changes yet. */
+  restoreOpenBackup: (password: string) => call<BackupReview>("restore_open_backup", { password }),
+  /** Step 3: checks the current master password, leaves the sync group if in one, and replaces the vault. */
+  restoreReplaceVault: (password: string) => call<AppSnapshot>("restore_replace_vault", { password }),
+  /** Forgets the chosen file and the opened backup. */
+  restoreCancel: () => call<void>("restore_cancel"),
   /** Sign-in methods the extension remembered ("Continue with GitHub" and the account). */
   signIns: () => call<SignInsState>("sign_ins"),
   setSignIns: (enabled: boolean) => call<SignInsState>("set_sign_ins", { enabled }),

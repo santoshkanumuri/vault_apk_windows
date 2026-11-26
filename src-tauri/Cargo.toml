@@ -30,6 +30,9 @@ base64 = "0.22"
 ed25519-dalek = "2.2"
 # X25519 for epoch-key packages (epoch_keys.rs); already in Cargo.lock through ed25519-dalek.
 curve25519-dalek = "4.1"
+# Reads the deflated members of a backup made on Android (backup_restore.rs); already in
+# Cargo.lock through keepass, png and ureq.
+flate2 = "1.1"
 getrandom = "0.3"
 hex = "0.4"
 hmac = "0.12.1"

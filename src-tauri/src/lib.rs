@@ -9,6 +9,7 @@ mod browser_setup;
 mod browsers;
 mod backup_export;
 mod drive_backup;
+mod backup_restore;
 mod clipboard;
 pub mod change_store;
 pub mod checkpoint;
@@ -2286,6 +2287,8 @@ fn lock(state: &ManagedState, browser: &BrowserIpcServer, pairing: &PairingContr
     pairing.cancel()?;
     let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
     let was_unlocked = app.unlocked.take().is_some();
+    // A backup opened to restore goes with the vault.
+    backup_restore::forget();
     let snapshot = app.snapshot();
     drop(app);
     browser.set_provider(None);
@@ -2575,6 +2578,7 @@ async fn reset_vault(
             public_vault_error(error)
         })?;
         app.unlocked = None;
+        backup_restore::forget();
         browser.set_provider(None);
         app.store.reset_files().map_err(public_vault_error)?;
         activity::log(Level::Warning, Category::Security, "Vault reset on this PC");
@@ -3267,6 +3271,175 @@ fn backup_error(error: VaultError) -> String {
     }
 }
 
+// Restore from a backup (backup_restore.rs): choose a file, open and check all of it, then
+// replace the vault. The opened backup waits in memory between the steps and goes when the vault
+// locks or the dialog closes.
+
+#[tauri::command]
+async fn restore_choose_file(window: tauri::WebviewWindow, state: State<'_, ManagedState>) -> Result<Option<String>, String> {
+    let owner = window.hwnd().map_err(|_| "The restore needs an app window")?.0 as isize;
+    if state.lock().map_err(|_| "Vault state is unavailable")?.unlocked.is_none() {
+        return Err("Unlock the vault first".to_owned());
+    }
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = backup_export::choose_file(owner, "Restore from backup")? else {
+            return Ok(None);
+        };
+        // Under the vault lock, so a lock while the dialog was open can't leave a file chosen.
+        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        if app.unlocked.is_none() {
+            return Err("The vault locked. Unlock it and try again.".to_owned());
+        }
+        let name = backup_restore::file_name(&path);
+        backup_restore::choose(path);
+        Ok(Some(name))
+    })
+    .await
+    .map_err(|_| "Choosing the backup stopped unexpectedly.".to_owned())?
+}
+
+#[tauri::command]
+async fn restore_open_backup(password: String, state: State<'_, ManagedState>) -> Result<backup_restore::Review, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let password = Zeroizing::new(password);
+        let path = backup_restore::chosen().ok_or("Choose the backup file again.")?;
+        let sync = {
+            let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+            app.unlocked.as_ref().ok_or("Unlock the vault first")?.restore_role().map_err(public_vault_error)?
+        };
+        // No vault lock while the key is derived (Argon2id) and the whole file is read.
+        let plan = backup_restore::open_file(&path, &password).map_err(restore_error)?;
+        drop(password);
+        let summary = plan.summary();
+        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        if app.unlocked.is_none() {
+            return Err("The vault locked before the backup opened. Unlock it and try again.".to_owned());
+        }
+        if !backup_restore::hold(&path, plan) {
+            return Err("Choose the backup file again.".to_owned());
+        }
+        drop(app);
+        activity::log(Level::Info, Category::Vault, "Opened a backup to restore");
+        Ok(backup_restore::Review { file_name: backup_restore::file_name(&path), summary, sync })
+    })
+    .await
+    .map_err(|_| "Opening the backup stopped unexpectedly.".to_owned())?
+}
+
+#[tauri::command]
+async fn restore_replace_vault(
+    password: String,
+    app_handle: AppHandle,
+    state: State<'_, ManagedState>,
+    browser: State<'_, Arc<BrowserIpcServer>>,
+    pairing: State<'_, Arc<PairingController>>,
+    sync: State<'_, Arc<SyncController>>,
+) -> Result<AppSnapshot, String> {
+    if pairing.is_active()? {
+        return Err("Finish or cancel pairing before restoring a backup.".to_owned());
+    }
+    pairing.cancel()?;
+    let state = state.inner().clone();
+    let browser = browser.inner().clone();
+    let pairing = pairing.inner().clone();
+    let sync = sync.inner().clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || -> Result<AppSnapshot, String> {
+        let password = Zeroizing::new(password);
+        // No sync session runs while the vault is replaced.
+        let _gate = sync.gate.lock().map_err(|_| "Sync status unavailable")?;
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        if app.unlocked.is_none() {
+            return Err("Unlock the vault first".to_owned());
+        }
+        if !backup_restore::has_plan() {
+            return Err("Open the backup again before replacing the vault.".to_owned());
+        }
+        app.store.verify_password(&password).map_err(|error| {
+            activity::log(Level::Warning, Category::Security, "Restore blocked: wrong password");
+            public_vault_error(error)
+        })?;
+        drop(password);
+        let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+        if vault.restore_role().map_err(public_vault_error)? == backup_restore::SyncRole::Manager {
+            return Err("This PC manages its sync group, so it can't restore a backup.".to_owned());
+        }
+        let plan = backup_restore::take().ok_or("Open the backup again before replacing the vault.")?;
+        let left = match vault.leave_group_before_restore() {
+            Ok(left) => left,
+            Err(error) => {
+                backup_restore::put_back(plan);
+                activity::log(Level::Warning, Category::Vault, "Restore stopped: couldn't leave the sync group");
+                return Err(public_vault_error(error));
+            }
+        };
+        let replaced = vault.replace_with_backup(&plan);
+        let snapshot = app.snapshot();
+        drop(app);
+        if left {
+            activity::log(Level::Warning, Category::Pairing, "Left the sync group on this PC to restore a backup");
+            let background = state.clone();
+            thread::spawn(move || {
+                let _ = lan_sync::deliver_leave(&background, 0);
+            });
+        }
+        let complete = match replaced {
+            Ok(complete) => complete,
+            Err(error) => {
+                // Under the vault lock again, so a lock since then can't leave the backup behind.
+                if let Ok(app) = state.lock()
+                    && app.unlocked.is_some()
+                {
+                    backup_restore::put_back(plan);
+                }
+                activity::diagnostic(Category::Vault, "Restoring a backup failed", &error);
+                activity::log(Level::Warning, Category::Vault, "Restoring a backup failed");
+                return Err(if left {
+                    "Couldn't restore the backup. This PC left its sync group, and its items are as they were."
+                } else {
+                    "Couldn't restore the backup. Nothing changed."
+                }
+                .to_owned());
+            }
+        };
+        // The backup's accent and background, as Android applies them. Not under the vault lock.
+        if let Some((accent, surface)) = plan.appearance() {
+            let _ = appearance::set_from_ui(&state, accent, surface);
+        }
+        let summary = plan.summary();
+        drop(plan);
+        activity::log(
+            Level::Success,
+            Category::Vault,
+            format!("Restored a backup with {} items, {} folders and {} photos", summary.items, summary.folders, summary.photos),
+        );
+        if !complete {
+            // The next unlock finishes the history the vault needs before it syncs again.
+            return lock(&state, &browser, &pairing);
+        }
+        snapshot
+    })
+    .await
+    .map_err(|_| "Restoring the backup stopped unexpectedly.".to_owned())??;
+    // Other windows read the new counts, or that the vault locked to finish.
+    let _ = app_handle.emit("vault-changed", ());
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn restore_cancel() {
+    backup_restore::forget();
+}
+
+fn restore_error(error: backup_restore::RestoreError) -> String {
+    if let backup_restore::RestoreError::Io(_) = error {
+        activity::diagnostic(Category::Vault, "Opening a backup failed", &error);
+    }
+    activity::log(Level::Warning, Category::Vault, "A backup couldn't be opened to restore");
+    error.to_string()
+}
+
 #[tauri::command]
 fn list_entry_photos(
     entry_id: String,
@@ -3761,6 +3934,10 @@ pub fn run() {
             forget_trashed,
             empty_trash,
             export_backup,
+            restore_choose_file,
+            restore_open_backup,
+            restore_replace_vault,
+            restore_cancel,
             sync_now,
             sync_status,
             configure_sync,

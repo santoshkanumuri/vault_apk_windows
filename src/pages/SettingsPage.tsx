@@ -23,8 +23,10 @@ import { useToast } from "../app/toast";
 import { useSiteIconsSetting } from "../app/siteIcons";
 import { SignInsSettingRow } from "./signins/SignInsPage";
 import { AuthenticatorImportRow } from "./AuthenticatorImport";
+import { RestoreBackupRow } from "./RestoreBackup";
 import { useVault } from "../app/vault";
 import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type AutoTypeStatus, type QuickSearchStatus } from "../lib/api";
+import { localDate } from "../lib/backupFile";
 import { humanError } from "../lib/errors";
 import { cx, relativeTime } from "../lib/format";
 import { managerLabel } from "../lib/deviceList";
@@ -119,6 +121,7 @@ export function SettingsPage({ section }: { section?: string }) {
         <BackupRow />
         <SettingsRow icon={CloudUpload} title={driveBackupText.cardTitle} description={driveBackupText.pageRow}
           onClick={() => void router.navigate({ page: "backups" })} />
+        <RestoreBackupRow />
       </SettingsGroup>
       <KeepassImportDialog open={keepass} onClose={() => setKeepass(false)} />
       <PasswordImportDialog open={passwordImport} onClose={() => setPasswordImport(false)} />
@@ -137,12 +140,6 @@ export function SettingsPage({ section }: { section?: string }) {
       <DangerZone />
     </div>
   );
-}
-
-/** The local date, "2026-11-05", for the backup's suggested file name. */
-function localDate(now = new Date()) {
-  const two = (value: number) => String(value).padStart(2, "0");
-  return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
 }
 
 /** Export encrypted backup (backup_export.rs): a .pvault file that Nuvori for Android restores. */

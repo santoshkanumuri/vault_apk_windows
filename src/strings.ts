@@ -188,6 +188,20 @@ export const strings = {
   aCloudFolderMayUploadThe: "If you save it in a OneDrive or other cloud folder, that app uploads the encrypted file.",
   currentMasterPassword: "Current master password",
   saveBackup: "Save backup",
+  restoreFromBackup: "Restore from backup",
+  replaceThisVaultWithAPvault: "Replace this vault with a .pvault backup from Nuvori for Windows or Android.",
+  backupPassword: "Backup password",
+  theMasterPasswordTheVaultHadWhen: "The master password the vault had when the backup was made.",
+  openingTheBackupChecksAllOf: "Opening the backup checks all of it before anything changes, which can take a few seconds.",
+  openBackup: "Open backup",
+  replaceThisVaultWithTheBackup: "Replace this vault with the backup?",
+  thisPcWillLeaveItsSyncGroup: "This PC will leave its sync group.",
+  nuvoriTellsTheManagingPhoneWhichRemoves: "Nuvori tells the managing phone, which removes this PC. The restored items don't sync. To share them, pair this PC again.",
+  thisPcManagesItsSyncGroupSo: "This PC manages its sync group, so it can't restore a backup.",
+  everythingInThisVaultNowIsReplaced: "Everything in this vault now is replaced, including Recently deleted, and you can't undo it.",
+  afterwardUnlockWithYourCurrentMaster: "Afterward, unlock with your current master password, not the backup's.",
+  saveThisVaultFirst: "Save this vault first",
+  replaceVault: "Replace vault",
   about: "About",
   nuvoriForWindows: "Nuvori for Windows",
   yourVaultIsEncryptedWithA: "Your vault is encrypted with a key derived from your master password and stays on this PC. Your phone keeps its own copy; after you pair with a confirmed code, changes travel over your Wi-Fi, or through your own Google Drive if you connect it, encrypted on this PC first.",
@@ -666,6 +680,32 @@ export const driveBackupText = {
   restoreTitle: "Restoring a backup",
   restoreBody: "Open Nuvori on your phone, sign in to the same Google account, and choose Restore from Google Drive. It makes a vault of its own on the phone, which you can then pair with a new PC.",
   exportRow: "To keep a copy yourself, use Export encrypted backup in Settings.",
+} as const;
+
+/**
+ * Restore from backup (pages/RestoreBackup.tsx, lib/backupFile.ts): the messages and sentences that
+ * code chooses or fills in. Kept in its own block to keep merges simple.
+ */
+export const restoreText = {
+  couldntOpenTheFile: "Couldn't open the backup file.",
+  enterTheBackupPassword: "Enter the backup's password.",
+  couldntOpenTheBackup: "The backup couldn't be opened.",
+  enterToSave: "Enter your master password to save this vault.",
+  couldntSave: "Couldn't save this vault.",
+  enterToReplace: "Enter your master password.",
+  couldntRestore: "Couldn't restore the backup.",
+  savedAs: (fileName: string) => `Saved as ${fileName}.`,
+  holds: (items: string) => `The backup has ${items}.`,
+  holdsWithCodes: (items: string, codes: string) => `The backup has ${items}, including ${codes}.`,
+  alsoHolds: (others: string) => `It also has ${others}.`,
+  restored: (items: string) => `Restored ${items} from the backup.`,
+  restoredThenLocked: (items: string) => `Restored ${items} from the backup. Unlock Nuvori to finish.`,
+  item: "item",
+  authenticator: "authenticator",
+  folder: "folder",
+  photo: "photo",
+  passkey: "passkey",
+  and: "and",
 } as const;
 
 /**

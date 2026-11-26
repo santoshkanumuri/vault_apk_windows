@@ -2561,6 +2561,7 @@ dependencies = [
  "base64 0.22.1",
  "curve25519-dalek",
  "ed25519-dalek",
+ "flate2",
  "getrandom 0.3.4",
  "hex",
  "hmac 0.12.1",

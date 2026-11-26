@@ -14,7 +14,8 @@
 //! - Only this PC writes and deletes its own files; another device's backups are never touched.
 //!   `drive_backup_plan.rs` holds the naming and scheduling rules, as Android has them.
 //!
-//! Restoring a backup is Android's job for now: this PC writes them and the phone reads them.
+//! Restoring from Drive is Android's job for now. On this PC, Settings > Restore from backup opens
+//! a `.pvault` file saved on the PC (`backup_restore.rs`).
 
 use std::{
     fs::{self, File},
