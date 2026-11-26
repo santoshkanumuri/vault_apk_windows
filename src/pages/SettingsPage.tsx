@@ -19,6 +19,7 @@ import { DEFAULT_ACCENT, DEFAULT_SURFACE, useTheme, type ThemePreference } from 
 import { useToast } from "../app/toast";
 import { useSiteIconsSetting } from "../app/siteIcons";
 import { SignInsSettingRow } from "./signins/SignInsPage";
+import { AuthenticatorImportRow } from "./AuthenticatorImport";
 import { useVault } from "../app/vault";
 import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type AutoTypeStatus, type QuickSearchStatus } from "../lib/api";
 import { humanError } from "../lib/errors";
@@ -106,6 +107,7 @@ export function SettingsPage({ section }: { section?: string }) {
       <SettingsGroup title={strings.yourData} id="settings-data">
         <SettingsRow icon={FileUp} title={passwordImportText.title} description={passwordImportText.row} onClick={() => setPasswordImport(true)} />
         <SettingsRow icon={FileKey} title={strings.importFromKeepass} description={strings.loginsCodesAndNotesFromA} onClick={() => setKeepass(true)} />
+        <AuthenticatorImportRow />
         <SettingsRow icon={ArchiveRestore} title={strings.recentlyDeleted} description={strings.restoreItemsDeletedInTheLast2} onClick={() => void router.navigate({ page: "trash" })} />
       </SettingsGroup>
       <KeepassImportDialog open={keepass} onClose={() => setKeepass(false)} />

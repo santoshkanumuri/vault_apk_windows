@@ -257,6 +257,22 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       if (gone) mockTrash.unshift({ id: id(), itemId: gone.id, kind: "entry", itemType: gone.type, title: gone.title, deletedAt: Date.now(), deletedElsewhere: false, expiresAt: Date.now() + 30 * 86_400_000, data: gone });
       state.entries = state.entries.filter((e) => e.id !== args.id); state.revision++; log("info", "items", "Item deleted"); return null;
     }
+    case "authenticators_preview": case "authenticators_import": {
+      requireUnlocked();
+      const sources = (args.sources ?? []) as Array<{ kind: string; text: string; password?: string }>;
+      if (sources.some((source) => source.kind === "oneAuth" && source.password === "wrong")) throw "Couldn't decrypt this OneAuth export. Check its password and format.";
+      if (sources.some((source) => !source.text.toLowerCase().startsWith("otpauth") && source.kind !== "oneAuth")) throw "Use a OneAuth oneauth_04 JSON export or a text file with one otpauth://totp link per line.";
+      const migration = sources.filter((source) => source.text.startsWith("otpauth-migration://")).length;
+      const expected = migration ? 2 : 1;
+      if (command === "authenticators_import") {
+        if (Math.min(sources.length, expected) < expected) throw "Scan the remaining QR pages to continue.";
+        log("success", "items", "Imported authenticator codes: 2 added, 1 already saved, 0 skipped");
+        return { added: 2, alreadySaved: 1, conflicts: 0 };
+      }
+      return { pages: Math.min(sources.length, expected), expected, new: 2, alreadySaved: 1, conflicts: 1, items: [
+        { issuer: "Example", account: "me@example.com", status: "new" }, { issuer: "", account: "plain", status: "new" },
+        { issuer: "GitHub", account: "dev@example.com", status: "alreadySaved" }, { issuer: "Dropbox", account: "me@example.com", status: "conflict" }] };
+    }
     case "keepass_preview": case "keepass_import": {
       if (args.password === "wrong") throw "The password or key file is wrong for this KeePass database.";
       const summary = { logins: 42, codes: 5, notes: 3, groups: ["Banking", "Work", "Work / Servers"], inRecycleBin: 4, withoutContent: 1, attachments: 2, passkeys: 1, duplicates: 0, codesSkipped: 0 };

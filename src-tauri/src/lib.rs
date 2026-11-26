@@ -2,6 +2,7 @@ pub mod activity;
 mod auto_lock;
 mod auto_type;
 pub mod appearance;
+pub mod authenticator_import;
 pub mod browser;
 pub mod browser_ipc;
 mod browser_setup;
@@ -2475,6 +2476,47 @@ fn delete_entry(id: String, state: State<'_, ManagedState>) -> Result<(), String
     Ok(())
 }
 
+// Import authenticator codes (authenticator_import.rs). The dialog sends every page it has read
+// each time, so the review and the import read the same pages; nothing is kept here between them.
+
+#[tauri::command]
+async fn authenticators_preview(
+    sources: Vec<authenticator_import::Source>,
+    state: State<'_, ManagedState>,
+) -> Result<authenticator_import::Review, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let collected = authenticator_import::collect(&sources).map_err(|error| error.to_string())?;
+        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?;
+        vault.review_authenticator_import(&collected).map_err(public_vault_error)
+    })
+    .await
+    .map_err(|_| "The authenticator export couldn't be read.".to_owned())?
+}
+
+#[tauri::command]
+async fn authenticators_import(
+    sources: Vec<authenticator_import::Source>,
+    state: State<'_, ManagedState>,
+) -> Result<authenticator_import::Summary, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let collected = authenticator_import::collect(&sources).map_err(|error| error.to_string())?;
+        if !collected.complete() {
+            return Err(authenticator_import::ImportError::Incomplete.to_string());
+        }
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let summary = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?
+            .import_authenticators(&collected).map_err(public_vault_error)?;
+        activity::log(Level::Success, Category::Items, format!(
+            "Imported authenticator codes: {} added, {} already saved, {} skipped", summary.added, summary.already_saved, summary.conflicts));
+        Ok(summary)
+    })
+    .await
+    .map_err(|_| "The import stopped unexpectedly.".to_owned())?
+}
+
 // Import from KeePass (keepass_import.rs). The file arrives as base64 from the import dialog and
 // is opened in memory only. Both commands run the KeePass key derivation off the UI thread.
 
@@ -3242,6 +3284,8 @@ pub fn run() {
             clear_previous_passwords,
             list_trash,
             restore_trashed,
+            authenticators_preview,
+            authenticators_import,
             forget_trashed,
             empty_trash,
             sync_now,
