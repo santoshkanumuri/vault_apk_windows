@@ -65,6 +65,42 @@ const MEMBERSHIP_UPDATED: &str = "The device list changed. Syncing again.";
 /// Internal: the listener answered a `leave1` request; no sync happened.
 const LEAVE_ANSWERED: &str = "A device asked to leave the sync group.";
 const MORE_REMAIN: &str = "More changes remain. Sync will continue on the next pass.";
+/// M12, Android `LanSyncService.DEVICE_REFUSED` and `PEER_REFUSED`: the status line and the
+/// device's own line after a session this PC refused (a signature, a forked chain, a bad frame).
+pub(crate) const DEVICE_REFUSED: &str = "A paired device sent changes Nuvori on this PC can't accept. Update Nuvori on both devices.";
+pub(crate) const PEER_REFUSED: &str = "Sent changes this PC can't accept. Update Nuvori on both. If it keeps happening, pair it again.";
+
+/// M12, Android `SessionFailure`: how a failed session is shown and retried.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum FailureClass {
+    /// The connection dropped, timed out or the device was busy: retried, shown as a Wi-Fi problem.
+    Temporary,
+    /// Something on this PC needs the person (pair again, storage, a missing helper).
+    NeedsYou,
+    /// The device sent something this PC refuses. Retrying changes nothing until someone updates
+    /// or pairs again, so it is shown on that device and not retried at the fast rate.
+    Refused,
+}
+
+pub(crate) fn failure_class(error: &str) -> FailureClass {
+    const TEMPORARY: [&str; 8] = [UNREACHABLE, BUSY, TIMED_OUT, INTERRUPTED, MORE_REMAIN, MEMBERSHIP_UPDATED, REJECTED, LEAVE_ANSWERED];
+    const NEEDS_YOU: [&str; 7] = [REMOVED, REMOVED_NOTICE, TOO_LARGE, "Unlock the vault first", "Vault state unavailable",
+        "Device identity unavailable", "Pair this PC with your phone first"];
+    if TEMPORARY.contains(&error) { FailureClass::Temporary }
+    else if NEEDS_YOU.contains(&error) || error.starts_with("Sync data could not be verified or stored")
+        || error.contains("pairing helper") || error.contains("free space") { FailureClass::NeedsYou }
+    else { FailureClass::Refused }
+}
+
+/// One paired device's last failed session, for its row on the Sync page (M12).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFailure {
+    pub device_id: String,
+    pub kind: FailureClass,
+    pub message: String,
+}
 const TOO_LARGE: &str = "A saved change is too large to sync. Existing items are kept.";
 /// Android serves and requests at most 32 photos per exchange (`servePhotos` `require(requests.size <= 32)`).
 const MAX_PHOTO_REQUESTS: usize = 32;
@@ -152,6 +188,8 @@ pub struct SyncStatus {
     pub drive_check_seconds: u64,
     /// One pass over Wi-Fi and Google Drive each time Nuvori opens, also with automatic sync off.
     pub sync_on_open: bool,
+    /// M12: paired devices whose last session failed, each with how and why.
+    pub device_failures: Vec<DeviceFailure>,
     /// Part of `waiting_to_apply`: changes of a kind this version doesn't know, per device that made
     /// them. They apply after Nuvori is updated on this PC (M4).
     pub needs_update: Vec<NeedsUpdate>,
@@ -272,9 +310,24 @@ struct TrackerState {
     next_retry_at: Option<Instant>,
     photo_transferred: u64,
     photo_total: u64,
+    /// The device of the session running now, once it authenticated (M12).
+    session_peer: Option<String>,
+    /// M12: devices whose last session failed. Cleared by that device's next good session.
+    device_failures: BTreeMap<String, (FailureClass, String)>,
 }
 
 impl TrackerState {
+    /// One device's refusal stays the status while other devices sync (M12): a success elsewhere
+    /// must not hide it. Temporary failures stay on the device's own row only.
+    fn surface_device_failure(&mut self) {
+        let worst = self.device_failures.values().filter(|(class, _)| *class != FailureClass::Temporary)
+            .max_by_key(|(class, _)| *class == FailureClass::Refused);
+        if let Some((class, message)) = worst {
+            self.phase = Phase::Error;
+            self.last_error = if *class == FailureClass::Refused { DEVICE_REFUSED.to_owned() } else { message.clone() };
+        }
+    }
+
     fn recompute(&mut self) {
         self.total = self
             .total
@@ -356,7 +409,41 @@ impl SyncTracker {
             state.last_error.clear();
             state.consecutive_failures = 0;
             state.next_retry_at = None;
+            state.surface_device_failure();
         });
+    }
+
+    /// The device of the current session proved who it is.
+    fn session_peer(&self, peer: &str) {
+        self.update(|state| state.session_peer = Some(peer.to_owned()));
+    }
+
+    /// The device the last session reached, once; `None` when it ended before authentication.
+    pub(crate) fn take_session_peer(&self) -> Option<String> {
+        self.state.lock().ok().and_then(|mut state| state.session_peer.take())
+    }
+
+    /// M12: records a failed session with `peer`. A refusal or a problem on this PC becomes the
+    /// status at once, without counting toward the fast retry.
+    pub(crate) fn device_failed(&self, peer: &str, error: &str) {
+        let class = failure_class(error);
+        if class != FailureClass::Temporary {
+            crate::activity::log(crate::activity::Level::Warning, crate::activity::Category::Sync,
+                format!("A sync session with a paired device ended: {error}"));
+        }
+        self.update(|state| {
+            state.device_failures.insert(peer.to_owned(), (class, error.to_owned()));
+            state.surface_device_failure();
+        });
+    }
+
+    pub(crate) fn device_succeeded(&self, peer: &str) {
+        self.update(|state| { state.device_failures.remove(peer); });
+    }
+
+    /// Forgets devices that are no longer active members.
+    pub(crate) fn keep_devices(&self, active: &std::collections::BTreeSet<String>) {
+        self.update(|state| state.device_failures.retain(|peer, _| active.contains(peer)));
     }
 
     pub fn fail(&self, message: &str) {
@@ -429,6 +516,11 @@ impl SyncTracker {
             status.last_error = state.last_error.clone();
             status.last_attempt = state.last_attempt.clone();
             status.consecutive_failures = state.consecutive_failures;
+            status.device_failures = state.device_failures.iter().map(|(peer, (class, error))| DeviceFailure {
+                device_id: peer.clone(),
+                kind: *class,
+                message: if *class == FailureClass::Refused { PEER_REFUSED.to_owned() } else { error.clone() },
+            }).collect();
             status.next_retry_seconds = state.next_retry_at.map_or(0, |at| {
                 let left = at.saturating_duration_since(Instant::now());
                 left.as_secs() + u64::from(left.subsec_nanos() > 0)
@@ -504,6 +596,7 @@ pub(crate) fn status(vault: &mut UnlockedVault) -> Result<SyncStatus> {
         wifi_check_seconds: schedule(db).wifi_seconds,
         drive_check_seconds: schedule(db).drive_seconds,
         sync_on_open: sync_on_open(db),
+        device_failures: Vec::new(),
         needs_update: needs_update(db, &id).into_iter()
             .map(|(device_id, count)| NeedsUpdate { name: device_name(db, &device_id), device_id, count })
             .collect(),
@@ -565,9 +658,15 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
     let mut checked = std::collections::BTreeSet::new();
     let mut total = SyncReport { local_revision_at_start: revision, ..Default::default() };
     let mut last_error = UNREACHABLE.to_owned();
+    tracker.keep_devices(&peers);
+    // M12: devices whose session failed in this pass, with the error.
+    let mut failed: BTreeMap<String, String> = BTreeMap::new();
     for target in targets.into_iter().take(64) {
+        let _ = tracker.take_session_peer();
         match run_to(state, helper, &target.to_string(), tracker) {
             Ok(report) => {
+                tracker.device_succeeded(&report.peer_device_id);
+                failed.remove(&report.peer_device_id);
                 if report.peer_device_id != local { checked.insert(report.peer_device_id.clone()); }
                 total.more_remain |= report.more_remain;
                 total.sent += report.sent;
@@ -578,6 +677,10 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
                 total.conflicts = report.conflicts;
             }
             Err(error) => {
+                if let Some(peer) = tracker.take_session_peer().filter(|peer| peers.contains(peer) && !checked.contains(peer)) {
+                    tracker.device_failed(&peer, &error);
+                    failed.insert(peer, error.clone());
+                }
                 if error != REJECTED && (last_error == UNREACHABLE || error == BUSY) {
                     last_error = error;
                 }
@@ -585,7 +688,13 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
         }
         if checked.len() == peers.len() { break; }
     }
+    // A refusal, or a problem on this PC, decides the result over an unreachable device: retrying
+    // it fast changes nothing (`failure_class`).
+    let refused = failed.values().find(|error| failure_class(error) != FailureClass::Temporary).cloned();
     if checked.is_empty() {
+        if let Some(error) = refused {
+            return Err(if failure_class(&error) == FailureClass::Refused { DEVICE_REFUSED.into() } else { error });
+        }
         if last_error == BUSY { tracker.defer_busy(); }
         else if quiet_miss && last_error == UNREACHABLE { tracker.set_phase(Phase::Idle); }
         else { tracker.fail(&last_error); }
@@ -593,6 +702,7 @@ pub(crate) fn run(state: &ManagedState, helper: &Path, address: &str,
     }
     total.peers_checked = checked.len();
     total.peers_waiting = peers.len().saturating_sub(checked.len());
+    // M12: one device's success no longer hides another's failure; `succeed` keeps a refusal shown.
     tracker.succeed();
     Ok(total)
 }
@@ -623,25 +733,35 @@ pub(crate) fn remember_peer_endpoint(vault: &mut UnlockedVault, vault_id: &str, 
 #[cfg(test)]
 pub(crate) fn serve(state: &ManagedState, helper: &Path, stream: TcpStream,
     tracker: &SyncTracker) -> Result<SyncReport> {
-    serve_proved(state, helper, stream, tracker).0
+    serve_proved(state, helper, stream, tracker, None).0
 }
 
 /// [serve], and whether the connecting device proved membership (or only asked to leave), for
-/// [crate::preauth::PreAuthLimiter].
+/// [crate::preauth::PreAuthLimiter]. M7: `gate` (the sync lock) is taken only after the device
+/// proved membership, so a device outside the group never holds it; a lock that stays taken
+/// gets a busy reply after the proof, as Android 2.3.5 answers.
 pub(crate) fn serve_proved(state: &ManagedState, helper: &Path, stream: TcpStream,
-    tracker: &SyncTracker) -> (Result<SyncReport>, bool) {
+    tracker: &SyncTracker, gate: Option<&Mutex<()>>) -> (Result<SyncReport>, bool) {
     let before = tracker.state.lock().map_or(0, |state| state.generation);
-    let result = exchange_role(state, helper, tracker, true, |_| Ok(stream));
+    let result = exchange_gated(state, helper, tracker, true, |_| Ok(stream), gate);
     match result {
-        Ok((report, true)) => { tracker.succeed(); (Ok(report), true) }
+        Ok((report, true)) => { tracker.device_succeeded(&report.peer_device_id); tracker.succeed(); (Ok(report), true) }
         // L1: the connecting device's round limit ended the session after progress. It connects
         // again at once, so this counts as progress, not as a failure.
-        Ok((report, false)) => { tracker.succeed(); (Ok(SyncReport { more_remain: true, ..report }), true) }
+        Ok((report, false)) => {
+            tracker.device_succeeded(&report.peer_device_id);
+            tracker.succeed();
+            (Ok(SyncReport { more_remain: true, ..report }), true)
+        }
         Err(error) => {
             // A nearby device outside this group must not replace the paired-device status.
             let authenticated = tracker.state.lock().is_ok_and(|state| state.generation != before);
-            if authenticated { tracker.fail(&error); }
-            let proved = authenticated || error == LEAVE_ANSWERED;
+            // M12: a refusal is shown on that device and is not a Wi-Fi failure.
+            let peer = tracker.take_session_peer();
+            if let Some(peer) = peer.as_deref().filter(|_| authenticated) { tracker.device_failed(peer, &error); }
+            if authenticated && failure_class(&error) == FailureClass::Temporary { tracker.fail(&error); }
+            // A server answers busy only after the proof (M7).
+            let proved = authenticated || error == LEAVE_ANSWERED || error == BUSY;
             (Err(error), proved)
         }
     }
@@ -738,6 +858,30 @@ fn exchange_role(
     server: bool,
     connect: impl FnOnce(&str) -> Result<TcpStream>,
 ) -> Result<(SyncReport, bool)> {
+    exchange_gated(state, helper, tracker, server, connect, None)
+}
+
+/// How long a device that proved membership waits for the sync lock before a busy reply (M7).
+const GATE_WAIT: Duration = Duration::from_secs(2);
+
+/// The sync lock, waiting up to [GATE_WAIT] for a pass that is finishing.
+fn wait_for_gate(gate: &Mutex<()>) -> Option<std::sync::MutexGuard<'_, ()>> {
+    let deadline = Instant::now() + GATE_WAIT;
+    loop {
+        if let Ok(guard) = gate.try_lock() { return Some(guard); }
+        if Instant::now() >= deadline { return None; }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn exchange_gated(
+    state: &ManagedState,
+    helper: &Path,
+    tracker: &SyncTracker,
+    server: bool,
+    connect: impl FnOnce(&str) -> Result<TcpStream>,
+    gate: Option<&Mutex<()>>,
+) -> Result<(SyncReport, bool)> {
     if !helper.is_file() {
         return Err("The pairing helper is missing. Rebuild or reinstall Nuvori.".into());
     }
@@ -800,6 +944,8 @@ fn exchange_role(
     let mut frames = SyncFrames::new(reader, PacedWriter { stream });
     let mut epoch_secret = crate::membership_exit::transport_epoch_secret(&secret, &vault_id, membership.key_epoch, &random)
         .ok_or("Invalid sync keys")?;
+    // Held for the rest of the session once the device proved membership (M7).
+    let mut _held = None;
     let challenge;
     if server {
         challenge = { let mut bytes = vec![0; 32]; getrandom::fill(&mut bytes).map_err(storage_error)?; bytes };
@@ -860,6 +1006,13 @@ fn exchange_role(
                 }
             }
             return Err(REJECTED.into());
+        }
+        if let Some(gate) = gate {
+            let Some(guard) = wait_for_gate(gate) else {
+                frames.send(BUSY_REPLY, 4096).map_err(network_error)?;
+                return Err(BUSY.into());
+            };
+            _held = Some(guard);
         }
         frames.send(b"ok", 4096).map_err(network_error)?;
     } else {
@@ -954,6 +1107,7 @@ fn exchange_role(
         }
     }
     if server { tracker.begin(); }
+    tracker.session_peer(&session.peer.device_id);
     let relay_removed = session.peer_features.iter().any(|feature| feature == crate::protocol::REMOVAL_CUTOFF_FEATURE);
     // Appearance changes are relayed to every peer, also one without `appearance-v1`: a chain is
     // verified link by link, so leaving one change out (or stopping before it) blocks the author's
@@ -1119,6 +1273,14 @@ pub(crate) fn sync_port(vault_id: &str) -> u16 {
         hash.wrapping_mul(31).wrapping_add(i32::from(c))
     });
     (20_000 + hash.rem_euclid(30_000)) as u16
+}
+
+/// L5: the port the listener takes when another program holds [`sync_port`]: half the range away,
+/// so it is the same on every start. Devices find it through the local advertisement, as before,
+/// and remember the address they reached; nothing on the wire changes.
+pub(crate) fn fallback_sync_port(vault_id: &str) -> u16 {
+    let port = sync_port(vault_id);
+    20_000 + (port - 20_000 + 15_000) % 30_000
 }
 
 fn integer(value: u64) -> Result<i64> {
@@ -3362,7 +3524,7 @@ mod tests {
             message: String::new(), phase: "idle", progress_done: 0, progress_total: 0,
             last_error: String::new(), last_attempt: String::new(),
             consecutive_failures: 0, next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15,
-            sync_on_open: true, needs_update: Vec::new(),
+            sync_on_open: true, device_failures: Vec::new(), needs_update: Vec::new(),
         };
         tracker.fill(&mut status);
         assert_eq!(status.phase, "error");
@@ -3378,6 +3540,49 @@ mod tests {
         tracker.fill(&mut status);
         assert_eq!((status.phase, status.consecutive_failures, status.next_retry_seconds), ("done", 0, 0));
         assert!(status.last_error.is_empty());
+    }
+
+    /// M12: a refusal by one device stays shown on it and as the status while another device
+    /// syncs, without counting toward the fast retry; its next good session clears it.
+    #[test]
+    fn one_devices_refusal_is_not_hidden_by_another_devices_success() {
+        assert_eq!(failure_class(INTERRUPTED), FailureClass::Temporary);
+        assert_eq!(failure_class(UNREACHABLE), FailureClass::Temporary);
+        assert_eq!(failure_class(REMOVED), FailureClass::NeedsYou);
+        assert_eq!(failure_class("Sync data could not be verified or stored. Your existing items are kept."), FailureClass::NeedsYou);
+        assert_eq!(failure_class("Peer identity proof failed"), FailureClass::Refused);
+        assert_eq!(failure_class(DEVICE_REFUSED), FailureClass::Refused);
+        let tracker = SyncTracker::default();
+        let status = || {
+            let mut app_status = SyncStatus { last_sync: String::new(), waiting_to_apply: 0, set_aside: 0, waiting_for_keys: false,
+                conflicts: 0, phone_address: String::new(), automatic: true, running: false, message: String::new(), phase: "idle",
+                progress_done: 0, progress_total: 0, last_error: String::new(), last_attempt: String::new(), consecutive_failures: 0,
+                next_retry_seconds: 0, wifi_check_seconds: 60, drive_check_seconds: 15, sync_on_open: true, device_failures: Vec::new(), needs_update: Vec::new() };
+            tracker.fill(&mut app_status);
+            app_status
+        };
+        tracker.begin();
+        tracker.session_peer("pixel");
+        assert_eq!(tracker.take_session_peer().as_deref(), Some("pixel"));
+        assert_eq!(tracker.take_session_peer(), None, "taken once");
+        tracker.device_failed("pixel", "Peer identity proof failed");
+        tracker.device_failed("tablet", INTERRUPTED);
+        tracker.succeed();
+        let shown = status();
+        assert_eq!((shown.phase, shown.last_error.as_str(), shown.consecutive_failures), ("error", DEVICE_REFUSED, 0));
+        assert_eq!(shown.device_failures, vec![
+            DeviceFailure { device_id: "pixel".into(), kind: FailureClass::Refused, message: PEER_REFUSED.into() },
+            DeviceFailure { device_id: "tablet".into(), kind: FailureClass::Temporary, message: INTERRUPTED.into() },
+        ]);
+        let json = serde_json::to_value(&shown).unwrap();
+        assert_eq!(json["deviceFailures"][0]["kind"], "refused");
+        tracker.device_succeeded("pixel");
+        tracker.succeed();
+        let shown = status();
+        assert_eq!((shown.phase, shown.last_error.as_str()), ("done", ""), "a temporary failure stays on its row only");
+        assert_eq!(shown.device_failures.len(), 1);
+        tracker.keep_devices(&std::collections::BTreeSet::from(["pixel".to_owned()]));
+        assert!(status().device_failures.is_empty(), "a removed device is forgotten");
     }
 
     pub(super) fn phone_op(sequence: u64, previous: &str, entity_type: &str, entity_id: &str, version: RecordVersion, base: u64, body: serde_json::Value) -> ChangeRecord {
@@ -4050,6 +4255,8 @@ mod tests {
     #[test]
     fn endpoints_are_private_and_ports_match_java() {
         assert_eq!(sync_port("android-vault"), 23492);
+        // L5: the second port is half the range away, wrapping inside 20000-49999.
+        assert_eq!(fallback_sync_port("android-vault"), 38492);
         assert_eq!(
             endpoint("192.168.1.4", "android-vault").unwrap().port(),
             sync_port("android-vault")
@@ -4472,6 +4679,55 @@ mod tests {
         }
         drop(synthetic.state);
         std::fs::remove_dir_all(synthetic.directory).unwrap();
+    }
+
+    /// M7: a connecting device proves membership before it may take the sync lock. A stranger
+    /// never holds it, and a member that proved while a pass runs gets busy after the proof.
+    #[test]
+    fn the_sync_lock_is_taken_only_after_the_membership_proof() {
+        let helper = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../pairing-helper/publish/Nuvori.PairingHelper.exe");
+        let a = synthetic_vault(1);
+        let b = synthetic_vault(0);
+        let phone = DeviceIdentity { device_id: "phone".into(),
+            public_key: SigningKey::from_bytes(&[17; 32]).verifying_key().to_bytes() };
+        let mut history = vec![signed_member(None, &phone)];
+        for device in [&a.local, &b.local] { history.push(signed_member(history.last(), device)); }
+        for device in [&a, &b] {
+            let mut app = device.state.lock().unwrap();
+            let db = app.unlocked.as_mut().unwrap().connection();
+            db.execute("DELETE FROM sync_membership_events", []).unwrap();
+            persist_membership(db, "vault-a", &[], &history, &membership::verify(&history).unwrap()).unwrap();
+        }
+        let gate = std::sync::Arc::new(Mutex::new(()));
+        // A stranger: while it stalls before the proof, the lock stays free; a wrong proof is refused.
+        let (listener, address) = loopback_pair();
+        let (server_state, server_helper, server_gate) = (b.state.clone(), helper.clone(), gate.clone());
+        let server = std::thread::spawn(move || serve_proved(&server_state, &server_helper,
+            listener.accept().unwrap().0, &SyncTracker::default(), Some(&server_gate)));
+        let stranger = TcpStream::connect(address).unwrap();
+        let mut frames = SyncFrames::new(stranger.try_clone().unwrap(), stranger);
+        assert_eq!(frames.receive(4096).unwrap().len(), 32);
+        assert!(gate.try_lock().is_ok(), "no lock before the proof");
+        frames.send(URL_SAFE_NO_PAD.encode([9u8; 32]).as_bytes(), 4096).unwrap();
+        let (result, proved) = server.join().unwrap();
+        assert_eq!((result.unwrap_err(), proved), (REJECTED.to_owned(), false));
+        // A member while this PC's own pass holds the lock: busy after the proof, counted as proved.
+        let held = gate.lock().unwrap();
+        let (listener, address) = loopback_pair();
+        let (server_state, server_helper, server_gate) = (b.state.clone(), helper.clone(), gate.clone());
+        let server = std::thread::spawn(move || serve_proved(&server_state, &server_helper,
+            listener.accept().unwrap().0, &SyncTracker::default(), Some(&server_gate)));
+        let error = exchange(&a.state, &helper, &SyncTracker::default(),
+            |_| TcpStream::connect(address).map_err(network_error)).unwrap_err();
+        assert_eq!(error, BUSY);
+        let (result, proved) = server.join().unwrap();
+        assert_eq!((result.unwrap_err(), proved), (BUSY.to_owned(), true));
+        drop(held);
+        for device in [a, b] {
+            drop(device.state);
+            std::fs::remove_dir_all(device.directory).unwrap();
+        }
     }
 
     #[test]

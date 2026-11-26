@@ -3,19 +3,23 @@
 // verified progress (a Wi-Fi exchange or a signed Drive `p.` file, both in `sync_peer_progress`) shows
 // it applied this PC's latest change, whichever transport carried it. A transport failure is only a
 // quiet note while the other one keeps devices in step.
-import type { CloudStatus, MembershipStatus, SyncStatus } from "./api";
+import type { CloudStatus, DeviceFailure, MembershipStatus, SyncReport, SyncStatus } from "./api";
 import type { StatusKind } from "../components/Status";
-import { relativeTime, toMillis } from "./format.ts";
+import { plural, relativeTime, toMillis } from "./format.ts";
 import { syncStatusText as words } from "../strings.ts";
 
 export type TransportHealth = "off" | "ok" | "failed";
-export type PeerAck = "upToDate" | "waiting" | "silent" | "notChecked";
+export type PeerAck = "upToDate" | "waiting" | "silent" | "notChecked" | "failed";
 export type OverallSync = "syncing" | "attention" | "keys" | "conflicts" | "waiting" | "waitingHere" | "stale" | "notYet" | "upToDate";
-export type AttentionCause = "bothFailed" | "wifiOnlyFailed" | "driveOnlyFailed" | "localProblem" | "rejected" | "deviceSilent";
+export type AttentionCause = "bothFailed" | "wifiOnlyFailed" | "driveOnlyFailed" | "driveSignIn" | "localProblem" | "rejected" | "deviceSilent";
 export type TransportNote = "wifiFailedDriveKeptUp" | "wifiFailedDriveCarries" | "wifiFailed" | "driveFailedWifiKeptUp" | "driveFailedWifiCarries" | "driveFailed" | "paused";
 
 /** One active paired device. `unconfirmed`: this PC's changes it has not applied yet. */
-export type PeerFacts = { deviceId: string; name: string; unconfirmed: number; reported: boolean; lastSeen: number; wifiFailed?: boolean };
+export type PeerFacts = { deviceId: string; name: string; unconfirmed: number; reported: boolean; lastSeen: number; wifiFailed?: boolean;
+  /** H1: its own changes that an active device reports applied but that have not arrived here. */
+  missingHere?: number;
+  /** M12: its last session failed with a refusal or a problem on this PC (a dropped link sets `wifiFailed`). */
+  failure?: Pick<DeviceFailure, "kind" | "message"> };
 
 export type SyncFacts = {
   now: number;
@@ -34,6 +38,8 @@ export type SyncFacts = {
   rejected?: number;
   waitingForKeys?: boolean;
   waitingHere?: boolean;
+  /** M14: Google Drive is connected and needs the user to sign in again. */
+  driveSignIn?: boolean;
 };
 
 export type SyncOverview = {
@@ -47,6 +53,8 @@ export type SyncOverview = {
   days: number;
   note?: TransportNote;
   noteDevices: string[];
+  /** Devices with changes another device applied that have not arrived here, the most first (H1). */
+  missingFrom: PeerFacts[];
 };
 
 /** A device unheard for this long, or no device heard from for this long, is a problem. */
@@ -59,6 +67,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * A device whose pairing never finished stays here, so it never makes changes look stuck.
  */
 export function peerAck(peer: PeerFacts, now: number): PeerAck {
+  // M12: a refusal shows on that device's row, whatever else it reported.
+  if (peer.failure) return "failed";
   if (peer.lastSeen === 0 && !peer.reported) return "notChecked";
   if (peer.unconfirmed > 0) return peer.lastSeen > 0 && now - peer.lastSeen > STALE_AFTER_MS ? "silent" : "waiting";
   return "upToDate";
@@ -84,12 +94,15 @@ export function syncOverview(facts: SyncFacts): SyncOverview {
   else if (driveFailed && !wifiFailed) note = facts.wifi === "ok" ? (inStep ? "driveFailedWifiKeptUp" : "driveFailedWifiCarries") : "driveFailed";
   else if (!wifiFailed && !driveFailed && facts.paused) note = "paused";
   const noteDevices = note?.startsWith("wifi") ? failedNames : [];
+  const missingFrom = facts.peers.filter((peer) => (peer.missingHere ?? 0) > 0).sort((a, b) => (b.missingHere ?? 0) - (a.missingHere ?? 0));
   const result = (state: OverallSync, cause?: AttentionCause, days = 0): SyncOverview =>
-    ({ state, cause, peers, waitingFor, waitingChanges, lastSynced, days, note, noteDevices });
+    ({ state, cause, peers, waitingFor, waitingChanges, lastSynced, days, note, noteDevices, missingFrom });
 
   // No transport is left to carry waiting changes: one failed and the other is off or failed too.
   const noTransport = (wifiFailed || driveFailed) && facts.wifi !== "ok" && facts.drive !== "ok";
   if (facts.busy) return result("syncing");
+  // M14: only the user can fix a sign-in, so it is never hidden behind "Up to date" or a quiet note.
+  if (facts.driveSignIn) return result("attention", "driveSignIn");
   if (wifiFailed && driveFailed) return result("attention", "bothFailed");
   if (facts.localProblem) return result("attention", "localProblem");
   if ((facts.rejected ?? 0) > 0) return result("attention", "rejected");
@@ -98,7 +111,8 @@ export function syncOverview(facts: SyncFacts): SyncOverview {
   if (facts.waitingForKeys) return result("keys");
   if ((facts.conflicts ?? 0) > 0) return result("conflicts");
   if (!inStep) return result("waiting");
-  if (facts.waitingHere) return result("waitingHere");
+  // "Up to date" only when this PC also holds everything any device applied (H1).
+  if (facts.waitingHere || missingFrom.length > 0) return result("waitingHere");
   if (lastSynced === 0) return result("notYet");
   if (facts.peers.length > 0 && lastHeard > 0 && now - lastHeard > STALE_AFTER_MS) return result("stale", undefined, Math.floor((now - lastHeard) / DAY_MS));
   if (facts.peers.length > 0 && lastHeard === 0) return result("notYet");
@@ -123,8 +137,10 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
   const reachFailed = Boolean(failedText) && looksUnreachable(failedText);
   const wifi: TransportHealth = reachFailed ? "failed" : !sync || !sync.automatic ? "off" : "ok";
   const drive: TransportHealth = !cloud?.connected ? "off" : cloud.needsSignIn || cloud.lastError ? "failed" : "ok";
+  const deviceFailures = new Map((sync?.deviceFailures ?? []).map((failure) => [failure.deviceId, failure]));
   const peers = (membership?.devices ?? []).filter((device) => device.status === "active" && !device.isThisDevice).map((device) => {
     const counts = device.counts;
+    const failure = deviceFailures.get(device.deviceId);
     return {
       deviceId: device.deviceId,
       name: device.name || "Paired device",
@@ -132,6 +148,9 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
       unconfirmed: counts?.unconfirmed ?? (counts ? counts.toSend + counts.receivedThere : 0),
       reported: Boolean(counts?.checked),
       lastSeen: device.lastSeen ?? 0,
+      missingHere: counts?.missingHere ?? 0,
+      wifiFailed: failure?.kind === "temporary",
+      failure: failure && failure.kind !== "temporary" ? { kind: failure.kind, message: failure.message } : undefined,
     };
   });
   const waiting = sync ? sync.waitingToApply - (sync.setAside ?? 0) : 0;
@@ -147,6 +166,7 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
     rejected: sync?.setAside ?? 0,
     waitingForKeys: Boolean(sync?.waitingForKeys),
     waitingHere: waiting > 0,
+    driveSignIn: Boolean(cloud?.connected && cloud.needsSignIn),
   };
 }
 
@@ -158,7 +178,7 @@ function inSentence(when: string): string {
 export type OverviewText = { kind: StatusKind; title: string; detail: string; note?: string; lastSynced?: string };
 export type PeerAckText = { kind: StatusKind; label: string; detail: string };
 
-const TRANSPORT_CAUSES = new Set<AttentionCause>(["bothFailed", "wifiOnlyFailed", "driveOnlyFailed"]);
+const TRANSPORT_CAUSES = new Set<AttentionCause>(["bothFailed", "wifiOnlyFailed", "driveOnlyFailed", "driveSignIn"]);
 
 /** The status card's headline, its detail, the quiet transport line and "Last synced". */
 export function overviewText(facts: SyncFacts, overview: SyncOverview): OverviewText {
@@ -173,6 +193,7 @@ export function overviewText(facts: SyncFacts, overview: SyncOverview): Overview
       const detail = overview.cause === "bothFailed" ? words.detailBothFailed
         : overview.cause === "wifiOnlyFailed" ? words.detailWifiOnlyFailed(names, one)
         : overview.cause === "driveOnlyFailed" ? words.detailDriveOnlyFailed
+        : overview.cause === "driveSignIn" ? words.detailDriveSignIn
         : overview.cause === "localProblem" ? facts.localProblem ?? ""
         : overview.cause === "rejected" ? words.detailRejected(facts.rejected ?? 0)
         : words.detailDeviceSilent(silent?.name ?? "", overview.days);
@@ -186,7 +207,14 @@ export function overviewText(facts: SyncFacts, overview: SyncOverview): Overview
       title: waitingName ? words.waitingFor(waitingName) : words.waitingForDevices(overview.waitingFor.length),
       detail: waitingName ? words.detailWaitingOne(overview.waitingChanges, waitingName) : words.detailWaitingMany(overview.waitingChanges),
     }; break;
-    case "waitingHere": text = { kind: "warning", title: words.waitingHere, detail: words.detailWaitingHere }; break;
+    case "waitingHere": {
+      const from = overview.missingFrom;
+      const missing = from.reduce((sum, peer) => sum + (peer.missingHere ?? 0), 0);
+      const detail = from.length === 0 ? words.detailWaitingHere
+        : from.length === 1 ? words.detailMissingFrom(missing, from[0].name) : words.detailMissingMany(missing);
+      text = { kind: "warning", title: words.waitingHere, detail };
+      break;
+    }
     case "stale": text = { kind: "warning", title: words.stale(overview.days), detail: facts.drive !== "off" ? words.detailStaleDrive : words.detailStaleWifi }; break;
     case "notYet": text = { kind: "neutral", title: words.notYet, detail: words.detailNotYet }; break;
     default: text = { kind: "success", title: words.upToDate, detail: words.detailUpToDate };
@@ -214,6 +242,31 @@ export function peerAckText(peer: PeerFacts, ack: PeerAck, now: number): PeerAck
     case "upToDate": return { kind: "success", label: words.peerUpToDate, detail: words.peerDetailUpToDate };
     case "waiting": return { kind: "info", label: words.peerWaiting, detail: words.peerDetailWaiting(peer.unconfirmed, peer.name) };
     case "silent": return { kind: "error", label: words.peerSilent, detail: words.peerDetailSilent(Math.floor((now - peer.lastSeen) / DAY_MS)) };
+    case "failed": return { kind: "error", label: words.peerCantSync, detail: peer.failure?.message ?? "" };
     default: return { kind: "neutral", label: words.peerNotChecked, detail: words.peerDetailNotChecked };
   }
+}
+
+export type SyncNowOutcome = { kind: "success" | "info" | "warning"; text: string };
+
+/**
+ * The message after Sync now (H1). It says the vault is in step only when the overview, read after
+ * the attempt, is up to date: every known device, or Google Drive, was checked and nothing is
+ * missing here. `after` is that overview; without it (an older backend) the report decides alone.
+ */
+export function syncNowOutcome(report: SyncReport, after?: { overview: SyncOverview; text: OverviewText }): SyncNowOutcome {
+  const parts = [report.sent ? `sent ${report.sent}` : "", report.received ? `received ${report.received}` : ""].filter(Boolean);
+  const driveOnly = Boolean(report.cloud) && !report.peersChecked;
+  const state = after?.overview.state;
+  const settled = !after || state === "upToDate" || state === "syncing";
+  const summary = parts.length ? `${driveOnly ? "Synced through Google Drive" : "Synced"} · ${parts.join(", ")}`
+    : driveOnly ? (settled ? "Google Drive is up to date" : "Google Drive checked") : "Sync check complete";
+  if (report.conflicts) return { kind: "warning", text: `${summary}. ${plural(report.conflicts, "change")} need review.` };
+  if (report.waitingToApply) return { kind: "info", text: `${summary}. ${report.waitingToApply} still waiting to apply.` };
+  if (report.peersWaiting && !report.cloud) return { kind: "info", text: `${summary}. ${plural(report.peersWaiting, "device")} will catch up when connected.` };
+  if (!settled && after) {
+    const kind = after.text.kind === "error" || after.text.kind === "warning" ? "warning" : "info";
+    return { kind, text: `${summary}. ${after.text.detail || after.text.title}` };
+  }
+  return { kind: "success", text: summary };
 }

@@ -326,9 +326,25 @@ struct CloudController {
     last_error: Mutex<String>,
     /// When the whole app folder was last listed; other passes list only what changed since.
     listed_all: Mutex<Option<Instant>>,
+    /// M14: passes in a row that needed a Google sign-in, and when the user was last told.
+    sign_in_failures: std::sync::atomic::AtomicU32,
+    sign_in_told_at: Mutex<Option<Instant>>,
+    /// Shows or clears the sign-in reminder outside the app window (the tray icon's tooltip).
+    sign_in_alert: std::sync::OnceLock<Box<dyn Fn(bool) + Send + Sync>>,
 }
 
 const CLOUD_FULL_LISTING: Duration = Duration::from_secs(6 * 60 * 60);
+/// M14, as on Android: after this many passes in a row needed a sign-in, the user is told once,
+/// at most once a day; a pass that works again clears it.
+const SIGN_IN_FAILURES_BEFORE_NOTICE: u32 = 3;
+const SIGN_IN_NOTICE_GAP: Duration = Duration::from_secs(24 * 60 * 60);
+const SIGN_IN_NOTICE: &str = "Google Drive sync needs you to sign in. Open Nuvori and sign in again so your devices keep in step.";
+
+/// True when the failures in a row and the last notice call for telling the user now.
+fn sign_in_notice_due(failures: u32, told_at: Option<Instant>, now: Instant) -> bool {
+    failures >= SIGN_IN_FAILURES_BEFORE_NOTICE
+        && told_at.is_none_or(|at| now.saturating_duration_since(at) >= SIGN_IN_NOTICE_GAP)
+}
 
 impl CloudController {
     /// One cloud pass. `None` when this PC is not connected to a drive or not in a sync group.
@@ -345,6 +361,19 @@ impl CloudController {
         let store = drive.get_or_insert_with(|| google_drive::GoogleDrive::new(account.refresh_token.clone()));
         let full = manual || self.listed_all.lock().ok()?.is_none_or(|at| at.elapsed() > CLOUD_FULL_LISTING);
         let result = lan_sync::cloud::run(state, store, tracker, full);
+        let sign_in = match &result {
+            Ok(_) => Some(false),
+            Err(error) if error == lan_sync::cloud::AUTH_NEEDED => Some(true),
+            Err(_) => None,
+        };
+        match self.note_sign_in(sign_in, Instant::now()) {
+            Some(true) => {
+                activity::log(Level::Warning, Category::Sync, SIGN_IN_NOTICE);
+                if let Some(alert) = self.sign_in_alert.get() { alert(true); }
+            }
+            Some(false) => if let Some(alert) = self.sign_in_alert.get() { alert(false); },
+            None => {}
+        }
         match &result {
             Ok(_) => {
                 if full && let Ok(mut listed) = self.listed_all.lock() { *listed = Some(Instant::now()); }
@@ -362,6 +391,26 @@ impl CloudController {
         Some(result)
     }
 
+    /// M14: counts passes that needed a sign-in (`Some(true)`); a pass that worked (`Some(false)`)
+    /// ends the run. Other failures change nothing. Returns `Some(true)` when the user is to be told
+    /// now and `Some(false)` when a reminder they were given no longer holds.
+    fn note_sign_in(&self, needed: Option<bool>, now: Instant) -> Option<bool> {
+        use std::sync::atomic::Ordering;
+        let mut told = self.sign_in_told_at.lock().ok()?;
+        match needed? {
+            true => {
+                let failures = self.sign_in_failures.fetch_add(1, Ordering::SeqCst).saturating_add(1);
+                if !sign_in_notice_due(failures, *told, now) { return None; }
+                *told = Some(now);
+                Some(true)
+            }
+            false => {
+                self.sign_in_failures.store(0, Ordering::SeqCst);
+                told.take().map(|_| false)
+            }
+        }
+    }
+
     /// True when this build has a Google client and this PC saved a Google Drive sign-in.
     fn connected(state: &ManagedState) -> bool {
         google_drive::client().is_some() && state.lock().ok().is_some_and(|mut app| {
@@ -375,6 +424,8 @@ impl CloudController {
         if let Ok(mut listed) = self.listed_all.lock() { *listed = None; }
         if let Ok(mut error) = self.last_error.lock() { error.clear(); }
         self.needs_sign_in.store(false, Ordering::SeqCst);
+        if self.note_sign_in(Some(false), Instant::now()) == Some(false)
+            && let Some(alert) = self.sign_in_alert.get() { alert(false); }
     }
 }
 
@@ -508,8 +559,10 @@ impl SyncController {
                     ..lan
                 })
             }
-            (Err(_), Ok(cloud)) => {
-                self.tracker.succeed();
+            (Err(lan), Ok(cloud)) => {
+                // M12: Drive carried the changes, but a problem on this PC stays shown (a device's
+                // refusal is kept by `succeed`).
+                if lan_sync::failure_class(&lan) != lan_sync::FailureClass::NeedsYou { self.tracker.succeed(); }
                 Ok(lan_sync::SyncReport { cloud: true, ..cloud })
             }
             // The cloud card on the Sync page shows the cloud error; Wi-Fi sync still counts.
@@ -1090,10 +1143,13 @@ impl WayClock {
         self.last = Some(now);
     }
 
-    /// Records a result; returns the retry delay after a failure.
+    /// Records a result; returns the retry delay after a failure. M12: a refusal or a problem on
+    /// this PC is not retried at the fast rate; the next check comes at the usual interval.
     fn finish(&mut self, result: &Result<(), String>, now: Instant) -> Option<Duration> {
         match result {
             Ok(()) => { self.failures = 0; self.retry_at = None; None }
+            Err(error) if error == lan_sync::DEVICE_REFUSED
+                || lan_sync::failure_class(error) == lan_sync::FailureClass::NeedsYou => { self.failures = 0; self.retry_at = None; None }
             Err(error) => {
                 self.failures = self.failures.saturating_add(1);
                 let delay = if error == lan_sync::BUSY {
@@ -1104,6 +1160,20 @@ impl WayClock {
             }
         }
     }
+}
+
+#[test]
+fn a_refusal_waits_for_the_usual_interval_and_a_dropped_link_retries_soon() {
+    let start = Instant::now();
+    let mut clock = WayClock::default();
+    clock.start(&(String::new(), 1), start);
+    assert!(clock.finish(&Err(lan_sync::INTERRUPTED.into()), start).is_some());
+    assert!(clock.retry_at.is_some());
+    assert_eq!(clock.finish(&Err(lan_sync::DEVICE_REFUSED.into()), start), None);
+    assert_eq!((clock.retry_at, clock.failures), (None, 0));
+    let every = Some(Duration::from_secs(60));
+    assert!(!clock.due(&(String::new(), 1), every, start + Duration::from_secs(30)));
+    assert!(clock.due(&(String::new(), 1), every, start + Duration::from_secs(60)));
 }
 
 #[test]
@@ -1166,14 +1236,23 @@ fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync
         };
         let Some(stream) = stream else { continue; };
         let Ok(source) = stream.peer_addr().map(|address| address.ip()) else { continue; };
-        if !limiter.lock().is_ok_and(|mut limiter| limiter.allow(source, Instant::now())) { drop(stream); continue; }
-        if pairing.is_active().unwrap_or(true) || sync.gate.try_lock().is_err() { lan_sync::reply_busy(stream); continue; }
-        // The session runs on its own thread so this loop keeps accepting: a second device that
-        // connects meanwhile gets a busy reply at once instead of waiting for its timeout.
+        let admit = limiter.lock().map_or(preauth::Admit::Blocked, |mut limiter| limiter.try_start(source, Instant::now()));
+        match admit {
+            preauth::Admit::Start => {}
+            preauth::Admit::Full => { lan_sync::reply_busy(stream); continue; }
+            preauth::Admit::Blocked => { drop(stream); continue; }
+        }
+        if pairing.is_active().unwrap_or(true) {
+            if let Ok(mut limiter) = limiter.lock() { limiter.release(source); }
+            lan_sync::reply_busy(stream);
+            continue;
+        }
+        // The session runs on its own thread so this loop keeps accepting. M7: the device proves
+        // membership first and only then takes the sync lock (`serve_proved`), so a device outside
+        // the group can't hold sync, Google Drive or this PC's own passes.
         let (state, pairing, sync, limiter) = (state.clone(), pairing.clone(), sync.clone(), limiter.clone());
         thread::spawn(move || {
-            let Ok(_guard) = sync.gate.try_lock() else { lan_sync::reply_busy(stream); return; };
-            let (result, proved) = lan_sync::serve_proved(&state, &pairing.helper_path, stream, &sync.tracker);
+            let (result, proved) = lan_sync::serve_proved(&state, &pairing.helper_path, stream, &sync.tracker, Some(&sync.gate));
             if let Ok(mut limiter) = limiter.lock() { limiter.finish(source, proved, Instant::now()); }
             if let Ok(report) = result {
                 if let Ok(mut message) = sync.message.lock() {
@@ -3383,6 +3462,10 @@ pub fn run() {
             if let Err(error) = desktop::create_tray(app.handle(), lock_from_tray) {
                 activity::diagnostic(Category::Vault, "Could not add the tray icon", error);
             }
+            // M14: the tray icon says so while Google Drive needs a sign-in the user was told about.
+            let handle = app.handle().clone();
+            let _ = app.state::<Arc<SyncController>>().cloud.sign_in_alert
+                .set(Box::new(move |needed| desktop::show_sign_in_needed(&handle, needed)));
             passkey_plugin::start(app.state::<ManagedState>().inner().clone(), app.handle().clone());
             if desktop::plugin_launch() {
                 // Windows started Nuvori for a passkey request. The request opens the unlock window if needed.
@@ -3516,6 +3599,29 @@ pub fn run() {
             api.prevent_exit();
         }
     });
+}
+
+#[cfg(test)]
+mod sign_in_notice_tests {
+    use super::*;
+
+    #[test]
+    fn the_user_is_told_after_three_sign_in_failures_in_a_row_at_most_once_a_day() {
+        let cloud = CloudController::default();
+        let start = Instant::now();
+        assert_eq!(cloud.note_sign_in(Some(true), start), None);
+        assert_eq!(cloud.note_sign_in(None, start), None, "a dropped link neither counts nor ends the run");
+        assert_eq!(cloud.note_sign_in(Some(true), start), None);
+        assert_eq!(cloud.note_sign_in(Some(true), start), Some(true), "the third in a row tells the user");
+        assert_eq!(cloud.note_sign_in(Some(true), start + Duration::from_secs(60 * 60)), None, "not again the same day");
+        assert_eq!(cloud.note_sign_in(Some(true), start + SIGN_IN_NOTICE_GAP), Some(true), "again a day later");
+        assert_eq!(cloud.note_sign_in(Some(false), start + SIGN_IN_NOTICE_GAP), Some(false), "a good pass clears it");
+        assert_eq!(cloud.note_sign_in(Some(false), start + SIGN_IN_NOTICE_GAP), None);
+        let later = start + SIGN_IN_NOTICE_GAP;
+        assert_eq!(cloud.note_sign_in(Some(true), later), None, "the count starts over");
+        assert_eq!(cloud.note_sign_in(Some(true), later), None);
+        assert_eq!(cloud.note_sign_in(Some(true), later), Some(true));
+    }
 }
 
 #[cfg(test)]

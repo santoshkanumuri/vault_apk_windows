@@ -129,7 +129,10 @@ export type SyncStatus = {
   driveCheckSeconds?: number;
   /** One pass over Wi-Fi and Google Drive each time Nuvori opens, also with automatic sync off. */
   syncOnOpen?: boolean;
+  /** Paired devices whose last session failed: dropped (temporary), a problem on this PC (needsYou), or refused. Absent on older builds. */
+  deviceFailures?: DeviceFailure[];
 };
+export type DeviceFailure = { deviceId: string; kind: "temporary" | "needsYou" | "refused"; message: string };
 export type SyncReport = { peersChecked: number; peersWaiting: number; sent: number; received: number; waitingToApply: number; conflicts: number; /** The pass also went through Google Drive. */ cloud?: boolean };
 /** Sync through the user's own Google Drive. */
 export type CloudStatus = {
@@ -199,7 +202,9 @@ export type MemberDevice = {
 /** Changes still moving between this PC and one device (same counts as the phone). */
 export type PeerCounts = { checked: boolean; toSend: number; toApplyHere: number; receivedThere: number; toReceiveHere: number;
   /** This PC's changes the device has not applied, by its verified progress over Wi-Fi or Google Drive. Absent on older builds. */
-  unconfirmed?: number };
+  unconfirmed?: number;
+  /** The device's own changes that an active device reports applied but that have not arrived here. Absent on older builds. */
+  missingHere?: number };
 export type MembershipStatus = {
   managerDeviceId: string;
   managerName: string;

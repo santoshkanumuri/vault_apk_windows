@@ -190,6 +190,13 @@ pub fn close_unlock_prompt(app: &AppHandle) {
     }
 }
 
+/// M14: while Google Drive needs a sign-in, the tray icon's tooltip says so.
+pub fn show_sign_in_needed(app: &AppHandle, needed: bool) {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(if needed { "Nuvori: Google Drive needs you to sign in" } else { "Nuvori" }));
+    }
+}
+
 /// Tray icon: left click opens Nuvori; the menu opens, locks, or quits.
 pub fn create_tray(app: &AppHandle, lock: fn(&AppHandle)) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Nuvori", true, None::<&str>)?;

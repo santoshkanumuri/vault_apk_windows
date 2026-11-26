@@ -1,7 +1,7 @@
 // Run with `npm test`. The same cases as Android `SyncOverviewTest` and `SyncOverviewTextTest`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { overviewText, peerAck, peerAckText, syncFacts, syncOverview } from "./syncOverview.ts";
+import { overviewText, peerAck, peerAckText, syncFacts, syncNowOutcome, syncOverview } from "./syncOverview.ts";
 
 const now = 1_790_000_000_000;
 const minute = 60_000;
@@ -127,4 +127,81 @@ test("facts read the backend: unreachable Wi-Fi is a transport failure, other er
   // An older backend without `unconfirmed`: not received plus not applied there.
   const older = { devices: [{ ...membership.devices[1], counts: { checked: true, toSend: 1, toApplyHere: 0, receivedThere: 2, toReceiveHere: 0 } }] };
   assert.equal(syncFacts(sync, cloud, older, 0, now).peers[0].unconfirmed, 3);
+});
+
+test("H1: changes another device applied that never arrived here are not up to date", () => {
+  const behind = (name, missingHere) => ({ ...peer(name), missingHere });
+  const one = both(facts([behind("Pixel 8", 4), peer("Tablet")], { drive: "ok" }));
+  assert.equal(one.overview.state, "waitingHere");
+  assert.equal(one.text.kind, "warning");
+  assert.equal(one.text.detail, "4 changes from Pixel 8 haven't arrived here yet.");
+  assert.equal(both(facts([behind("Pixel 8", 1)])).text.detail, "1 change from Pixel 8 hasn't arrived here yet.");
+  const many = both(facts([behind("Pixel 8", 2), behind("Tablet", 3)]));
+  assert.deepEqual(many.overview.missingFrom.map((p) => p.name), ["Tablet", "Pixel 8"], "the most first");
+  assert.equal(many.text.detail, "5 changes from your other devices haven't arrived here yet.");
+  // Arrived and waiting to apply keeps the old sentence; this PC's own changes waiting elsewhere come first.
+  assert.equal(both(facts([peer("Pixel 8")], { waitingHere: true })).text.detail, "Changes arrived and are waiting to apply on this PC.");
+  assert.equal(syncOverview(facts([{ ...behind("Pixel 8", 2), unconfirmed: 1 }])).state, "waiting");
+  assert.equal(syncOverview(facts([behind("Pixel 8", 0)])).state, "upToDate");
+  // The backend's count reaches the facts; an older backend without it reads as nothing missing.
+  const membership = { devices: [{ deviceId: "phone", name: "Pixel 8", status: "active", isThisDevice: false, lastSeen: now - minute,
+    counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0, missingHere: 6 } }] };
+  const sync = { lastSync: new Date(now - minute).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "", automatic: true, running: false, message: "" };
+  assert.equal(syncOverview(syncFacts(sync, null, membership, 0, now)).state, "waitingHere");
+  const older = { devices: [{ ...membership.devices[0], counts: { ...membership.devices[0].counts, missingHere: undefined } }] };
+  assert.equal(syncOverview(syncFacts(sync, null, older, 0, now)).state, "upToDate");
+});
+
+test("H1: Sync now says up to date only when the overview after the attempt is", () => {
+  const report = { peersChecked: 1, peersWaiting: 0, sent: 0, received: 2, waitingToApply: 0, conflicts: 0, cloud: false };
+  const after = (f) => { const overview = syncOverview(f); return { overview, text: overviewText(f, overview) }; };
+  assert.deepEqual(syncNowOutcome(report, after(facts([peer("Pixel 8")]))), { kind: "success", text: "Synced · received 2" });
+  const missing = syncNowOutcome(report, after(facts([{ ...peer("Pixel 8"), missingHere: 3 }])));
+  assert.deepEqual(missing, { kind: "warning", text: "Synced · received 2. 3 changes from Pixel 8 haven't arrived here yet." });
+  const drive = { ...report, peersChecked: 0, received: 0, cloud: true };
+  assert.equal(syncNowOutcome(drive, after(facts([peer("Pixel 8")], { drive: "ok" }))).text, "Google Drive is up to date");
+  assert.deepEqual(syncNowOutcome(drive, after(facts([peer("Pixel 8", { unconfirmed: 2 })], { drive: "ok" }))),
+    { kind: "info", text: "Google Drive checked. Pixel 8 hasn't confirmed 2 changes yet." });
+  // Without a status to read (an older backend), the report decides as before.
+  assert.deepEqual(syncNowOutcome(report), { kind: "success", text: "Synced · received 2" });
+  assert.equal(syncNowOutcome({ ...report, conflicts: 1 }).kind, "warning");
+  assert.equal(syncNowOutcome({ ...report, peersWaiting: 1 }).text, "Synced · received 2. 1 device will catch up when connected.");
+});
+
+test("M12: a device's refusal shows on its row; a dropped link is a Wi-Fi note", () => {
+  const membership = { devices: [
+    { deviceId: "phone", name: "Pixel 8", status: "active", isThisDevice: false, lastSeen: now - minute,
+      counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } },
+    { deviceId: "tablet", name: "Tablet", status: "active", isThisDevice: false, lastSeen: now - minute,
+      counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } },
+  ] };
+  const refusal = "Sent changes this PC can't accept. Update Nuvori on both. If it keeps happening, pair it again.";
+  const sync = { lastSync: new Date(now - minute).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "", automatic: true, running: false,
+    message: "", phase: "error", lastError: "A paired device sent changes Nuvori on this PC can't accept. Update Nuvori on both devices.", consecutiveFailures: 0,
+    deviceFailures: [{ deviceId: "phone", kind: "refused", message: refusal }, { deviceId: "tablet", kind: "temporary", message: "Connection interrupted." }] };
+  const f = syncFacts(sync, null, membership, 0, now);
+  const overview = syncOverview(f);
+  assert.equal(overview.state, "attention", "the worst is the headline, though the tablet synced");
+  assert.equal(overviewText(f, overview).detail, sync.lastError);
+  assert.equal(overview.peers.phone, "failed");
+  assert.deepEqual(peerAckText(f.peers[0], "failed", now), { kind: "error", label: "Can't sync", detail: refusal });
+  assert.equal(f.peers[1].wifiFailed, true);
+  assert.equal(overview.peers.tablet, "upToDate");
+  // An older backend without the list changes nothing.
+  assert.equal(syncFacts({ ...sync, deviceFailures: undefined }, null, membership, 0, now).peers[0].failure, undefined);
+});
+
+test("M14: a Drive sign-in is the headline, never a quiet note, even while Wi-Fi keeps up", () => {
+  const { overview, text } = both(facts([peer("Pixel 8")], { drive: "failed", driveSignIn: true }));
+  assert.equal(overview.state, "attention");
+  assert.equal(overview.cause, "driveSignIn");
+  assert.equal(text.kind, "error");
+  assert.equal(text.detail, "Google Drive needs you to sign in again. Until then, changes don't go through Drive.");
+  assert.equal(text.note, undefined, "the headline already says it");
+  // Read from the backend: only a connected drive that needs a sign-in counts.
+  const sync = { lastSync: new Date(now - minute).toISOString(), waitingToApply: 0, conflicts: 0, phoneAddress: "", automatic: true,
+    running: false, message: "", consecutiveFailures: 0 };
+  const cloud = { available: true, connected: true, account: "a", lastSync: "", lastError: "", connecting: false, needsSignIn: true, checkSeconds: 900 };
+  assert.equal(syncFacts(sync, cloud, null, 0, now).driveSignIn, true);
+  assert.equal(syncFacts(sync, { ...cloud, connected: false }, null, 0, now).driveSignIn, false);
 });
