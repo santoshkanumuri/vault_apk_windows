@@ -21,6 +21,7 @@ import { ActivityPage } from "../pages/ActivityPage";
 import { MorePage } from "../pages/MorePage";
 import { TrashPage } from "../pages/TrashPage";
 import { AutoTypePicker } from "../components/AutoTypePicker";
+import { MasterPasswordSwitchPrompt } from "../pages/sync/MasterPasswordSwitch";
 import { SearchPalette } from "../pages/SearchPalette";
 import { categories, categoryForType, type Category } from "../lib/entries";
 import { cx } from "../lib/format";
@@ -261,6 +262,7 @@ export function Shell() {
         </nav>
       </div>
       <AutoTypePicker />
+      <MasterPasswordSwitchPrompt />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </SearchContext.Provider>
   );

@@ -34,8 +34,12 @@ pub const EPOCH_KEYS_FEATURE: &str = crate::epoch_keys::FEATURE;
 /// Announced by builds that read Google Drive floor markers (`compaction.rs` `drive`). Drive cleanup
 /// runs only when every active member announced it.
 pub const HISTORY_COMPACTION_FEATURE: &str = crate::compaction::drive::FEATURE;
-pub const SYNC_FEATURES: [&str; 8] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE, SITE_ICONS_FEATURE, CHECKPOINT_ENROLL_FEATURE,
-    SIGN_IN_METHODS_FEATURE, MERGE_JOIN_FEATURE, EPOCH_KEYS_FEATURE, HISTORY_COMPACTION_FEATURE];
+/// Announced by builds that switch to the managing phone's new master password when it changes
+/// (`master_password.rs`). The phone changes its password while paired only when every other active
+/// member announced it.
+pub const MASTER_PASSWORD_FEATURE: &str = crate::master_password::FEATURE;
+pub const SYNC_FEATURES: [&str; 9] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE, SITE_ICONS_FEATURE, CHECKPOINT_ENROLL_FEATURE,
+    SIGN_IN_METHODS_FEATURE, MERGE_JOIN_FEATURE, EPOCH_KEYS_FEATURE, HISTORY_COMPACTION_FEATURE, MASTER_PASSWORD_FEATURE];
 
 /// `cutoff1:<sequence>:<hash>` in a REMOVE event's subject key field (Android `RemovalCutoff`).
 /// `Ok(None)` for an empty field; `Err` for anything else that is not a valid cutoff.

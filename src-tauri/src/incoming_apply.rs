@@ -78,6 +78,8 @@ impl IncomingApply {
             // A delete is not supported but readable: `validate_payload` sets it aside.
             crate::site_icon_sync::ENTITY_TYPE => true,
             crate::sign_in_sync::ENTITY_TYPE => true,
+            // A delete is readable but invalid: `validate_payload` sets it aside.
+            crate::master_password::ENTITY_TYPE => true,
             _ => false,
         };
         if !supported {
@@ -150,6 +152,14 @@ impl IncomingApply {
                 crate::site_icons::notify_saved();
             }
             return Ok(outcome);
+        }
+
+        if operation.entity_type == crate::master_password::ENTITY_TYPE {
+            // `master-password-v1`: nothing to materialize. The vault reads the current check from
+            // the applied changes, with the membership (`UnlockedVault::refresh_master_password`).
+            mark_applied(&transaction, operation, ApplyOutcome::Applied)?;
+            transaction.commit()?;
+            return Ok(ApplyOutcome::Applied);
         }
 
         if operation.entity_type == crate::sign_in_sync::ENTITY_TYPE {
@@ -807,6 +817,13 @@ pub(crate) fn clear_authenticator_links(connection: &Connection, id: &str) -> ru
 }
 
 fn validate_payload(operation: &ChangeRecord, payload: &Value) -> Result<(), ApplyError> {
+    if operation.entity_type == crate::master_password::ENTITY_TYPE {
+        // `master-password-v1`: a check under the vault ID or a switch under the author's own device
+        // ID, always an upsert. Whether a check's author was the managing device is decided on read.
+        let valid = crate::master_password::read(&operation.vault_id, &operation.device_id, &operation.entity_id,
+            operation.kind == ChangeKind::Upsert, payload).is_some();
+        return if valid { Ok(()) } else { Err(ApplyError::InvalidPayload) };
+    }
     if operation.entity_type == crate::sign_in_sync::ENTITY_TYPE {
         // `sign-in-methods-v1`: an upsert (checked in full, with the id, in `IncomingApply::apply_with_appearance`)
         // or the entry delete shape.

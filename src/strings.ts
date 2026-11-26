@@ -461,7 +461,7 @@ export const strings = {
   setupLink: "Setup link",
   startsWithNuvoriPairV3It: "Starts with nuvori-pair://v3/. It contains a one-time secret.",
   phoneSMasterPassword: "Phone's master password",
-  pairingSamePasswordHint: "Use the phone's master password. It must also unlock this PC, because paired devices keep the same master password.",
+  pairingSamePasswordHint: "Use the phone's master password. Paired devices keep the same master password, so this PC opens with it too after pairing.",
   continue: "Continue",
   showQr: "Show QR",
   thisPcKeepsItsItemsYour: "This PC keeps its items. Your phone is told the next time this PC reaches it.",
@@ -650,7 +650,7 @@ export const accountText = {
   confirmNewPassword: "Confirm new password",
   passwordsDontMatch: "Passwords don't match.",
   cantReset: "Nuvori can't reset this password. If you forget it, your vault can't be recovered.",
-  pairedChangeOnPhone: (phone: string) => `Paired devices keep the same master password, so the change happens on ${phone}, under Settings > Security. This PC needs the new password too.`,
+  pairedChangeOnPhone: (phone: string) => `Paired devices keep the same master password, so the change happens on ${phone}, under Settings > Security. This PC asks you for the new one at the next sync.`,
   pairedOrLeaveGroup: "To give this PC a password of its own instead, leave the sync group under Danger zone. It keeps its items.",
   hello: "Windows Hello unlock keeps working.",
   changing: "Changing the password. This takes a few seconds.",
@@ -670,4 +670,21 @@ export const accountText = {
   nameTooLong: "Use 40 characters or fewer.",
   nameHasControls: "Remove line breaks and tabs from the name.",
   renameThisPc: (name: string) => `Rename ${name}`,
+} as const;
+
+/** The phone changed its master password and this PC switches to it (master_password.rs). */
+export const masterPasswordText = {
+  title: "Enter your phone's new master password",
+  changedBy: (manager: string) => `${manager || "Your phone"} changed your vault's master password. Paired devices keep the same master password, so enter the new one to keep syncing this PC.`,
+  paused: "Sync is paused until then. This PC still opens with its current password.",
+  newPassword: "New master password",
+  usePassword: "Use new password",
+  notNow: "Not now",
+  enterPassword: "Enter the new master password.",
+  checking: "Checking the password. This takes a few seconds.",
+  switched: "This PC now uses the new master password",
+  failed: "Couldn't switch to the new master password.",
+  bannerTitle: "Sync is paused",
+  bannerBody: "Your phone's master password changed. Enter the new one to resume sync.",
+  bannerAction: "Enter password",
 } as const;

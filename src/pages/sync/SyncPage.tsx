@@ -19,6 +19,7 @@ import { ActivityList } from "../ActivityPage";
 import { useSyncNow } from "../Home";
 import { PairedNotice, PairingCard } from "./Pairing";
 import { CloudCard } from "./Cloud";
+import { MasterPasswordSwitchBanner } from "./MasterPasswordSwitch";
 import { strings, syncStatusText } from "../../strings";
 
 export function SyncPage() {
@@ -37,6 +38,7 @@ export function SyncPage() {
   return (
     <div className="page page-narrow">
       <RemovedNoticeBanner membership={membership.data} reload={membership.reload} />
+      {snapshot.enrolled && <MasterPasswordSwitchBanner />}
       {snapshot.enrolled && <PairedNotice />}
       {!snapshot.enrolled && membership.data?.pendingLeave && (
         <StatusBanner kind="info" title={strings.youLeftTheSyncGroup} action={<PendingLeaveChip membership={membership.data} />}>{strings.thisPcKeepsItsItemsYour}</StatusBanner>

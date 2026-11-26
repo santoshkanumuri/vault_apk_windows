@@ -30,6 +30,7 @@ pub mod join_match;
 pub mod keepass_import;
 pub mod password_import;
 pub mod local_recovery;
+pub mod master_password;
 pub mod merge_join;
 mod discovery;
 mod google_drive;
@@ -454,6 +455,10 @@ impl SyncController {
         let Ok(_guard) = self.gate.try_lock() else {
             return PassOutcome::not_run(Err("A sync pass is already running".into()));
         };
+        // `master-password-v1`: the phone changed its master password and this PC hasn't switched.
+        if master_password_switch_pending(state) {
+            return PassOutcome::not_run(Err(SWITCH_MASTER_PASSWORD_FIRST.into()));
+        }
         // Google Drive alone was asked for and is not connected: nothing runs, the status stays.
         if !ways.wifi && !CloudController::connected(state) {
             return PassOutcome::not_run(Err(DRIVE_NOT_CONNECTED.into()));
@@ -501,6 +506,10 @@ impl SyncController {
                 *message = match &outcome.result { Ok(report) => sync_summary(report), Err(error) => error.clone() };
             }
             log_sync_result(&outcome.result, manual);
+        }
+        // The pass may have brought the phone's new master password check: sync waits from now on.
+        if refresh_master_password(state) && let Ok(mut message) = self.message.lock() {
+            *message = SWITCH_MASTER_PASSWORD_FIRST.into();
         }
         outcome
     }
@@ -1224,6 +1233,8 @@ fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync
             let mut app = state.lock().ok()?;
             let vault = app.unlocked.as_mut()?;
             if !vault.is_enrolled().ok()? || !lan_sync::configuration(vault).ok()?.1 { return None; }
+            // Not offered on Wi-Fi while it waits for the phone's new master password.
+            if vault.master_password_switch().is_some() { return None; }
             vault.connection().query_row("SELECT vault_id FROM sync_group_state", [], |row| row.get::<_, String>(0)).ok()
         })();
         let stream = {
@@ -1254,6 +1265,7 @@ fn start_lan_listener(state: ManagedState, pairing: Arc<PairingController>, sync
         thread::spawn(move || {
             let (result, proved) = lan_sync::serve_proved(&state, &pairing.helper_path, stream, &sync.tracker, Some(&sync.gate));
             if let Ok(mut limiter) = limiter.lock() { limiter.finish(source, proved, Instant::now()); }
+            refresh_master_password(&state);
             if let Ok(report) = result {
                 if let Ok(mut message) = sync.message.lock() {
                     *message = format!("Sent {} changes and received {} from a paired device.", report.sent, report.received);
@@ -1306,6 +1318,8 @@ fn start_background_sync(state: ManagedState, pairing: Arc<PairingController>, s
                 let mut app = state.lock().ok()?;
                 let vault = app.unlocked.as_mut()?;
                 if !vault.is_enrolled().ok()? { return None; }
+                // Sync waits until this PC switches to the phone's new master password.
+                if vault.master_password_switch().is_some() { return None; }
                 let revision = vault.change_revision().ok()?;
                 let (address, automatic) = lan_sync::configuration(vault).ok()?;
                 let schedule = lan_sync::schedule(vault.connection());
@@ -1634,7 +1648,7 @@ fn join_android(
         |socket| controller.attach_socket(socket),
     )
     .map_err(|error| error.to_string())?;
-    finish_join(state, controller, &identity_store, &mut session)
+    finish_join(state, controller, &identity_store, &mut session, password)
 }
 
 fn join_reverse(
@@ -1672,7 +1686,7 @@ fn join_reverse(
             Err(error) => return Err(error.to_string()),
         }
     };
-    finish_join(state, controller, &identity_store, &mut session)
+    finish_join(state, controller, &identity_store, &mut session, password)
 }
 
 fn finish_join(
@@ -1680,6 +1694,7 @@ fn finish_join(
     controller: &PairingController,
     identity_store: &DeviceIdentityStore,
     session: &mut JoinSession,
+    password: &str,
 ) -> Result<bool, String> {
     controller.set_stage(
         "confirm",
@@ -1690,17 +1705,21 @@ fn finish_join(
     session.approve().map_err(|error| error.to_string())?;
     controller.set_stage("transferring", "Receiving the encrypted vault copy", "")?;
     let prepared = session.prepare().map_err(|error| error.to_string())?;
-    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let mut guard = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let app = &mut *guard;
     let vault = app
         .unlocked
         .as_mut()
         .ok_or("Unlock the Windows vault before pairing")?;
+    adopt_pairing_password(&app.store, vault, password)?;
     let (joined, summary) = session
         .commit(prepared, vault, identity_store)
         .map_err(|error| error.to_string())?;
     // A leave request this same identity signed earlier must not remove it again later.
     let _ = vault.forget_own_pending_leave();
-    drop(app);
+    // Joined after any password check of the phone, so no switch waits (`master_password.rs`).
+    let _ = vault.refresh_master_password();
+    drop(guard);
     controller.note_join(summary);
     Ok(joined)
 }
@@ -1731,6 +1750,16 @@ struct AppSnapshot {
     welcome_back: bool,
     /// While locked: when the vault was last changed, in Unix milliseconds (a file time); 0 otherwise.
     last_used_at: i64,
+    /// The phone changed its master password and this PC hasn't switched yet: sync waits.
+    master_password_switch: Option<MasterPasswordSwitch>,
+}
+
+/// What the switch prompt shows (`master_password.rs`). Never the check itself.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MasterPasswordSwitch {
+    /// The managing device's name in this group, when it has one.
+    manager_name: String,
 }
 
 impl AppState {
@@ -1789,6 +1818,10 @@ impl AppState {
             } else {
                 0
             },
+            master_password_switch: self.unlocked.as_ref().and_then(|vault| {
+                let pending = vault.master_password_switch()?;
+                Some(MasterPasswordSwitch { manager_name: vault.display_name_of(&pending.current.author).unwrap_or_default() })
+            }),
         })
     }
 
@@ -1851,21 +1884,23 @@ fn pairing_status(controller: State<'_, Arc<PairingController>>) -> Result<Pairi
 
 /// Android `VaultViewModel.changePassword`'s rule, worded for a PC that joins the group.
 const PAIRED_PASSWORD_CHANGE: &str =
-    "Master password changes are unavailable while devices share a vault. Paired devices must keep the same master password.";
-const PAIRING_PASSWORD_DIFFERS: &str =
-    "This PC's master password is different from the phone's. Paired devices must keep the same master password: change this PC's master password to the phone's in Settings, then pair.";
+    "Master password changes are unavailable on a paired PC. Paired devices keep your phone's master password: change it on your phone, and this PC asks for the new one.";
 
-/// Android `joinDevicePairing`: the password typed for pairing must also unlock this device, so the
-/// whole group keeps the managing device's master password. The handshake then proves it is the
-/// phone's. Runs on the pairing thread because it takes an Argon2id run.
-fn ensure_same_password(state: &ManagedState, password: &str) -> Result<(), String> {
-    let app = state.lock().map_err(|_| "Vault state is unavailable")?;
-    app.unlocked.as_ref().ok_or("Unlock the Windows vault before pairing")?;
-    match app.store.verify_password(password) {
+/// Android `changePasswordAndJoinDevice`, for every join: every paired device keeps the managing
+/// device's master password. The pairing handshake has just proved that `password` is the phone's
+/// (a J-PAKE run on it, `enrollment.rs`), so this PC's vault key is wrapped under it before the
+/// join is saved. A PC that already opens with it changes nothing. Runs on the pairing thread.
+fn adopt_pairing_password(store: &VaultStore, vault: &UnlockedVault, password: &str) -> Result<(), String> {
+    match store.verify_password(password) {
         Ok(()) => Ok(()),
         Err(VaultError::WrongPasswordOrCorruptKey) => {
-            activity::log(Level::Warning, Category::Pairing, "Pairing stopped: this PC's master password differs from the phone's");
-            Err(PAIRING_PASSWORD_DIFFERS.to_owned())
+            let key = Zeroizing::new(*vault.key_for_hello());
+            store.adopt_password(&key, password).map_err(|error| {
+                activity::diagnostic(Category::Pairing, "Could not switch this PC to the phone's master password", &error);
+                "Couldn't switch this PC to the phone's master password, so it wasn't paired. Try again.".to_owned()
+            })?;
+            activity::log(Level::Success, Category::Security, "This PC now opens with the phone's master password");
+            Ok(())
         }
         Err(other) => Err(public_vault_error(other)),
     }
@@ -1886,7 +1921,7 @@ fn start_pairing(
     thread::spawn(move || {
         let link = Zeroizing::new(setup_link);
         let password = Zeroizing::new(master_password);
-        let result = ensure_same_password(&app, &password).and_then(|()| join_android(app, &controller, &link, &password));
+        let result = join_android(app, &controller, &link, &password);
         controller.finish(result);
     });
     Ok(())
@@ -1932,7 +1967,7 @@ fn start_reverse_pairing(
     let controller = controller.inner().clone();
     thread::spawn(move || {
         let password = Zeroizing::new(master_password);
-        let result = ensure_same_password(&app, &password).and_then(|()| join_reverse(app, &controller, offer, &password));
+        let result = join_reverse(app, &controller, offer, &password);
         controller.finish(result);
     });
     Ok(())
@@ -1996,8 +2031,13 @@ async fn unlock_vault(
             return Err(unlock_throttle::message(wait));
         }
         let result = app.store.unlock(&password);
+        // `master-password-v1`: a vault that already opens with the phone's new master password (a
+        // switch interrupted before it was recorded) finishes the switch without asking again.
+        let switched = result.as_ref().ok().and_then(UnlockedVault::master_password_switch)
+            .filter(|pending| pending.matches(&password))
+            .map(|pending| pending.current.check.epoch);
         password.zeroize();
-        let vault = result.map_err(|error| {
+        let mut vault = result.map_err(|error| {
             activity::log(Level::Warning, Category::Security, "Unlock failed");
             // A newer or damaged key file is not a wrong guess: retrying can't help.
             if matches!(error, VaultError::WrongPasswordOrCorruptKey) {
@@ -2009,6 +2049,12 @@ async fn unlock_vault(
         })?;
         if let Err(failure) = throttle.clear() {
             activity::diagnostic(Category::Security, "Could not clear the wrong-password count", failure);
+        }
+        if let Some(epoch) = switched {
+            match vault.record_master_password_switch(epoch) {
+                Ok(()) => activity::log(Level::Success, Category::Security, "This PC already opens with the phone's new master password. Sync resumes"),
+                Err(error) => activity::diagnostic(Category::Security, "Could not record the master password switch", &error),
+            }
         }
         app.unlocked = Some(vault);
         // Received changes that wait apply now, before the vault is shown (H5).
@@ -2529,6 +2575,85 @@ async fn change_master_password(
     })
     .await
     .map_err(|_| "Changing the master password stopped unexpectedly".to_owned())?
+}
+
+/// `master-password-v1` (`master_password.rs`): the managing phone changed its master password, and
+/// this PC switches to it. `password` is tested against the phone's check (one Argon2id run, without
+/// the vault lock), then this PC's vault key is wrapped under it (`VaultStore::adopt_password`) and a
+/// signed switch goes to the group. Sync resumes. The old password is not needed: the vault is open.
+#[tauri::command]
+async fn switch_master_password(password: String, app_handle: AppHandle, state: State<'_, ManagedState>) -> Result<AppSnapshot, String> {
+    let state = state.inner().clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || -> Result<AppSnapshot, String> {
+        let password = Zeroizing::new(password);
+        let pending = {
+            let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+            let vault = app.unlocked.as_ref().ok_or("Unlock the vault first")?;
+            vault.master_password_switch().cloned().ok_or(NO_MASTER_PASSWORD_SWITCH)?
+        };
+        let wait = master_password::SWITCH_THROTTLE.lock().map_err(|_| "Vault state is unavailable")?.wait(Instant::now());
+        if !wait.is_zero() {
+            return Err(format!("Too many wrong passwords. Try again in {}.", master_password::describe_wait(wait)));
+        }
+        if !pending.matches(&password) {
+            if let Ok(mut throttle) = master_password::SWITCH_THROTTLE.lock() {
+                throttle.failed(Instant::now());
+            }
+            activity::log(Level::Warning, Category::Security, "Master password switch: the password didn't match the phone's");
+            return Err(SWITCH_PASSWORD_WRONG.to_owned());
+        }
+        if let Ok(mut throttle) = master_password::SWITCH_THROTTLE.lock() {
+            throttle.succeeded();
+        }
+        // Held for the rewrap (two Argon2id runs), so a lock and unlock can't read the key file in between.
+        let mut guard = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let app = &mut *guard;
+        let vault = app.unlocked.as_mut().ok_or("Unlock the vault first")?;
+        // A newer check arrived meanwhile: that one is the password to type.
+        if vault.master_password_switch().map(|current| &current.current.hash) != Some(&pending.current.hash) {
+            return Err(SWITCH_PASSWORD_CHANGED_AGAIN.to_owned());
+        }
+        let key = Zeroizing::new(*vault.key_for_hello());
+        app.store.adopt_password(&key, &password).map_err(|error| {
+            activity::diagnostic(Category::Security, "Master password switch failed", &error);
+            "Couldn't switch to the new master password. Your current password still works.".to_owned()
+        })?;
+        // From here the vault opens with the new password. If the switch can't be recorded now, the
+        // next unlock with it records it (`unlock_vault`).
+        if let Err(error) = vault.record_master_password_switch(pending.current.check.epoch) {
+            activity::diagnostic(Category::Security, "Could not record the master password switch", &error);
+            return Err("This PC now opens with the new master password. Lock and unlock once to resume sync.".to_owned());
+        }
+        activity::log(Level::Success, Category::Security, "Switched to the phone's new master password. Sync resumes");
+        app.snapshot()
+    })
+    .await
+    .map_err(|_| "Switching the master password stopped unexpectedly".to_owned())??;
+    vault_changed(&app_handle, false);
+    Ok(snapshot)
+}
+
+const SWITCH_MASTER_PASSWORD_FIRST: &str =
+    "Sync is paused. Your phone's master password changed: enter the new one on this PC to resume.";
+const NO_MASTER_PASSWORD_SWITCH: &str = "This PC already uses the phone's master password.";
+const SWITCH_PASSWORD_WRONG: &str = "That isn't your phone's new master password.";
+const SWITCH_PASSWORD_CHANGED_AGAIN: &str =
+    "Your phone's master password changed again. Enter the newest one.";
+
+/// Whether sync waits for the phone's new master password (as last read).
+fn master_password_switch_pending(state: &ManagedState) -> bool {
+    state.lock().is_ok_and(|app| app.unlocked.as_ref().is_some_and(|vault| vault.master_password_switch().is_some()))
+}
+
+/// Reads again whether this PC must switch to the phone's new master password, after changes may
+/// have arrived. Returns whether it must.
+fn refresh_master_password(state: &ManagedState) -> bool {
+    let Ok(mut app) = state.lock() else { return false };
+    let Some(vault) = app.unlocked.as_mut() else { return false };
+    if let Err(error) = vault.refresh_master_password() {
+        activity::diagnostic(Category::Sync, "Could not read the master password state", &error);
+    }
+    vault.master_password_switch().is_some()
 }
 
 /// Devices & sync > This PC > Rename (Android `VaultViewModel.nameThisDevice`). The name reaches
@@ -3606,6 +3731,7 @@ pub fn run() {
             stop_sharing,
             reset_vault,
             change_master_password,
+            switch_master_password,
             start_fresh,
             list_notes,
             save_note,
