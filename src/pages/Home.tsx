@@ -17,7 +17,7 @@ import { api, type VaultEntry } from "../lib/api";
 import { categories, categoryOrder, entrySubtitle, type Category } from "../lib/entries";
 import { cx, greeting, groupCode, plural, relativeTime } from "../lib/format";
 import { browserIndicator, isSyncing, syncIndicator } from "../lib/syncState";
-import { overviewText, syncFacts, syncNowOutcome, syncOverview } from "../lib/syncOverview";
+import { overviewText, syncFacts, syncNowOutcome, syncOverview, waitingToApplyHere } from "../lib/syncOverview";
 import { totpAt } from "../lib/totp";
 import { useTotpCodes } from "./codes/useTotp";
 import { EntryQuickActions } from "./items/actions";
@@ -109,7 +109,7 @@ function AttentionStrip() {
     items.push({ key: "phone", kind: overview.text.kind, label: overview.text.title, detail: overview.text.detail, onClick: () => void router.root({ page: "sync" }) });
   } else if (snapshot.enrolled && !overview && (phone.kind === "warning" || phone.kind === "error") && phone.label !== "Needs review") items.push({ key: "phone", kind: phone.kind, label: phone.label, detail: phone.detail, onClick: () => void router.root({ page: "sync" }) });
   if (sync.data && (sync.data.setAside ?? 0) > 0) items.push({ key: "set-aside", kind: "warning", label: `${plural(sync.data.setAside ?? 0, "change")} couldn't be read`, detail: "Set aside and tried again on each sync", onClick: () => void router.root({ page: "sync" }) });
-  if (sync.data && sync.data.waitingToApply - (sync.data.setAside ?? 0) > 0) items.push({ key: "waiting", kind: "info", label: `${plural(sync.data.waitingToApply - (sync.data.setAside ?? 0), "change")} waiting`, detail: "Applied on a later sync", onClick: () => void router.root({ page: "sync" }) });
+  if (sync.data && waitingToApplyHere(sync.data) > 0) items.push({ key: "waiting", kind: "info", label: `${plural(waitingToApplyHere(sync.data), "change")} waiting`, detail: "Applied on a later sync", onClick: () => void router.root({ page: "sync" }) });
   if (browser.data && extension.label === "Not listening") items.push({ key: "browser", kind: "warning", label: "Browser filling is off", detail: "Nuvori isn't listening for the extension", onClick: () => void router.root({ page: "settings", section: "browser" }) });
   // Cards that have expired or expire within 90 days, the first three as on Android's Home.
   entries.filter((entry) => entry.type === "CARD" && cardExpiryKind(entry.tertiaryValue, now)).slice(0, 3).forEach((entry) => {

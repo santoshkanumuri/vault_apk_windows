@@ -11,7 +11,7 @@ import { syncStatusText as words } from "../strings.ts";
 export type TransportHealth = "off" | "ok" | "failed";
 export type PeerAck = "upToDate" | "waiting" | "silent" | "notChecked" | "failed";
 export type OverallSync = "syncing" | "attention" | "keys" | "conflicts" | "waiting" | "waitingHere" | "stale" | "notYet" | "upToDate";
-export type AttentionCause = "bothFailed" | "wifiOnlyFailed" | "driveOnlyFailed" | "driveSignIn" | "localProblem" | "rejected" | "deviceSilent";
+export type AttentionCause = "bothFailed" | "wifiOnlyFailed" | "driveOnlyFailed" | "driveSignIn" | "localProblem" | "rejected" | "appUpdate" | "deviceSilent";
 export type TransportNote = "wifiFailedDriveKeptUp" | "wifiFailedDriveCarries" | "wifiFailed" | "driveFailedWifiKeptUp" | "driveFailedWifiCarries" | "driveFailed" | "paused";
 
 /** One active paired device. `unconfirmed`: this PC's changes it has not applied yet. */
@@ -40,6 +40,8 @@ export type SyncFacts = {
   waitingHere?: boolean;
   /** M14: Google Drive is connected and needs the user to sign in again. */
   driveSignIn?: boolean;
+  /** M4: devices whose changes wait for a newer Nuvori on this PC, with how many. */
+  updateFrom?: { name: string; count: number }[];
 };
 
 export type SyncOverview = {
@@ -55,7 +57,18 @@ export type SyncOverview = {
   noteDevices: string[];
   /** Devices with changes another device applied that have not arrived here, the most first (H1). */
   missingFrom: PeerFacts[];
+  /** M4: devices whose changes wait for a newer Nuvori on this PC, the most first. */
+  updateFrom: { name: string; count: number }[];
 };
+
+/**
+ * Received changes that still apply on a later sync: not the ones set aside (unreadable) or the
+ * ones that wait for a newer Nuvori (M4), which have their own messages.
+ */
+export function waitingToApplyHere(status: Pick<SyncStatus, "waitingToApply" | "setAside" | "needsUpdate">): number {
+  const update = (status.needsUpdate ?? []).reduce((sum, device) => sum + device.count, 0);
+  return Math.max(0, status.waitingToApply - (status.setAside ?? 0) - update);
+}
 
 /** A device unheard for this long, or no device heard from for this long, is a problem. */
 export const STALE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
@@ -95,8 +108,9 @@ export function syncOverview(facts: SyncFacts): SyncOverview {
   else if (!wifiFailed && !driveFailed && facts.paused) note = "paused";
   const noteDevices = note?.startsWith("wifi") ? failedNames : [];
   const missingFrom = facts.peers.filter((peer) => (peer.missingHere ?? 0) > 0).sort((a, b) => (b.missingHere ?? 0) - (a.missingHere ?? 0));
+  const updateFrom = (facts.updateFrom ?? []).filter((device) => device.count > 0).sort((a, b) => b.count - a.count);
   const result = (state: OverallSync, cause?: AttentionCause, days = 0): SyncOverview =>
-    ({ state, cause, peers, waitingFor, waitingChanges, lastSynced, days, note, noteDevices, missingFrom });
+    ({ state, cause, peers, waitingFor, waitingChanges, lastSynced, days, note, noteDevices, missingFrom, updateFrom });
 
   // No transport is left to carry waiting changes: one failed and the other is off or failed too.
   const noTransport = (wifiFailed || driveFailed) && facts.wifi !== "ok" && facts.drive !== "ok";
@@ -106,6 +120,8 @@ export function syncOverview(facts: SyncFacts): SyncOverview {
   if (wifiFailed && driveFailed) return result("attention", "bothFailed");
   if (facts.localProblem) return result("attention", "localProblem");
   if ((facts.rejected ?? 0) > 0) return result("attention", "rejected");
+  // M4: only an update of this PC applies them; the other devices aren't held up meanwhile.
+  if (updateFrom.length > 0) return result("attention", "appUpdate");
   if (silent) return result("attention", "deviceSilent", Math.floor((now - silent.lastSeen) / DAY_MS));
   if (noTransport && !inStep) return result("attention", wifiFailed ? "wifiOnlyFailed" : "driveOnlyFailed");
   if (facts.waitingForKeys) return result("keys");
@@ -153,7 +169,8 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
       failure: failure && failure.kind !== "temporary" ? { kind: failure.kind, message: failure.message } : undefined,
     };
   });
-  const waiting = sync ? sync.waitingToApply - (sync.setAside ?? 0) : 0;
+  const waiting = sync ? waitingToApplyHere(sync) : 0;
+  const names = new Map((membership?.devices ?? []).map((device) => [device.deviceId, device.name]));
   return {
     now, peers,
     busy: Boolean(sync && (sync.running || (sync.phase !== undefined && ACTIVE_PHASES.has(sync.phase)))),
@@ -167,6 +184,7 @@ export function syncFacts(sync: SyncStatus | null, cloud: CloudStatus | null, me
     waitingForKeys: Boolean(sync?.waitingForKeys),
     waitingHere: waiting > 0,
     driveSignIn: Boolean(cloud?.connected && cloud.needsSignIn),
+    updateFrom: (sync?.needsUpdate ?? []).map((device) => ({ name: names.get(device.deviceId) || device.name, count: device.count })),
   };
 }
 
@@ -196,6 +214,7 @@ export function overviewText(facts: SyncFacts, overview: SyncOverview): Overview
         : overview.cause === "driveSignIn" ? words.detailDriveSignIn
         : overview.cause === "localProblem" ? facts.localProblem ?? ""
         : overview.cause === "rejected" ? words.detailRejected(facts.rejected ?? 0)
+        : overview.cause === "appUpdate" ? words.detailAppUpdate(overview.updateFrom[0].count, overview.updateFrom[0].name)
         : words.detailDeviceSilent(silent?.name ?? "", overview.days);
       text = { kind: "error", title: words.attention, detail };
       break;

@@ -34,12 +34,19 @@ pub const EPOCH_KEYS_FEATURE: &str = crate::epoch_keys::FEATURE;
 /// Announced by builds that read Google Drive floor markers (`compaction.rs` `drive`). Drive cleanup
 /// runs only when every active member announced it.
 pub const HISTORY_COMPACTION_FEATURE: &str = crate::compaction::drive::FEATURE;
+/// Announced by builds that listen on the Wi-Fi port in 20000-32767 and try a paired device's
+/// other ports when one refuses (`lan_sync::sync_port`, L5). While any other active member hasn't
+/// announced it, a build also listens on the port older versions use.
+pub const SYNC_PORTS_FEATURE: &str = "sync-ports-v2";
 /// Announced by builds that switch to the managing phone's new master password when it changes
 /// (`master_password.rs`). The phone changes its password while paired only when every other active
 /// member announced it.
 pub const MASTER_PASSWORD_FEATURE: &str = crate::master_password::FEATURE;
-pub const SYNC_FEATURES: [&str; 9] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE, SITE_ICONS_FEATURE, CHECKPOINT_ENROLL_FEATURE,
-    SIGN_IN_METHODS_FEATURE, MERGE_JOIN_FEATURE, EPOCH_KEYS_FEATURE, HISTORY_COMPACTION_FEATURE, MASTER_PASSWORD_FEATURE];
+/// M12 and M11 (`refusal.rs`): this build tells a peer when it refuses what the peer sent, and
+/// confirms received photo bytes as they arrive. Each is used only with a peer that announced it.
+pub const SYNC_FEATURES: [&str; 12] = [REMOVAL_CUTOFF_FEATURE, APPEARANCE_FEATURE, SITE_ICONS_FEATURE, CHECKPOINT_ENROLL_FEATURE,
+    SIGN_IN_METHODS_FEATURE, MERGE_JOIN_FEATURE, EPOCH_KEYS_FEATURE, HISTORY_COMPACTION_FEATURE, SYNC_PORTS_FEATURE,
+    crate::refusal::FEATURE, crate::refusal::PHOTO_RECEIPTS_FEATURE, MASTER_PASSWORD_FEATURE];
 
 /// `cutoff1:<sequence>:<hash>` in a REMOVE event's subject key field (Android `RemovalCutoff`).
 /// `Ok(None)` for an empty field; `Err` for anything else that is not a valid cutoff.

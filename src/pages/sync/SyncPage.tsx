@@ -15,6 +15,7 @@ import { useVault } from "../../app/vault";
 import { api, type ActivityEvent, type SyncStatus } from "../../lib/api";
 import { formatDateTime, plural, relativeTime } from "../../lib/format";
 import { isSyncing, phaseLabel } from "../../lib/syncState";
+import { waitingToApplyHere } from "../../lib/syncOverview";
 import { ActivityList } from "../ActivityPage";
 import { useSyncNow } from "../Home";
 import { PairedNotice, PairingCard } from "./Pairing";
@@ -31,6 +32,10 @@ export function SyncPage() {
   const membership = useMembership();
   const membershipShown = Boolean(membership.data && !membership.error && membership.data.devices.length > 0);
   const conflictCount = conflicts.data ? conflicts.data.length : sync.data?.conflicts ?? 0;
+  // M4: changes of a kind only a newer Nuvori applies. The device's own name, as the overview uses.
+  const updateFrom = (sync.data?.needsUpdate ?? []).map((device) => ({
+    ...device, name: membership.data?.devices.find((known) => known.deviceId === device.deviceId)?.name || device.name }));
+  const updateCount = updateFrom.reduce((sum, device) => sum + device.count, 0);
   const recent = (activity.data ?? []).filter((event) => event.category === "sync" || event.category === "pairing").slice(0, 6);
   // One status over Wi-Fi and Google Drive: a success on either counts.
   const overview = useSyncOverview(sync.data, membershipShown ? membership.data : null, conflictCount);
@@ -64,8 +69,13 @@ export function SyncPage() {
       {snapshot.enrolled && sync.data?.waitingForKeys && (
         <StatusBanner kind="info" title={strings.waitingForNewSyncKeysFrom}>{strings.aDeviceWasRemovedSoThe}</StatusBanner>
       )}
-      {snapshot.enrolled && sync.data && sync.data.waitingToApply - (sync.data.setAside ?? 0) > 0 && (
-        <StatusBanner kind="info" title={`${plural(sync.data.waitingToApply - (sync.data.setAside ?? 0), "change")} waiting to apply`}>{strings.theyLlBeAppliedOnA}</StatusBanner>
+      {snapshot.enrolled && sync.data && waitingToApplyHere(sync.data) > 0 && (
+        <StatusBanner kind="info" title={`${plural(waitingToApplyHere(sync.data), "change")} waiting to apply`}>{strings.theyLlBeAppliedOnA}</StatusBanner>
+      )}
+      {snapshot.enrolled && updateCount > 0 && (
+        <StatusBanner kind="warning" title={`${plural(updateCount, "change")} from ${updateFrom.length === 1 ? updateFrom[0].name : `${updateFrom.length} devices`} ${updateCount === 1 ? "needs" : "need"} a newer Nuvori`}>
+          Update Nuvori on this PC to apply {updateCount === 1 ? "it" : "them"}. Other changes still sync.
+        </StatusBanner>
       )}
       {snapshot.enrolled && sync.data && (sync.data.setAside ?? 0) > 0 && (
         <StatusBanner kind="warning" title={`${plural(sync.data.setAside ?? 0, "change")} couldn't be read`}>

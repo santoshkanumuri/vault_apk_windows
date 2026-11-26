@@ -26,6 +26,8 @@ pub(crate) struct LanDiscovery {
     peers: BTreeMap<String, Vec<SocketAddr>>,
     instance: String,
     advertised: Option<(String, String, TcpListener)>,
+    /// L5: a second listener on the port older versions connect to, while a paired device may.
+    legacy: Option<TcpListener>,
 }
 
 impl LanDiscovery {
@@ -33,7 +35,7 @@ impl LanDiscovery {
         let daemon = ServiceDaemon::new().map_err(|e| e.to_string())?;
         let events = daemon.browse(SERVICE).map_err(|e| e.to_string())?;
         Ok(Self { daemon, events, peers: BTreeMap::new(),
-            instance: format!("nuvori-{}", uuid::Uuid::new_v4()), advertised: None })
+            instance: format!("nuvori-{}", uuid::Uuid::new_v4()), advertised: None, legacy: None })
     }
 
     pub fn endpoints(&mut self) -> Vec<SocketAddr> {
@@ -59,6 +61,7 @@ impl LanDiscovery {
         if let Some((_, name, _)) = self.advertised.take() {
             let _ = self.daemon.unregister(&name);
         }
+        self.legacy = None;
         let Some(vault) = vault else { return Ok(()); };
         let listener = bind_sync_listener(vault).map_err(|e| e.to_string())?;
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
@@ -71,9 +74,26 @@ impl LanDiscovery {
         Ok(())
     }
 
+    /// L5: also listens on the port older versions use (`lan_sync::legacy_sync_port`) while `open`,
+    /// unless it is the port the advertised listener already has. Best effort: when another program
+    /// holds it, older devices still find this PC through the advertisement. Not advertised.
+    pub fn set_legacy_port(&mut self, open: bool) {
+        let Some((vault, _, listener)) = self.advertised.as_ref() else { self.legacy = None; return };
+        let port = crate::lan_sync::legacy_sync_port(vault);
+        if !open || listener.local_addr().is_ok_and(|address| address.port() == port) {
+            self.legacy = None;
+        } else if self.legacy.is_none() {
+            self.legacy = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).ok()
+                .filter(|legacy| legacy.set_nonblocking(true).is_ok());
+        }
+    }
+
+    /// The next connection from a private address, on either listener. Both lead to the same
+    /// pre-authentication limit and membership proof (`start_lan_listener`).
     pub fn accept(&self) -> Option<TcpStream> {
         let listener = &self.advertised.as_ref()?.2;
-        let (stream, address) = listener.accept().ok()?;
+        let (stream, address) = listener.accept().ok()
+            .or_else(|| self.legacy.as_ref()?.accept().ok())?;
         if !private_address(address.ip()) { return None; }
         stream.set_nonblocking(false).ok()?;
         Some(stream)
@@ -110,7 +130,7 @@ mod tests {
         let vault = format!("port-test-{}", uuid::Uuid::new_v4());
         let (port, second) = (crate::lan_sync::sync_port(&vault), crate::lan_sync::fallback_sync_port(&vault));
         assert_ne!(port, second);
-        assert!((20_000..50_000).contains(&second));
+        assert!((20_000..32_768).contains(&second));
         let Ok(_held) = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)) else { return };
         for _ in 0..2 {
             let listener = bind_sync_listener(&vault).unwrap();

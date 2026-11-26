@@ -609,6 +609,7 @@ export const syncStatusText = {
   detailDriveOnlyFailed: "Google Drive didn't finish the last sync. Your changes wait on this PC.",
   detailDriveSignIn: "Google Drive needs you to sign in again. Until then, changes don't go through Drive.",
   detailRejected: (count: number) => `${count} ${count === 1 ? "change" : "changes"} couldn't be read. Update Nuvori on this PC and on your phone.`,
+  detailAppUpdate: (count: number, name: string) => `Update Nuvori to apply ${count} ${count === 1 ? "change" : "changes"} from ${name}.`,
   detailDeviceSilent: (name: string, days: number) => `${name} hasn't synced in ${days} days and doesn't have your latest changes.`,
   noteWifiFailedDriveKeptUp: (names: string, one: boolean) => `Wi-Fi couldn't reach ${names}. Google Drive kept ${one ? "it" : "them"} in sync.`,
   noteWifiFailedDriveCarries: (names: string) => `Wi-Fi couldn't reach ${names}. Changes go through Google Drive.`,

@@ -1,7 +1,7 @@
 // Run with `npm test`. The same cases as Android `SyncOverviewTest` and `SyncOverviewTextTest`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { overviewText, peerAck, peerAckText, syncFacts, syncNowOutcome, syncOverview } from "./syncOverview.ts";
+import { overviewText, peerAck, peerAckText, syncFacts, syncNowOutcome, syncOverview, waitingToApplyHere } from "./syncOverview.ts";
 
 const now = 1_790_000_000_000;
 const minute = 60_000;
@@ -127,6 +127,26 @@ test("facts read the backend: unreachable Wi-Fi is a transport failure, other er
   // An older backend without `unconfirmed`: not received plus not applied there.
   const older = { devices: [{ ...membership.devices[1], counts: { checked: true, toSend: 1, toApplyHere: 0, receivedThere: 2, toReceiveHere: 0 } }] };
   assert.equal(syncFacts(sync, cloud, older, 0, now).peers[0].unconfirmed, 3);
+});
+
+test("M4: changes that need a newer Nuvori here name the update, not a later sync", () => {
+  const status = { waitingToApply: 5, setAside: 1, needsUpdate: [{ deviceId: "phone", name: "a paired device", count: 3 }] };
+  assert.equal(waitingToApplyHere(status), 1, "only what applies on a later sync");
+  assert.equal(waitingToApplyHere({ waitingToApply: 2 }), 2, "an older backend reports no needsUpdate");
+  const membership = { devices: [{ deviceId: "phone", name: "Pixel 8", platform: "android", status: "active", isManager: true,
+    isThisDevice: false, lastSeen: now - minute, counts: { checked: true, toSend: 0, toApplyHere: 0, receivedThere: 0, toReceiveHere: 0, unconfirmed: 0 } }] };
+  const sync = { lastSync: new Date(now - minute).toISOString(), conflicts: 0, phoneAddress: "", automatic: true, running: false, message: "",
+    ...status, waitingToApply: 4, setAside: 0 };
+  const f = syncFacts(sync, null, membership, 0, now);
+  assert.deepEqual(f.updateFrom, [{ name: "Pixel 8", count: 3 }], "the device's own name");
+  assert.equal(f.waitingHere, true);
+  const { overview, text } = both(f);
+  assert.equal(overview.cause, "appUpdate");
+  assert.equal(text.title, "Sync needs attention");
+  assert.equal(text.detail, "Update Nuvori to apply 3 changes from Pixel 8.");
+  // Set-aside changes stay first, as on Android.
+  assert.equal(syncOverview({ ...f, rejected: 1 }).cause, "rejected");
+  assert.equal(syncOverview({ ...f, updateFrom: [] , waitingHere: false }).state, "upToDate");
 });
 
 test("H1: changes another device applied that never arrived here are not up to date", () => {

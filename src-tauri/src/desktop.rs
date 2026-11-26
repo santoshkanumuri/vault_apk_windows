@@ -190,11 +190,52 @@ pub fn close_unlock_prompt(app: &AppHandle) {
     }
 }
 
-/// M14: while Google Drive needs a sign-in, the tray icon's tooltip says so.
+/// M14: while Google Drive needs a sign-in, the tray icon's tooltip says so, and when the user
+/// is to be told (after 3 passes in a row, at most once a day) a Windows notification does too.
 pub fn show_sign_in_needed(app: &AppHandle, needed: bool) {
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(if needed { "Nuvori: Google Drive needs you to sign in" } else { "Nuvori" }));
     }
+    if needed && let Err(error) = notify("Google Drive needs you to sign in",
+        "Open Nuvori and sign in again so your devices keep in step.") {
+        // A copy that was not installed (no Start menu shortcut) can't show one; the tooltip stays.
+        activity::diagnostic(Category::Sync, "Could not show the sign-in notification", error);
+    }
+}
+
+/// The installer builds' identifier, which their Start menu shortcut carries as its
+/// AppUserModelID. Windows shows a notification only for an app it knows by that ID.
+const NOTIFICATION_APP_ID: &str = "com.nuvori.desktop";
+
+/// Shows a Windows notification with fixed text: no vault content, since Windows can show it on
+/// the lock screen. Uses the `windows` crate Nuvori already depends on.
+fn notify(title: &str, body: &str) -> windows::core::Result<()> {
+    use windows::{
+        Data::Xml::Dom::XmlDocument,
+        UI::Notifications::{ToastNotification, ToastNotificationManager},
+        core::HSTRING,
+    };
+    let xml = XmlDocument::new()?;
+    xml.LoadXml(&HSTRING::from(toast_xml(title, body)))?;
+    let toast = ToastNotification::CreateToastNotification(&xml)?;
+    // The Store build has its package identity; the installer builds name their shortcut's ID.
+    let notifier = if crate::passkey_plugin::packaged() {
+        ToastNotificationManager::CreateToastNotifier()?
+    } else {
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(NOTIFICATION_APP_ID))?
+    };
+    notifier.Show(&toast)
+}
+
+fn toast_xml(title: &str, body: &str) -> String {
+    fn escape(text: &str) -> String {
+        text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+    }
+    format!(
+        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+        escape(title),
+        escape(body)
+    )
 }
 
 /// Tray icon: left click opens Nuvori; the menu opens, locks, or quits.

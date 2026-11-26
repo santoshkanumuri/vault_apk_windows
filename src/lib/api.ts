@@ -133,7 +133,10 @@ export type SyncStatus = {
   syncOnOpen?: boolean;
   /** Paired devices whose last session failed: dropped (temporary), a problem on this PC (needsYou), or refused. Absent on older builds. */
   deviceFailures?: DeviceFailure[];
+  /** Part of waitingToApply: changes of a kind this version doesn't know, per device that made them. They apply after Nuvori is updated on this PC (M4). Absent on older builds. */
+  needsUpdate?: NeedsUpdate[];
 };
+export type NeedsUpdate = { deviceId: string; name: string; count: number };
 export type DeviceFailure = { deviceId: string; kind: "temporary" | "needsYou" | "refused"; message: string };
 export type SyncReport = { peersChecked: number; peersWaiting: number; sent: number; received: number; waitingToApply: number; conflicts: number; /** The pass also went through Google Drive. */ cloud?: boolean };
 /** Sync through the user's own Google Drive. */
