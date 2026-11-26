@@ -20,6 +20,7 @@ import { useVault } from "../app/vault";
 import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type AutoTypeStatus, type QuickSearchStatus } from "../lib/api";
 import { humanError } from "../lib/errors";
 import { cx, relativeTime } from "../lib/format";
+import { managerLabel } from "../lib/deviceList";
 import { browserIndicator, syncIndicator } from "../lib/syncState";
 import { accountText, strings } from "../strings";
 import { passwordStrength } from "../lib/strength";
@@ -189,6 +190,7 @@ function HelloRow() {
  */
 function ChangePasswordRow() {
   const { snapshot } = useVault();
+  const membership = useMembership();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState("");
@@ -224,8 +226,10 @@ function ChangePasswordRow() {
   return (
     <>
       <SettingsRow icon={KeyRound} title={accountText.changeMasterPassword}
-        description={snapshot.enrolled ? accountText.pairedKeepSamePassword : accountText.changeMasterPasswordRow}
-        control={<Button size="sm" disabled={snapshot.enrolled} onClick={() => setOpen(true)}>{accountText.changePassword}</Button>} />
+        description={snapshot.enrolled ? accountText.pairedChangeOnPhone(managerLabel(membership.data?.managerName)) : accountText.changeMasterPasswordRow}
+        control={snapshot.enrolled ? undefined : <Button size="sm" onClick={() => setOpen(true)}>{accountText.changePassword}</Button>}>
+        {snapshot.enrolled && <p className="settings-detail muted small">{accountText.pairedOrLeaveGroup}</p>}
+      </SettingsRow>
       <Dialog open={open} onClose={close} title={accountText.changeMasterPassword} locked={busy}
         footer={<>
           <Button variant="ghost" onClick={close} disabled={busy}>{strings.cancel}</Button>
