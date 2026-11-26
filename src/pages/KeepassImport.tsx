@@ -13,7 +13,7 @@ import { strings } from "../strings";
 /** The largest KeePass file the import reads (keepass_import.rs MAX_FILE_BYTES). */
 const MAX_BYTES = 32 * 1024 * 1024;
 
-async function base64Of(file: File): Promise<string> {
+export async function base64Of(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
@@ -21,7 +21,7 @@ async function base64Of(file: File): Promise<string> {
 }
 
 /** A styled "Choose file" button with the chosen file's name, like the pairing "Read QR image" button. */
-function FilePicker({ label, hint, accept, file, onFile }: { label: string; hint: string; accept: string; file: File | null; onFile: (file: File | null) => void }) {
+export function FilePicker({ label, hint, accept, file, onFile }: { label: string; hint: string; accept: string; file: File | null; onFile: (file: File | null) => void }) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   return (

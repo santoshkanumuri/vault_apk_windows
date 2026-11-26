@@ -25,6 +25,7 @@ pub mod install_marker;
 pub mod item_copy;
 pub mod join_match;
 pub mod keepass_import;
+pub mod password_import;
 pub mod local_recovery;
 pub mod merge_join;
 mod discovery;
@@ -2520,6 +2521,67 @@ async fn keepass_import(data: String, password: String, key_file: Option<String>
     .map_err(|_| "The import stopped unexpectedly.".to_owned())?
 }
 
+// Import passwords from a browser or password manager export (password_import.rs). The file
+// arrives as base64 from the import dialog, is read in memory only and sent again for the import,
+// which refuses it if it or the saved logins changed since the review.
+
+fn open_password_export(
+    data: &str,
+    mapping: Option<&password_import::ColumnMapping>,
+) -> Result<(usize, Vec<password_import::ImportedLogin>), password_import::ImportError> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    if data.len() > password_import::MAX_FILE_BYTES / 3 * 4 + 8 {
+        return Err(password_import::ImportError::TooLarge);
+    }
+    let bytes = Zeroizing::new(STANDARD.decode(data).map_err(|_| password_import::ImportError::Unreadable)?);
+    password_import::open(&bytes, mapping)
+}
+
+#[tauri::command]
+async fn passwords_preview(
+    data: String,
+    mapping: Option<password_import::ColumnMapping>,
+    state: State<'_, ManagedState>,
+) -> Result<password_import::Preview, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = Zeroizing::new(data);
+        let (rows, logins) = match open_password_export(&data, mapping.as_ref()) {
+            Ok(found) => found,
+            Err(password_import::ImportError::MappingRequired { columns, suggested }) => {
+                return Ok(password_import::Preview::Mapping { columns, suggested });
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        let app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let vault = app.unlocked.as_ref().ok_or("Unlock the vault first".to_owned())?;
+        Ok(password_import::Preview::Review(vault.review_password_import(rows, &logins).map_err(public_vault_error)?))
+    })
+    .await
+    .map_err(|_| "The password export couldn't be read.".to_owned())?
+}
+
+#[tauri::command]
+async fn passwords_import(
+    data: String,
+    mapping: Option<password_import::ColumnMapping>,
+    choices: password_import::Choices,
+    state: State<'_, ManagedState>,
+) -> Result<password_import::Summary, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = Zeroizing::new(data);
+        let (rows, logins) = open_password_export(&data, mapping.as_ref()).map_err(|error| error.to_string())?;
+        let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+        let summary = app.unlocked.as_mut().ok_or("Unlock the vault first".to_owned())?
+            .import_passwords(rows, &logins, &choices).map_err(public_vault_error)?;
+        activity::log(Level::Success, Category::Items, format!("Imported passwords: {} added, {} updated", summary.added, summary.updated));
+        Ok(summary)
+    })
+    .await
+    .map_err(|_| "The import stopped unexpectedly.".to_owned())?
+}
+
 // Website icons: captured by the extension, kept on this PC only (site_icons.rs). The page
 // shows an icon from this list, or a built-in one, or the letter avatar.
 
@@ -2872,6 +2934,9 @@ fn public_vault_error(error: VaultError) -> String {
             "Choose a code that is still in this vault, or no code at all.".to_owned()
         }
         VaultError::EntryNotFound => "That item no longer exists.".to_owned(),
+        VaultError::ImportChanged => {
+            "Saved passwords changed after review. Review the import again.".to_owned()
+        }
         VaultError::InvalidPhoto => {
             "Choose an image under 10 MB. Each item can hold up to 20 photos.".to_owned()
         }
@@ -3171,6 +3236,8 @@ pub fn run() {
             auto_type_login,
             keepass_preview,
             keepass_import,
+            passwords_preview,
+            passwords_import,
             previous_passwords,
             clear_previous_passwords,
             list_trash,

@@ -485,6 +485,60 @@ export const strings = {
 } as const;
 
 /**
+ * Import passwords from a browser or password manager export, with Android's wording
+ * (`VaultUi.kt` "Import passwords", "Match password columns" and the import review).
+ */
+export const passwordImportText = {
+  title: "Import passwords",
+  row: "From a browser or password manager export",
+  description: "Choose a password CSV from a browser or password manager, or an unencrypted Bitwarden JSON export. You will review the accounts before saving. This does not import passkeys.",
+  readable: "Export files contain readable passwords.",
+  file: "Password export",
+  fileHint: "A .csv file, or a Bitwarden .json export that isn't encrypted",
+  chooseFile: "Choose a password export.",
+  tooLarge: "The password export is larger than 4 million characters.",
+  openFailed: "Couldn't read that file.",
+  matchColumns: "Match password columns",
+  matchHint: "Match each heading. Samples are masked, and password samples are always hidden.",
+  website: "Website",
+  username: "Username",
+  password: "Password",
+  titleColumn: "Title",
+  notes: "Notes",
+  doNotImport: "Do not import",
+  chooseColumn: "Choose a column",
+  columnsInvalid: "Choose three different required columns. Optional columns must also be different.",
+  reviewImport: "Review import",
+  reviewTitle: (rows: number) => `Review ${rows} imported logins`,
+  countNew: (count: number) => `${count} new`,
+  countAlreadySaved: (count: number) => `${count} already saved`,
+  countPasswordChanges: (count: number) => `${count} password changes`,
+  countAmbiguous: (count: number) => `${count} ambiguous`,
+  countRepeated: (count: number) => `${count} repeated export rows consolidated`,
+  filter: "Show",
+  filterAll: "All",
+  filterNew: "New",
+  filterAlreadySaved: "Already saved",
+  filterNeedsDecision: "Needs decision",
+  statusNew: "New",
+  statusAlreadySaved: "Already saved",
+  statusPasswordDiffers: "Password differs",
+  statusAmbiguous: "Multiple matches",
+  changedDefault: "Changed passwords default to keeping the saved value. Apply a bulk choice, then adjust individual accounts below.",
+  keepAllSaved: "Keep all saved",
+  useAllImported: "Use all imported",
+  keepSaved: "Keep saved",
+  useImported: "Use imported",
+  choiceFor: (label: string) => `Password for ${label}`,
+  ambiguousNote: "Ambiguous accounts match more than one saved login. They will not be changed.",
+  deleteExport: "The export file contains readable passwords. Delete it after checking the import.",
+  continue: "Continue",
+  failed: "Couldn't import the logins.",
+  result: (added: string, updated: number, duplicates: string, changes: string) =>
+    `Added ${added} and updated ${updated}. Skipped ${duplicates} and ${changes}. Delete the readable export file after checking your logins.`,
+} as const;
+
+/**
  * Sync status over Wi-Fi and Google Drive together (lib/syncOverview.ts). The same words as Android
  * strings.xml `sync_*`, with "this PC" for "this device". Kept in its own block to keep merges simple.
  */

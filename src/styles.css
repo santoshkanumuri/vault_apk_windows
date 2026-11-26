@@ -230,6 +230,12 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .file-picker .btn { flex: 0 0 auto; }
 .file-picker-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .keepass-counts { display: grid; gap: 4px; padding-left: 20px; }
+.password-import-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; border-top: 1px solid var(--hairline); }
+.password-import-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
+.password-import-item > .checkbox, .password-import-item > .password-import-label { flex: 1 1 200px; min-width: 0; }
+.password-import-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.password-import-status { color: var(--primary); font-size: 12px; font-weight: 600; }
+.password-import-item > .segmented { flex-basis: 100%; }
 /* Recently deleted (pages/TrashPage.tsx) */
 .trash-row { display: flex; align-items: center; gap: 12px; padding: 10px var(--s4); }
 .trash-row + .trash-row { border-top: 1px solid var(--hairline); }

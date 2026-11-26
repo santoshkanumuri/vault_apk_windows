@@ -263,6 +263,20 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       if (command === "keepass_import") { log("success", "items", "Imported 40 logins, 5 codes and 3 notes from KeePass"); return { ...summary, logins: 40, duplicates: 2 }; }
       return summary;
     }
+    case "passwords_preview": case "passwords_import": {
+      requireUnlocked();
+      if (!args.mapping) return { kind: "mapping", columns: [{ header: "site", sampleShape: "https://••••" }, { header: "email", sampleShape: "••••@••••" },
+        { header: "login", sampleShape: "••••" }, { header: "secret", sampleShape: "Hidden" }], suggested: { title: null, website: "site", username: null, password: "secret", notes: null } };
+      if (command === "passwords_import") {
+        const choices = args.choices as { skipNew: number[]; useImported: number[] };
+        log("success", "items", `Imported passwords: ${2 - choices.skipNew.length} added, ${choices.useImported.length} updated`);
+        return { added: 2 - choices.skipNew.length, updated: choices.useImported.length, skippedExact: 1, skippedConflicts: 2 - choices.useImported.length, duplicateRows: 1 };
+      }
+      return { kind: "review", rows: 6, duplicateRows: 1, new: 2, alreadySaved: 1, passwordDiffers: 1, ambiguous: 1, token: "mock", items: [
+        { row: 0, title: "Library", username: "reader@example.com", status: "new" }, { row: 1, title: "Forum", username: "poster", status: "new" },
+        { row: 2, title: "GitHub", username: "dev@example.com", status: "alreadySaved" }, { row: 3, title: "Gmail", username: "someone@gmail.com", status: "passwordDiffers" },
+        { row: 4, title: "Work portal", username: "jdoe", status: "ambiguous" }] };
+    }
     case "previous_passwords": return mockHistory.get(String(args.entryId)) ?? [];
     case "clear_previous_passwords": mockHistory.delete(String(args.entryId)); return null;
     case "list_trash": requireUnlocked(); return mockTrash.map(({ data: _data, ...item }) => item);

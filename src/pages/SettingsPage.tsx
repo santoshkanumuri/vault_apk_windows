@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
+import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, FileUp, Keyboard, ExternalLink, Info, KeyRound, MonitorSmartphone, LockKeyhole, LogOut, Monitor, Moon, Package, Palette, Puzzle, RotateCcw, ShieldCheck, Sun, Timer, Unplug, PlugZap } from "lucide-react";
 import { KeepassImportDialog } from "./KeepassImport";
+import { PasswordImportDialog } from "./PasswordImport";
+import { passwordImportText } from "../strings";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
@@ -33,6 +35,7 @@ export function SettingsPage({ section }: { section?: string }) {
   const toast = useToast();
   const lock = useLock();
   const [keepass, setKeepass] = useState(false);
+  const [passwordImport, setPasswordImport] = useState(false);
   const sync = useSyncStatus(10000);
   const lastSync = useLastSync(sync.data);
   const phone = syncIndicator(snapshot, sync.data, Boolean(sync.error));
@@ -101,10 +104,12 @@ export function SettingsPage({ section }: { section?: string }) {
       </SettingsGroup>
 
       <SettingsGroup title={strings.yourData} id="settings-data">
+        <SettingsRow icon={FileUp} title={passwordImportText.title} description={passwordImportText.row} onClick={() => setPasswordImport(true)} />
         <SettingsRow icon={FileKey} title={strings.importFromKeepass} description={strings.loginsCodesAndNotesFromA} onClick={() => setKeepass(true)} />
         <SettingsRow icon={ArchiveRestore} title={strings.recentlyDeleted} description={strings.restoreItemsDeletedInTheLast2} onClick={() => void router.navigate({ page: "trash" })} />
       </SettingsGroup>
       <KeepassImportDialog open={keepass} onClose={() => setKeepass(false)} />
+      <PasswordImportDialog open={passwordImport} onClose={() => setPasswordImport(false)} />
 
       <SettingsGroup title={strings.about} id="settings-about">
         <SettingsRow icon={Info} title={strings.nuvoriForWindows} description={build ? `Version ${build.version} · ${build.storeBuild ? "Microsoft Store build" : "Installer build"}` : "Nuvori for Windows"} />
