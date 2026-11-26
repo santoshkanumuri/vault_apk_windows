@@ -295,6 +295,12 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     }
     case "previous_passwords": return mockHistory.get(String(args.entryId)) ?? [];
     case "clear_previous_passwords": mockHistory.delete(String(args.entryId)); return null;
+    case "export_backup": {
+      if (args.password === "wrong") { log("warning", "security", "Encrypted backup blocked: wrong password"); throw "Wrong password or damaged vault key."; }
+      const items = state.entries.length + state.notes.length;
+      log("success", "vault", `Encrypted backup saved with ${items} items and 0 photos`);
+      return { fileName: `Nuvori backup ${String(args.today)}.pvault`, items, photos: 0 };
+    }
     case "list_trash": requireUnlocked(); return mockTrash.map(({ data: _data, ...item }) => item);
     case "restore_trashed": {
       const item = mockTrash.find((t) => t.id === args.id);

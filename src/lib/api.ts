@@ -70,6 +70,9 @@ import type { ColumnMapping, ImportChoices, ImportPreview, ImportSummary } from 
 
 export type PreviousPassword = { password: string; replacedAt: number };
 
+/** An encrypted backup saved by export_backup: the file's name and what it holds. */
+export type BackupSaved = { fileName: string; items: number; photos: number };
+
 /** The "Website icons" setting and the icons the browser extension saved: site -> `data:image/png;base64,...`. */
 export type SiteIconsState = { enabled: boolean; icons: Record<string, string> };
 
@@ -390,6 +393,8 @@ export const api = {
   siteIcons: () => call<SiteIconsState>("site_icons"),
   setSiteIcons: (enabled: boolean) => call<SiteIconsState>("set_site_icons", { enabled }),
   clearSiteIcons: () => call<SiteIconsState>("clear_site_icons"),
+  /** Checks the master password, asks where to save, then writes a .pvault backup encrypted with it. `null` when the Save dialog is cancelled. `today` is the local date, YYYY-MM-DD, for the file name. */
+  exportBackup: (password: string, today: string) => call<BackupSaved | null>("export_backup", { password, today }),
   /** Sign-in methods the extension remembered ("Continue with GitHub" and the account). */
   signIns: () => call<SignInsState>("sign_ins"),
   setSignIns: (enabled: boolean) => call<SignInsState>("set_sign_ins", { enabled }),
