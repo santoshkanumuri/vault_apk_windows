@@ -683,6 +683,32 @@ export const driveBackupText = {
 } as const;
 
 /**
+ * Restore from backup (pages/RestoreBackup.tsx, lib/backupFile.ts): the messages and sentences that
+ * code chooses or fills in. Kept in its own block to keep merges simple.
+ */
+export const restoreText = {
+  couldntOpenTheFile: "Couldn't open the backup file.",
+  enterTheBackupPassword: "Enter the backup's password.",
+  couldntOpenTheBackup: "The backup couldn't be opened.",
+  enterToSave: "Enter your master password to save this vault.",
+  couldntSave: "Couldn't save this vault.",
+  enterToReplace: "Enter your master password.",
+  couldntRestore: "Couldn't restore the backup.",
+  savedAs: (fileName: string) => `Saved as ${fileName}.`,
+  holds: (items: string) => `The backup has ${items}.`,
+  holdsWithCodes: (items: string, codes: string) => `The backup has ${items}, including ${codes}.`,
+  alsoHolds: (others: string) => `It also has ${others}.`,
+  restored: (items: string) => `Restored ${items} from the backup.`,
+  restoredThenLocked: (items: string) => `Restored ${items} from the backup. Unlock Nuvori to finish.`,
+  item: "item",
+  authenticator: "authenticator",
+  folder: "folder",
+  photo: "photo",
+  passkey: "passkey",
+  and: "and",
+} as const;
+
+/**
  * Sync status over Wi-Fi and Google Drive together (lib/syncOverview.ts). The same words as Android
  * strings.xml `sync_*`, with "this PC" for "this device". Kept in its own block to keep merges simple.
  */

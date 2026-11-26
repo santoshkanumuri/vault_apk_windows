@@ -10,7 +10,7 @@ import { useVault } from "../app/vault";
 import { api } from "../lib/api";
 import { backupContents, localDate, restoredMessage, type BackupReview } from "../lib/backupFile";
 import { humanError } from "../lib/errors";
-import { strings } from "../strings";
+import { restoreText, strings } from "../strings";
 
 /**
  * Restore from backup (backup_restore.rs), as Nuvori for Android restores: choose a .pvault file,
@@ -43,7 +43,7 @@ export function RestoreBackupRow() {
       const name = await api.restoreChooseFile();
       if (name) { setReview(null); setBackupPassword(""); setPassword(""); setSaved(""); setError(""); setFileName(name); }
     } catch (failure) {
-      toast.error(failure, "Couldn't open the backup file.");
+      toast.error(failure, restoreText.couldntOpenTheFile);
     } finally {
       setBusy("");
     }
@@ -51,12 +51,12 @@ export function RestoreBackupRow() {
 
   const open = async (event: FormEvent) => {
     event.preventDefault();
-    if (!backupPassword) { setError("Enter the backup's password."); return; }
+    if (!backupPassword) { setError(restoreText.enterTheBackupPassword); return; }
     setBusy("open"); setError("");
     try {
       setReview(await api.restoreOpenBackup(backupPassword));
     } catch (failure) {
-      setError(humanError(failure, "The backup couldn't be opened."));
+      setError(humanError(failure, restoreText.couldntOpenTheBackup));
     } finally {
       setBackupPassword("");
       setBusy("");
@@ -64,14 +64,14 @@ export function RestoreBackupRow() {
   };
 
   const saveFirst = async () => {
-    if (!password) { setError("Enter your master password to save this vault."); return; }
+    if (!password) { setError(restoreText.enterToSave); return; }
     setBusy("save"); setError("");
     try {
       const done = await api.exportBackup(password, localDate());
       if (done) setSaved(done.fileName);
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, "Couldn't save this vault."));
+      setError(humanError(failure, restoreText.couldntSave));
     } finally {
       setBusy("");
     }
@@ -80,7 +80,7 @@ export function RestoreBackupRow() {
   const replace = async (event: FormEvent) => {
     event.preventDefault();
     if (!review || review.sync === "manager") return;
-    if (!password) { setError("Enter your master password."); return; }
+    if (!password) { setError(restoreText.enterToReplace); return; }
     setBusy("replace"); setError("");
     try {
       const next = await api.restoreReplaceVault(password);
@@ -92,7 +92,7 @@ export function RestoreBackupRow() {
       reset();
     } catch (failure) {
       setPassword("");
-      setError(humanError(failure, "Couldn't restore the backup."));
+      setError(humanError(failure, restoreText.couldntRestore));
       setBusy("");
     }
   };
@@ -131,7 +131,7 @@ export function RestoreBackupRow() {
               hint={strings.afterwardUnlockWithYourCurrentMaster} capsLockWarning disabled={working} data-autofocus />
             <div className="restore-save-first">
               <Button icon={DatabaseBackup} onClick={() => void saveFirst()} busy={busy === "save"} disabled={busy === "replace"}>{strings.saveThisVaultFirst}</Button>
-              {saved && <span className="field-hint" role="status">Saved as {saved}.</span>}
+              {saved && <span className="field-hint" role="status">{restoreText.savedAs(saved)}</span>}
             </div>
           </form>
         )}

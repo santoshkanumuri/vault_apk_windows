@@ -3,7 +3,6 @@ import { Activity, ArchiveRestore, Clipboard, CornerDownLeft, Globe, FileKey, Fi
 import { KeepassImportDialog } from "./KeepassImport";
 import { PasswordImportDialog } from "./PasswordImport";
 import { passwordImportText } from "../strings";
-import { RestoreBackupRow } from "./RestoreBackup";
 import { Button } from "../components/Button";
 import { Kbd, SettingsGroup, SettingsRow } from "../components/Display";
 import { Dialog } from "../components/Dialog";
@@ -24,6 +23,7 @@ import { useToast } from "../app/toast";
 import { useSiteIconsSetting } from "../app/siteIcons";
 import { SignInsSettingRow } from "./signins/SignInsPage";
 import { AuthenticatorImportRow } from "./AuthenticatorImport";
+import { RestoreBackupRow } from "./RestoreBackup";
 import { useVault } from "../app/vault";
 import { api, type Browser, type BrowserFamily, type BrowserStatus, type BuildStatus, type PasskeyProviderState, type AutoTypeStatus, type QuickSearchStatus } from "../lib/api";
 import { localDate } from "../lib/backupFile";

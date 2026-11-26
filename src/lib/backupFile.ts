@@ -1,3 +1,5 @@
+import { restoreText as words } from "../strings.ts";
+
 /** What a backup holds, as the restore review shows it (`restore_open_backup`). */
 export type BackupReview = {
   fileName: string;
@@ -22,25 +24,24 @@ function count(value: number, one: string, many = `${one}s`): string {
 }
 
 function list(parts: string[]): string {
-  return parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} ${words.and} ${parts[parts.length - 1]}`;
 }
 
 /** "The backup has 12 items, including 2 authenticators. It also has 3 folders and 1 photo.", as Android words it. */
 export function backupContents(review: Pick<BackupReview, "items" | "codes" | "folders" | "photos" | "passkeys">): string {
   const items = review.codes > 0
-    ? `The backup has ${count(review.items, "item")}, including ${count(review.codes, "authenticator")}.`
-    : `The backup has ${count(review.items, "item")}.`;
+    ? words.holdsWithCodes(count(review.items, words.item), count(review.codes, words.authenticator))
+    : words.holds(count(review.items, words.item));
   const more = [
-    review.folders > 0 && count(review.folders, "folder"),
-    review.photos > 0 && count(review.photos, "photo"),
-    review.passkeys > 0 && count(review.passkeys, "passkey"),
+    review.folders > 0 && count(review.folders, words.folder),
+    review.photos > 0 && count(review.photos, words.photo),
+    review.passkeys > 0 && count(review.passkeys, words.passkey),
   ].filter(Boolean) as string[];
-  return more.length ? `${items} It also has ${list(more)}.` : items;
+  return more.length ? `${items} ${words.alsoHolds(list(more))}` : items;
 }
 
 /** The message after a restore. A vault that locked to finish says so. */
 export function restoredMessage(review: Pick<BackupReview, "items">, unlocked: boolean): string {
-  return unlocked
-    ? `Restored ${count(review.items, "item")} from the backup.`
-    : `Restored ${count(review.items, "item")} from the backup. Unlock Nuvori to finish.`;
+  const items = count(review.items, words.item);
+  return unlocked ? words.restored(items) : words.restoredThenLocked(items);
 }
