@@ -272,10 +272,17 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
     case "list_entry_photos": return state.photos.get(String(args.entryId)) ?? [];
     case "add_entry_photo": {
       const list = state.photos.get(String(args.entryId)) ?? [];
-      list.push({ id: id(), mimeType: String(args.mimeType), dataUrl: `data:${args.mimeType};base64,${args.data}` });
+      list.push({ id: id(), mimeType: String(args.mimeType), dataUrl: `data:${args.mimeType};base64,${args.data}`,
+        isCover: !list.some((p) => p.isCover) });
       state.photos.set(String(args.entryId), list); return null;
     }
     case "delete_entry_photo": for (const [key, list] of state.photos) state.photos.set(key, list.filter((p) => p.id !== args.photoId)); return null;
+    case "set_cover_photo":
+      for (const [key, list] of state.photos) {
+        if (!list.some((p) => p.id === args.photoId)) continue;
+        state.photos.set(key, list.map((p) => ({ ...p, isCover: p.id === args.photoId })));
+      }
+      return null;
     case "list_notes": requireUnlocked(); return state.notes.map((n) => ({ ...n }));
     case "save_note": {
       const existing = state.notes.find((n) => n.id === args.id);

@@ -504,6 +504,10 @@ mark { background: transparent; color: var(--primary); font-weight: 650; }
 .photo-delete { position: absolute; top: 6px; right: 6px; opacity: 0; }
 .photo:hover .photo-delete, .photo:focus-within .photo-delete { opacity: 1; }
 @media (hover: none) { .photo-delete { opacity: 1; } }
+.photo-cover-set { cursor: pointer; opacity: 0; }
+.photo:hover .photo-cover-set, .photo:focus-within .photo-cover-set { opacity: 1; }
+.photo-cover-set:disabled { cursor: default; color: var(--muted); }
+@media (hover: none) { .photo-cover-set { opacity: 1; } }
 .photo-viewer { max-width: min(92vw, 1100px); max-height: 90vh; padding: 0; border: 0; border-radius: var(--r-dialog); background: transparent; overflow: visible; }
 .photo-viewer::backdrop { background: rgb(0 0 0 / .8); }
 .photo-viewer img { display: block; max-width: 100%; max-height: 90vh; border-radius: var(--r-dialog); }

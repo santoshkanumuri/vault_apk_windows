@@ -380,6 +380,8 @@ export const api = {
   listEntryPhotos: (entryId: string) => call<EntryPhoto[]>("list_entry_photos", { entryId }),
   addEntryPhoto: (entryId: string, mimeType: string, data: string) => call<void>("add_entry_photo", { entryId, mimeType, data }),
   deleteEntryPhoto: (photoId: string) => call<void>("delete_entry_photo", { photoId }),
+  /** Makes this photo the one lists and the item's page show first, on every paired device. */
+  setCoverPhoto: (photoId: string) => call<void>("set_cover_photo", { photoId }),
 
   listNotes: () => call<LocalNote[]>("list_notes"),
   /** `rich` replaces the note's formatting ("" makes it plain); leaving it out keeps what the note had. */

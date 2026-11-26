@@ -2718,6 +2718,18 @@ fn delete_entry_photo(photo_id: String, state: State<'_, ManagedState>) -> Resul
 }
 
 #[tauri::command]
+fn set_cover_photo(photo_id: String, state: State<'_, ManagedState>) -> Result<(), String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    app.unlocked
+        .as_mut()
+        .ok_or("Unlock the vault first".to_owned())?
+        .set_cover_photo(&photo_id)
+        .map_err(public_vault_error)?;
+    activity::log(Level::Info, Category::Items, "Set an item's cover photo");
+    Ok(())
+}
+
+#[tauri::command]
 fn list_groups(state: State<'_, ManagedState>) -> Result<Vec<LocalGroup>, String> {
     let app = state.lock().map_err(|_| "Vault state is unavailable")?;
     app.unlocked
@@ -3149,6 +3161,7 @@ pub fn run() {
             list_entry_photos,
             add_entry_photo,
             delete_entry_photo,
+            set_cover_photo,
             list_groups,
             save_group,
             delete_group,
