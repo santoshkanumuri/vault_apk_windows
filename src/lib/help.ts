@@ -101,7 +101,7 @@ export const helpTopics: HelpTopic[] = [
     section: "Locking and unlocking",
     question: "Can I unlock with my PIN, face or fingerprint?",
     answer:
-      "Yes, if Windows Hello is set up in Windows Settings. Turn on Windows Hello in Settings under Security and confirm your master password once. After that the unlock screen offers Hello, and your master password still works and is still needed whenever Windows can't check it's you. Nuvori never stores the password: Windows Hello releases the vault's key only after your PIN, face or fingerprint, and only on this Windows account.",
+      "Yes, if Windows Hello is set up in Windows Settings. Turn on Windows Hello in Settings under Security and confirm your master password once. After that the unlock screen offers Hello, and your master password still works and is still needed whenever Windows can't check it's you. Nuvori asks for your master password again after the time set in Settings, 1 day unless you change it. Nuvori never stores the password: Windows Hello releases the vault's key only after your PIN, face or fingerprint, and only on this Windows account.",
     go: { label: "Open Security settings", route: SECURITY },
   },
   {
