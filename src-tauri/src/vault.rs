@@ -724,6 +724,38 @@ impl UnlockedVault {
         Ok(())
     }
 
+    /// Saves a copy of item `id` as a new item (`item_copy::entry_copy`): the same details and
+    /// folders without the item's secrets. An authenticator is refused (`InvalidEntry`).
+    pub fn duplicate_entry(&mut self, id: &str) -> Result<serde_json::Value, VaultError> {
+        let stored: String = self
+            .connection
+            .query_row("SELECT data_json FROM local_entries WHERE id = ?1", [id], |row| row.get(0))
+            .optional()?
+            .ok_or(VaultError::EntryNotFound)?;
+        let stored: serde_json::Value = serde_json::from_str(&stored)?;
+        let group_ids = self.group_ids(id)?;
+        let draft = crate::item_copy::entry_copy(&stored, &group_ids, now_millis()?).ok_or(VaultError::InvalidEntry)?;
+        // A new item only: entry_copy drops the id, so this can't blank an existing item's secret.
+        self.save_entry_checked(draft, true)
+    }
+
+    /// Saves a copy of note `id` as a new note: "<title> copy", with the same text, formatting
+    /// and folders.
+    pub fn duplicate_note(&mut self, id: &str) -> Result<LocalNote, VaultError> {
+        let (title, body): (String, String) = self
+            .connection
+            .query_row("SELECT title, body FROM local_notes WHERE id = ?1", [id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?
+            .ok_or(VaultError::NoteNotFound)?;
+        let details: Option<String> = self
+            .connection
+            .query_row("SELECT data_json FROM local_note_details WHERE id = ?1", [id], |row| row.get(0))
+            .optional()?;
+        let rich = rich_from_details(details.as_deref());
+        let group_ids = self.group_ids(id)?;
+        self.save_rich_note(None, &crate::item_copy::copy_title(&title), &body, Some(&rich), Some(group_ids))
+    }
+
     pub fn list_entries(&self) -> Result<Vec<serde_json::Value>, VaultError> {
         let mut statement = self
             .connection
@@ -2033,6 +2065,14 @@ impl UnlockedVault {
         &mut self,
         draft: serde_json::Value,
     ) -> Result<serde_json::Value, VaultError> {
+        self.save_entry_checked(draft, false)
+    }
+
+    fn save_entry_checked(
+        &mut self,
+        draft: serde_json::Value,
+        secret_may_be_blank: bool,
+    ) -> Result<serde_json::Value, VaultError> {
         let input = draft.as_object().ok_or(VaultError::InvalidEntry)?;
         let requested_id = match input.get("id") {
             None | Some(serde_json::Value::Null) => None,
@@ -2089,7 +2129,7 @@ impl UnlockedVault {
             }
         }
         entry["updatedAt"] = now.into();
-        validate_entry(&entry)?;
+        validate_entry(&entry, secret_may_be_blank)?;
         let id = entry["id"]
             .as_str()
             .ok_or(VaultError::InvalidEntry)?
@@ -2608,7 +2648,9 @@ fn default_entry(id: &str, now: i64) -> serde_json::Value {
     })
 }
 
-fn validate_entry(entry: &serde_json::Value) -> Result<(), VaultError> {
+/// `secret_may_be_blank`: a copy made with Duplicate leaves out the password, card number or
+/// answer, as on Android, and the copy's secret is entered later. Every other save needs it.
+fn validate_entry(entry: &serde_json::Value, secret_may_be_blank: bool) -> Result<(), VaultError> {
     let entry_type = entry["type"].as_str().ok_or(VaultError::InvalidEntry)?;
     if !matches!(
         entry_type,
@@ -2664,9 +2706,10 @@ fn validate_entry(entry: &serde_json::Value) -> Result<(), VaultError> {
         .as_str()
         .ok_or(VaultError::InvalidEntry)?;
     let required = match entry_type {
-        "CARD" => !primary.trim().is_empty(),
-        "PASSWORD" | "AUTHENTICATOR" => !secondary.trim().is_empty(),
-        "QUESTION" => !primary.trim().is_empty() && !secondary.trim().is_empty(),
+        "CARD" => secret_may_be_blank || !primary.trim().is_empty(),
+        "PASSWORD" => secret_may_be_blank || !secondary.trim().is_empty(),
+        "AUTHENTICATOR" => !secondary.trim().is_empty(),
+        "QUESTION" => !primary.trim().is_empty() && (secret_may_be_blank || !secondary.trim().is_empty()),
         "AUTOFILL" => serde_json::from_str::<serde_json::Value>(primary)
             .ok()
             .and_then(|profile| profile.as_object().cloned())
@@ -3296,6 +3339,52 @@ mod tests {
         for bad in ["not json", "[1,2]", &"x".repeat(MAX_RICH_NOTE_BYTES + 1)] {
             assert!(matches!(vault.save_rich_note(None, "Bad", "Body", Some(bad), None), Err(VaultError::InvalidNote)));
         }
+        drop(vault);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn duplicating_keeps_the_details_and_folders_but_not_the_secrets() {
+        let directory = std::env::temp_dir().join(format!("nuvori-duplicate-{}", Uuid::new_v4()));
+        let store = VaultStore::new(&directory);
+        let mut vault = store.create("synthetic-test-password").unwrap();
+        let folder = vault.save_group(None, "Work", "", "").unwrap();
+        let login = vault.save_entry(serde_json::json!({
+            "type": "PASSWORD", "title": "Bank", "primaryValue": "sam", "secondaryValue": "synthetic-secret",
+            "tertiaryValue": "https://bank.example", "favorite": true, "groupIds": [folder.id],
+        })).unwrap();
+        let copy = vault.duplicate_entry(login["id"].as_str().unwrap()).unwrap();
+        assert_ne!(copy["id"], login["id"]);
+        assert_eq!((copy["title"].as_str(), copy["primaryValue"].as_str(), copy["secondaryValue"].as_str()), (Some("Bank copy"), Some("sam"), Some("")));
+        assert_eq!(copy["tertiaryValue"], "https://bank.example");
+        assert_eq!(copy["favorite"], false);
+        assert_eq!(vault.group_ids(copy["id"].as_str().unwrap()).unwrap(), [folder.id.clone()]);
+        // The original is unchanged.
+        let original = vault.list_entries().unwrap().into_iter().find(|entry| entry["id"] == login["id"]).unwrap();
+        assert_eq!(original["secondaryValue"], "synthetic-secret");
+
+        // A card and a security question copy too, with their secrets left out.
+        let card = vault.save_entry(serde_json::json!({"type": "CARD", "title": "Travel card", "primaryValue": "4111111111111111", "fourthValue": "123"})).unwrap();
+        let card_copy = vault.duplicate_entry(card["id"].as_str().unwrap()).unwrap();
+        assert_eq!((card_copy["primaryValue"].as_str(), card_copy["fourthValue"].as_str()), (Some(""), Some("")));
+        let question = vault.save_entry(serde_json::json!({"type": "QUESTION", "title": "Pet", "primaryValue": "First pet?", "secondaryValue": "synthetic-answer"})).unwrap();
+        let question_copy = vault.duplicate_entry(question["id"].as_str().unwrap()).unwrap();
+        assert_eq!((question_copy["primaryValue"].as_str(), question_copy["secondaryValue"].as_str()), (Some("First pet?"), Some("")));
+        // An ordinary save still needs the secret, also on the copy.
+        assert!(matches!(vault.save_entry(serde_json::json!({"type": "PASSWORD", "title": "Blank"})), Err(VaultError::InvalidEntry)));
+        assert!(matches!(vault.save_entry(serde_json::json!({"id": copy["id"], "title": "Bank copy 2"})), Err(VaultError::InvalidEntry)));
+
+        let code = vault.save_entry(serde_json::json!({"type": "AUTHENTICATOR", "title": "Code", "secondaryValue": "JBSWY3DPEHPK3PXP"})).unwrap();
+        assert!(matches!(vault.duplicate_entry(code["id"].as_str().unwrap()), Err(VaultError::InvalidEntry)));
+        assert!(matches!(vault.duplicate_entry("missing"), Err(VaultError::EntryNotFound)));
+
+        let note_folder = vault.save_group(None, "Home", "", "NOTE").unwrap();
+        let note = vault.save_rich_note(None, "Wi-Fi", "Network: home", Some(""), Some(vec![note_folder.id.clone()])).unwrap();
+        let copy = vault.duplicate_note(&note.id).unwrap();
+        assert_ne!(copy.id, note.id);
+        assert_eq!((copy.title.as_str(), copy.body.as_str()), ("Wi-Fi copy", "Network: home"));
+        assert_eq!(copy.group_ids, [note_folder.id]);
+        assert_eq!(vault.list_notes().unwrap().len(), 2);
         drop(vault);
         fs::remove_dir_all(directory).unwrap();
     }

@@ -283,6 +283,23 @@ export async function mockInvoke(command: string, args: Record<string, unknown> 
       state.notes = [saved, ...state.notes.filter((n) => n.id !== saved.id)]; state.revision++; log("success", "items", "Note saved"); return saved;
     }
     case "open_note_link": return null;
+    case "duplicate_entry": {
+      // As item_copy.rs: no password, card number, cardholder, security code or answer.
+      requireUnlocked();
+      const source = state.entries.find((e) => e.id === args.id);
+      if (!source) throw "That item no longer exists.";
+      if (source.type === "AUTHENTICATOR") throw "Check the item fields and try again.";
+      const copy: VaultEntry = { ...source, id: id(), title: `${source.title} copy`, primaryValue: source.type === "CARD" ? "" : source.primaryValue,
+        secondaryValue: "", fourthValue: "", favorite: false, createdAt: Date.now(), updatedAt: Date.now(), groupIds: [...(source.groupIds ?? [])] };
+      state.entries = [copy, ...state.entries]; state.revision++; log("success", "items", "Item saved"); return copy;
+    }
+    case "duplicate_note": {
+      requireUnlocked();
+      const source = state.notes.find((n) => n.id === args.id);
+      if (!source) throw "That note no longer exists.";
+      const copy: LocalNote = { ...source, id: id(), title: `${source.title} copy`, createdAt: Date.now(), updatedAt: Date.now(), groupIds: [...(source.groupIds ?? [])] };
+      state.notes = [copy, ...state.notes]; state.revision++; log("success", "items", "Note saved"); return copy;
+    }
     case "delete_note": {
       const gone = state.notes.find((n) => n.id === args.id);
       if (gone) mockTrash.unshift({ id: id(), itemId: gone.id, kind: "note", itemType: "NOTE", title: gone.title, deletedAt: Date.now(), deletedElsewhere: false, expiresAt: Date.now() + 30 * 86_400_000, data: gone });

@@ -21,6 +21,7 @@ pub mod incoming;
 pub mod incoming_apply;
 pub mod incoming_store;
 pub mod install_marker;
+pub mod item_copy;
 pub mod join_match;
 pub mod keepass_import;
 pub mod local_recovery;
@@ -2388,6 +2389,34 @@ fn save_note(
     Ok(note)
 }
 
+/// "Duplicate" on an item (`item_copy`): a new item with the same details, without its secrets.
+#[tauri::command]
+fn duplicate_entry(id: String, state: State<'_, ManagedState>) -> Result<serde_json::Value, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let saved = app
+        .unlocked
+        .as_mut()
+        .ok_or("Unlock the vault first".to_owned())?
+        .duplicate_entry(&id)
+        .map_err(public_vault_error)?;
+    log_entry_saved(&saved, true);
+    Ok(saved)
+}
+
+/// "Duplicate" on a note: a new note with the same text, formatting and folders.
+#[tauri::command]
+fn duplicate_note(id: String, state: State<'_, ManagedState>) -> Result<LocalNote, String> {
+    let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
+    let note = app
+        .unlocked
+        .as_mut()
+        .ok_or("Unlock the vault first".to_owned())?
+        .duplicate_note(&id)
+        .map_err(public_vault_error)?;
+    activity::log(Level::Success, Category::Items, activity::item_saved_message("NOTE", true));
+    Ok(note)
+}
+
 #[tauri::command]
 fn delete_note(id: String, state: State<'_, ManagedState>) -> Result<(), String> {
     let mut app = state.lock().map_err(|_| "Vault state is unavailable")?;
@@ -3112,6 +3141,8 @@ pub fn run() {
             list_notes,
             save_note,
             delete_note,
+            duplicate_entry,
+            duplicate_note,
             list_entries,
             save_entry,
             delete_entry,
