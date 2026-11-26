@@ -3,6 +3,7 @@ import { SettingsGroup, SettingsRow } from "../components/Display";
 import { useLock } from "../app/hooks";
 import { useRouter } from "../app/router";
 import { useVault } from "../app/vault";
+import { helpText } from "../lib/help";
 import { plural } from "../lib/format";
 import { strings } from "../strings";
 
@@ -23,6 +24,7 @@ export function MorePage() {
         <SettingsRow icon={Activity} title={strings.activity} description={strings.recentUnlocksSavesAndSyncs} onClick={() => void router.navigate({ page: "activity" })} />
         <SettingsRow icon={ArchiveRestore} title={strings.recentlyDeleted} description={strings.restoreItemsDeletedInTheLast} onClick={() => void router.navigate({ page: "trash" })} />
         <SettingsRow icon={Settings} title={strings.settings} description={strings.themeSecurityBrowserExtension} onClick={() => void router.navigate({ page: "settings" })} />
+        <SettingsRow icon={CircleHelp} title={helpText.title} description={helpText.row} onClick={() => void router.navigate({ page: "help" })} />
         <SettingsRow icon={LockKeyhole} title={strings.lockVault} description={strings.ctrlL} onClick={() => void lock()} />
       </SettingsGroup>
     </div>
